@@ -298,12 +298,19 @@
         : '';
 
       let priceChip = '';
-      if (currentSection !== 'playlist' && track.for_sale && track.price_cup > 0) {
+      if (currentSection === 'catalog' && track.for_sale && track.price_cup > 0) {
         const priceText = formatPriceInCurrency(track.price_cup, selectedCurrency);
         priceChip = `
           <div class="track-price-chip">
             <svg viewBox="0 0 24 24"><path d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12L8.1 13h7.45c.75 0 1.41-.41 1.75-1.03L20.9 4H4.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z"/></svg>
             <span title="${escapeHtml(priceText)}">${escapeHtml(priceText)}</span>
+          </div>
+        `;
+      } else if (currentSection === 'vip' && track.price_cup > 0) {
+        const priceText = formatPriceInCurrency(track.price_cup, selectedCurrency);
+        priceChip = `
+          <div class="track-price-chip track-price-chip-sold">
+            <span title="Vendida en ${escapeHtml(priceText)}">Vendida · ${escapeHtml(priceText)}</span>
           </div>
         `;
       }
@@ -420,12 +427,14 @@
       playerBar.classList.add('active');
       markPlayingCard(track.id);
 
+      const canBuy = currentSection === 'catalog' && track.for_sale && track.price_cup > 0;
+
       if (currentSection === 'playlist') {
         buyBtn.style.display = 'none';
         buyBtn.onclick = null;
         downloadBtn.style.display = 'inline-flex';
         downloadBtn.onclick = () => { window.location.href = `/api/download/${track.id}`; };
-      } else if (track.for_sale && track.price_cup > 0) {
+      } else if (canBuy) {
         buyPriceLabel.textContent = formatPriceInCurrency(track.price_cup, selectedCurrency);
         buyPriceLabel.title = buyPriceLabel.textContent;
         buyBtn.style.display = 'inline-flex';
@@ -503,6 +512,8 @@
   const buyerPhoneInput = document.getElementById('buyer-phone-input');
   const orderSubmitBtn = document.getElementById('order-submit-btn');
   const modalSuccess = document.getElementById('modal-success');
+  const termsAcceptInput = document.getElementById('terms-accept-input');
+  const termsModalOverlay = document.getElementById('terms-modal-overlay');
 
   let receiptFile = null;
 
@@ -555,6 +566,7 @@
     receiptDropText.style.display = 'block';
     receiptPreview.style.display = 'none';
     receiptPreview.src = '';
+    termsAcceptInput.checked = false;
     orderSubmitBtn.classList.add('disabled');
     updateSubmitButtonState();
 
@@ -562,16 +574,37 @@
   }
 
   function updateSubmitButtonState() {
-    const ready = buyerNameInput.value.trim() && buyerPhoneInput.value.trim() && receiptFile;
+    const ready = buyerNameInput.value.trim() && buyerPhoneInput.value.trim() && receiptFile && termsAcceptInput.checked;
     orderSubmitBtn.disabled = !ready;
     orderSubmitBtn.classList.toggle('disabled', !ready);
-    orderSubmitBtn.textContent = ready
-      ? 'Enviar comprobante'
-      : 'Completa tus datos y el comprobante';
+    if (!termsAcceptInput.checked && buyerNameInput.value.trim() && buyerPhoneInput.value.trim() && receiptFile) {
+      orderSubmitBtn.textContent = 'Acepta los términos para continuar';
+    } else {
+      orderSubmitBtn.textContent = ready
+        ? 'Enviar comprobante'
+        : 'Completa tus datos y el comprobante';
+    }
   }
 
   buyerNameInput.addEventListener('input', updateSubmitButtonState);
   buyerPhoneInput.addEventListener('input', updateSubmitButtonState);
+  termsAcceptInput.addEventListener('change', updateSubmitButtonState);
+
+  function openTermsModal() {
+    termsModalOverlay.classList.add('active');
+  }
+
+  function closeTermsModal() {
+    termsModalOverlay.classList.remove('active');
+  }
+
+  document.getElementById('modal-terms-link').addEventListener('click', openTermsModal);
+  document.getElementById('modal-terms-link-inline').addEventListener('click', openTermsModal);
+  document.getElementById('terms-modal-close-btn').addEventListener('click', closeTermsModal);
+  document.getElementById('terms-modal-accept-btn').addEventListener('click', closeTermsModal);
+  termsModalOverlay.addEventListener('click', (e) => {
+    if (e.target === termsModalOverlay) closeTermsModal();
+  });
 
   receiptInput.addEventListener('change', () => {
     const file = receiptInput.files[0];
@@ -593,7 +626,7 @@
 
   orderForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    if (!receiptFile || !activeModalTrack) return;
+    if (!receiptFile || !activeModalTrack || !termsAcceptInput.checked) return;
 
     const buyerName = buyerNameInput.value.trim();
     const buyerPhone = buyerPhoneInput.value.trim();
@@ -647,7 +680,9 @@
     if (e.target === modalOverlay) closeBuyModal();
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeBuyModal();
+    if (e.key !== 'Escape') return;
+    if (termsModalOverlay.classList.contains('active')) closeTermsModal();
+    else closeBuyModal();
   });
 
   async function init() {

@@ -589,6 +589,15 @@ button {
   flex-shrink: 0;
 }
 
+.track-price-chip-sold {
+  color: var(--text-faint);
+  font-weight: 600;
+}
+.track-price-chip-sold span {
+  text-decoration: line-through;
+  text-decoration-color: var(--text-faint);
+}
+
 .track-stats {
   display: flex;
   align-items: center;
@@ -1017,8 +1026,103 @@ button {
   color: var(--text-dim);
   font-size: 13px;
   line-height: 1.5;
+  margin: 0 0 12px;
+}
+
+.modal-terms-link {
+  display: block;
+  color: var(--live);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
   margin: 0 0 18px;
 }
+.modal-terms-link:hover { color: var(--accent); }
+
+.modal-terms-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 0 16px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  line-height: 1.4;
+  cursor: pointer;
+}
+.modal-terms-check input {
+  margin-top: 2px;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+.modal-terms-check button {
+  color: var(--live);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font-weight: 600;
+  font-size: inherit;
+}
+.modal-terms-check button:hover { color: var(--accent); }
+
+.modal-box-terms {
+  max-width: 620px;
+  padding: 32px 32px 28px;
+}
+
+.terms-title {
+  font-family: 'Inter', sans-serif;
+  font-size: 19px;
+  font-weight: 800;
+  color: var(--text);
+  margin: 0 0 18px;
+  line-height: 1.3;
+  padding-right: 20px;
+}
+
+.terms-body {
+  max-height: 55vh;
+  overflow-y: auto;
+  padding-right: 12px;
+  margin-bottom: 20px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding-top: 16px;
+  padding-bottom: 16px;
+}
+
+.terms-body h4 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 22px 0 8px;
+}
+.terms-body h4:first-child { margin-top: 0; }
+
+.terms-body p {
+  color: var(--text-dim);
+  font-size: 13.5px;
+  line-height: 1.6;
+  margin: 0 0 10px;
+}
+
+.terms-body strong {
+  color: var(--text);
+}
+
+.btn-primary-wide {
+  display: block;
+  width: 100%;
+  background: var(--accent);
+  color: #0c0a12;
+  font-weight: 700;
+  font-size: 14px;
+  padding: 13px;
+  border-radius: 9px;
+  transition: background 0.15s;
+}
+.btn-primary-wide:hover { background: #ff5c92; }
 
 .modal-accounts {
   display: flex;

@@ -286,12 +286,17 @@ route('POST', '/api/orders', async (req, res) => {
     return sendJSON(res, 400, { error: 'Faltan datos: nombre, teléfono o comprobante' });
   }
 
-  const track = db.prepare('SELECT id, title, price_label, is_exclusive, sold FROM tracks WHERE id = ?').get(trackId);
+  const track = db.prepare('SELECT id, title, price_label, for_sale, is_playlist, is_exclusive, sold FROM tracks WHERE id = ?').get(trackId);
   if (!track) return sendJSON(res, 404, { error: 'Pista no encontrada' });
 
-  // por si dos compras llegan casi al mismo tiempo
+  if (track.is_playlist) {
+    return sendJSON(res, 400, { error: 'Esta pista es gratuita, no está a la venta' });
+  }
   if (track.is_exclusive && track.sold) {
     return sendJSON(res, 409, { error: 'Esta pista exclusiva ya fue comprada por otra persona' });
+  }
+  if (!track.for_sale) {
+    return sendJSON(res, 400, { error: 'Esta pista no está a la venta' });
   }
 
   const receiptExt = safeExt(receiptPart.filename, '.jpg');

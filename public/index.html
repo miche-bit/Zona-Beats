@@ -131,6 +131,8 @@
         Transfiere el monto a una de estas cuentas, luego completa tus datos y adjunta el comprobante. Se revisa y te contactan para enviarte tu pista.
       </p>
 
+      <button type="button" class="modal-terms-link" id="modal-terms-link">Leer antes de comprar</button>
+
       <div class="modal-accounts" id="modal-accounts"></div>
 
       <div class="modal-confirm-phone" id="modal-confirm-phone" style="display:none;">
@@ -159,6 +161,11 @@
           </label>
         </div>
 
+        <label class="modal-terms-check">
+          <input type="checkbox" id="terms-accept-input" required>
+          <span>Leí y acepto los <button type="button" id="modal-terms-link-inline">términos de licenciamiento</button></span>
+        </label>
+
         <button type="submit" class="modal-whatsapp-btn" id="order-submit-btn" disabled>
           Completa tus datos y el comprobante
         </button>
@@ -172,6 +179,41 @@
           Avisar por WhatsApp
         </a>
       </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="terms-modal-overlay">
+    <div class="modal-box modal-box-terms">
+      <button class="modal-close" id="terms-modal-close-btn" aria-label="Cerrar">&times;</button>
+      <div class="modal-eyebrow">LEER ANTES DE COMPRAR</div>
+      <h3 class="terms-title">Descargo de responsabilidad y política de licenciamiento</h3>
+
+      <div class="terms-body">
+        <h4>1. Sobre los Beats Estándar (Licencia No Exclusiva)</h4>
+        <p>Al adquirir un beat bajo nuestra licencia estándar, el comprador obtiene el derecho de utilizarlo para crear una canción, distribuirla en plataformas digitales (Spotify, Apple Music, etc.) y monetizarla en redes sociales (YouTube, TikTok, etc.).</p>
+        <p>Sin embargo, es fundamental entender que esta licencia NO es exclusiva. Esto significa que, aunque tú tienes el poder de explotar tu canción comercialmente, el productor se reserva el derecho de vender el mismo archivo de audio exacto a otros artistas. Por lo tanto, otra persona podrá tener una copia idéntica del beat, utilizarla para su propia canción y hacer lo mismo que tú con ella (distribuirla, monetizarla, etc.), siempre que respete los términos de su propia licencia.</p>
+        <p><strong>Aclaración importante:</strong> en ningún caso la licencia estándar otorga la propiedad del beat ni el derecho a revenderlo o sublicenciarlo como instrumental a terceros.</p>
+
+        <h4>2. Sobre los Beats Exclusivos (Licencia Exclusiva Total)</h4>
+        <p>Los beats etiquetados como EXCLUSIVOS tienen una política completamente diferente.</p>
+        <p><strong>Única compra:</strong> este beat será vendido una sola vez en toda la historia. Una vez realizada la transacción, el beat se retira de manera definitiva del catálogo público y de la tienda.</p>
+        <p><strong>Sin copias:</strong> al ser una licencia única, garantizamos que ningún otro artista, productor o persona podrá tener una copia de ese audio para uso comercial. La pista queda "bajo tu nombre".</p>
+        <p><strong>Derechos totales:</strong> el comprador adquiere todos los derechos de uso comercial, masterización y sincronización de la pista, pudiendo registrar la canción como propia sin temor a futuros conflictos de copyright por el uso del beat.</p>
+
+        <h4>3. Sección "Beats VIP" y créditos</h4>
+        <p>Para mantener la transparencia y dar visibilidad a los compradores de licencias exclusivas, todos los beats vendidos bajo esta modalidad aparecerán listados en nuestra sección "Beats VIP".</p>
+        <p>En este espacio se exhibirá el nombre del artista o comprador (previa autorización expresa del mismo) junto con el beat adquirido, con el fin de acreditar su propiedad exclusiva, generar confianza en la comunidad y evitar cualquier disputa sobre la autoría del uso del instrumental. Si el comprador prefiere mantenerse en el anonimato, su información no será publicada, pero el beat igualmente quedará retirado del mercado de forma permanente.</p>
+
+        <h4>4. Política de devoluciones y cancelaciones</h4>
+        <p>Una vez realizada la compra, no se aceptan devoluciones ni reembolsos bajo ningún concepto.</p>
+        <p>El comprador tiene a su disposición la vista previa completa del beat (con marca de agua o en calidad de demostración) antes de efectuar el pago, así como toda la información sobre los tipos de licencia aquí detallados. Por lo tanto, se entiende que el cliente escuchó, interpretó y evaluó el producto antes de adquirirlo, tomando una decisión informada y voluntaria.</p>
+        <p>Al tratarse de productos digitales descargables, una vez entregado el archivo de audio en alta calidad, se considera la transacción consumada de forma irrevocable. No se tramitarán reembolsos por errores en la elección del comprador (como confundir licencia estándar con exclusiva) ni por cambios de opinión posteriores.</p>
+
+        <h4>5. Cláusula general</h4>
+        <p>El productor se reserva la propiedad intelectual de la composición subyacente del beat. La compra (tanto estándar como exclusiva) otorga derechos de uso sobre la grabación maestra (audio), pero no transfiere automáticamente los derechos de publicación o composición (créditos de producción) a menos que se negocie explícitamente por escrito. Para los beats exclusivos, se incluye un contrato de cesión de derechos que detalla todos los alcances legales.</p>
+      </div>
+
+      <button type="button" class="btn-primary-wide" id="terms-modal-accept-btn">Entendido, cerrar</button>
     </div>
   </div>
 
