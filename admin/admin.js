@@ -804,5 +804,48 @@
     }
   });
 
+  const restoreInput = document.getElementById('restore-input');
+  restoreInput.addEventListener('change', async () => {
+    const file = restoreInput.files[0];
+    if (!file) return;
+
+    const firstConfirm = confirm(
+      `¿Restaurar el backup "${file.name}"?\n\nEsto va a BORRAR todas las pistas, imágenes y comprobantes que estén guardados ahora mismo, y los va a reemplazar por los del backup.`
+    );
+    if (!firstConfirm) {
+      restoreInput.value = '';
+      return;
+    }
+    const secondConfirm = confirm('Esta acción no se puede deshacer. ¿Confirmas que quieres continuar?');
+    if (!secondConfirm) {
+      restoreInput.value = '';
+      return;
+    }
+
+    showToast('Restaurando backup, esto puede tardar unos segundos…');
+
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const res = await fetch('/api/admin/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/zip' },
+        body: arrayBuffer,
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'No se pudo restaurar el backup');
+      }
+
+      const result = await res.json();
+      showToast(`Backup restaurado (${result.restoredCount} archivos). El servidor se está reiniciando…`);
+      setTimeout(() => window.location.reload(), 4000);
+    } catch (err) {
+      showToast(err.message, true);
+    } finally {
+      restoreInput.value = '';
+    }
+  });
+
   checkAuth();
 })();

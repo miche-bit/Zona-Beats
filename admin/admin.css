@@ -241,6 +241,36 @@ label {
   gap: 8px;
 }
 .admin-brand .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+
+.admin-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.btn-backup {
+  background: transparent;
+  border: 1px solid var(--live);
+  color: var(--live);
+  padding: 7px 14px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.btn-backup:hover { background: rgba(61, 255, 224, 0.1); }
+
+.btn-restore {
+  background: transparent;
+  border: 1px solid var(--accent-dim);
+  color: var(--accent);
+  padding: 7px 14px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-restore:hover { background: rgba(255, 61, 127, 0.1); }
+
 .btn-logout {
   background: transparent;
   border: 1px solid var(--line);

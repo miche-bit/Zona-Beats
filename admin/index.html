@@ -26,7 +26,14 @@
   <div class="admin-shell" id="admin-shell">
     <div class="admin-topbar">
       <div class="admin-brand"><span class="dot"></span> PANEL DE ADMINISTRACIÓN</div>
-      <button class="btn-logout" id="logout-btn">Cerrar sesión</button>
+      <div class="admin-topbar-actions">
+        <a class="btn-backup" id="backup-btn" href="/api/admin/backup">Descargar backup</a>
+        <label class="btn-restore" id="restore-btn-label">
+          Restaurar backup
+          <input type="file" id="restore-input" accept=".zip" style="display:none;">
+        </label>
+        <button class="btn-logout" id="logout-btn">Cerrar sesión</button>
+      </div>
     </div>
 
     <main class="admin-main">

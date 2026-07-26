@@ -67,7 +67,18 @@ No hace falta `npm install` — no tiene dependencias externas.
    - `ADMIN_PASSWORD` → la contraseña real del panel
    - `ADMIN_SESSION_SECRET` → una cadena aleatoria larga (por ejemplo generada con `openssl rand -hex 32`), para que las sesiones no se invaliden si el servidor reinicia
 4. **Importante — este proyecto incluye un `Dockerfile`**. Railway lo detecta automáticamente y lo usa en vez de su build por defecto (Nixpacks). Esto es necesario porque instala `ffmpeg`, requerido para la marca de agua audible — sin él, cualquier intento de activar la protección de audio fallará al subir una pista. Si por algún motivo Railway no toma el Dockerfile automáticamente, en la configuración del servicio revisa que el "Builder" esté puesto en "Dockerfile" y no en "Nixpacks".
-5. **Importante — almacenamiento persistente**: Railway borra el sistema de archivos en cada deploy. Como el audio, la base de datos y la voz de marca de agua se guardan en disco (`db/` y `uploads/`), necesitas agregar un **Volume** en Railway y montarlo en la carpeta raíz del proyecto (o específicamente en `/app/db` y `/app/uploads` si usas el Dockerfile) para que las pistas subidas no se pierdan en cada actualización.
+5. **Importante — almacenamiento persistente**: Railway borra el sistema de archivos en cada deploy. Este proyecto ya está preparado para usar un **Volume**: si existe la variable de entorno `RAILWAY_VOLUME_MOUNT_PATH` (Railway la define sola en cuanto agregas un Volume al servicio, no hay que crearla a mano), la base de datos y todos los archivos subidos se guardan ahí en vez de en la carpeta del proyecto. Si no configuras un Volume, la app funciona igual pero pierde todo en cada deploy.
+   - Para agregarlo: en el servicio de Railway, pestaña **Volumes** → **New Volume** → cualquier Mount Path (por ejemplo `/data`) → conéctalo al servicio. No hace falta tocar código ni agregar variables manualmente, Railway ya te da `RAILWAY_VOLUME_MOUNT_PATH` automáticamente.
+
+## Copias de seguridad (backup y restauración)
+
+El Volume evita que se pierdan los archivos en un deploy normal, pero no reemplaza una copia de seguridad real por si el disco falla, se borra algo sin querer, o Railway tiene un problema. Para eso, el panel admin trae dos botones arriba a la derecha:
+
+**Descargar backup**: genera al vuelo un `.zip` con la base de datos completa y todos los archivos (audio, portadas, comprobantes, voz de marca de agua) tal como están en ese momento, y lo descarga a tu computadora. Conviene hacerlo de vez en cuando, sobre todo después de subir contenido importante.
+
+**Restaurar backup**: sube un `.zip` generado con el botón anterior y reemplaza todos los datos actuales por los del backup. Pide dos confirmaciones porque **borra lo que haya en ese momento** antes de escribir los datos del backup — no hay forma de deshacerlo después. Tras restaurar, el servidor se reinicia solo (en Railway esto es automático; si lo corres en tu computadora, hay que volver a ejecutar `node server.js` a mano).
+
+Este es justo el flujo para el caso de "subí una actualización y la app quedó sin datos": descarga el backup de antes de actualizar (si no lo hiciste, revisa primero que el Volume esté bien conectado, porque probablemente ese sea el problema real), y una vez la nueva versión esté funcionando, usa "Restaurar backup" con ese archivo.
 
 ## Protección de audio (marca de agua audible)
 

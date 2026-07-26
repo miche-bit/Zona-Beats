@@ -26,17 +26,19 @@ const { URL } = require('node:url');
 
 const db = require('./db');
 const { issueStreamToken, validateStreamToken } = require('./streamAuth');
+const { createBackup, restoreBackup } = require('./backup');
 const { applyWatermark } = require('./watermark');
 
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'cambiaesto123';
 const ADMIN_SESSION_SECRET = process.env.ADMIN_SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 
-const UPLOADS_AUDIO = path.join(__dirname, 'uploads', 'audio');
-const UPLOADS_COVERS = path.join(__dirname, 'uploads', 'covers');
-const UPLOADS_RECEIPTS = path.join(__dirname, 'uploads', 'receipts');
-const UPLOADS_WATERMARK = path.join(__dirname, 'uploads', 'watermark');
-const TMP_PROCESSING = path.join(__dirname, 'uploads', 'tmp');
+const DATA_ROOT = process.env.RAILWAY_VOLUME_MOUNT_PATH || __dirname;
+const UPLOADS_AUDIO = path.join(DATA_ROOT, 'uploads', 'audio');
+const UPLOADS_COVERS = path.join(DATA_ROOT, 'uploads', 'covers');
+const UPLOADS_RECEIPTS = path.join(DATA_ROOT, 'uploads', 'receipts');
+const UPLOADS_WATERMARK = path.join(DATA_ROOT, 'uploads', 'watermark');
+const TMP_PROCESSING = path.join(DATA_ROOT, 'uploads', 'tmp');
 [UPLOADS_AUDIO, UPLOADS_COVERS, UPLOADS_RECEIPTS, UPLOADS_WATERMARK, TMP_PROCESSING].forEach(d => fs.mkdirSync(d, { recursive: true }));
 
 const MAX_AUDIO_BYTES = 150 * 1024 * 1024; // 150MB por pista (para WAV sin comprimir)
@@ -770,6 +772,43 @@ route('POST', '/api/admin/site-config', async (req, res) => {
     sendJSON(res, 200, { ok: true });
   } catch {
     sendJSON(res, 400, { error: 'Solicitud inválida' });
+  }
+});
+
+route('GET', '/api/admin/backup', (req, res) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  try {
+    const zipBuffer = createBackup(DATA_ROOT);
+    const stamp = new Date().toISOString().slice(0, 10);
+    res.writeHead(200, {
+      'Content-Type': 'application/zip',
+      'Content-Disposition': `attachment; filename="zona-beats-backup-${stamp}.zip"`,
+      'Content-Length': zipBuffer.length,
+    });
+    res.end(zipBuffer);
+  } catch (err) {
+    console.error('Error generando backup:', err.message);
+    sendJSON(res, 500, { error: 'No se pudo generar el backup' });
+  }
+});
+
+route('POST', '/api/admin/restore', async (req, res) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+
+  let zipBuffer;
+  try {
+    zipBuffer = await readBody(req, 200 * 1024 * 1024);
+  } catch {
+    return sendJSON(res, 413, { error: 'El archivo de backup es demasiado grande' });
+  }
+
+  try {
+    const restoredCount = restoreBackup(DATA_ROOT, zipBuffer);
+    sendJSON(res, 200, { ok: true, restoredCount });
+    setTimeout(() => process.exit(0), 300);
+  } catch (err) {
+    console.error('Error restaurando backup:', err.message);
+    sendJSON(res, 400, { error: err.message || 'No se pudo restaurar el backup' });
   }
 });
 

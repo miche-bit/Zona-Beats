@@ -2,7 +2,8 @@ const { DatabaseSync } = require('node:sqlite');
 const path = require('node:path');
 const fs = require('node:fs');
 
-const DB_DIR = path.join(__dirname, 'db');
+const DATA_ROOT = process.env.RAILWAY_VOLUME_MOUNT_PATH || __dirname;
+const DB_DIR = path.join(DATA_ROOT, 'db');
 if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
 
 const db = new DatabaseSync(path.join(DB_DIR, 'app.db'));
