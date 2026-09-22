@@ -2,6 +2,8 @@
 
 Plataforma de streaming para subir música y el público la escuche sin poder descargarla fácilmente. Sin dependencias externas — solo Node.js 22+ (usa `node:sqlite` nativo).
 
+Desarrollado por 爪丨匚卄乇.studios.
+
 ## Copias de seguridad (backup y restauración)
 
 El Volume evita que se pierdan los archivos en un deploy normal, pero no reemplaza una copia de seguridad real por si el disco falla, se borra algo sin querer, o Railway tiene un problema. Para eso, el panel admin trae dos botones arriba a la derecha:
