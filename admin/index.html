@@ -11,6 +11,7 @@
   <!-- Pantalla de login -->
   <div class="login-screen" id="login-screen">
     <div class="login-box">
+      <div class="login-badge">ZONA BEATS</div>
       <h1>Panel de administración</h1>
       <p>Acceso privado para subir contenido.</p>
       <div class="field">
@@ -156,6 +157,56 @@
         </div>
         <p class="panel-hint">Cuando alguien compra una pista, su comprobante aparece aquí con su nombre y teléfono. Aprueba el pedido cuando confirmes el pago (si la pista era exclusiva, se marca vendida y pasa a Beats VIP). Elimina el comprobante cuando ya lo hayas procesado, para no acumular espacio.</p>
         <div id="orders-list"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header-row">
+          <h2>Beats de productores pendientes</h2>
+          <span class="badge-count" id="pending-tracks-count"></span>
+        </div>
+        <p class="panel-hint">Un beat subido por un productor no aparece en la tienda pública hasta que lo apruebes aquí.</p>
+        <div id="pending-tracks-list"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header-row">
+          <h2>Productores</h2>
+          <span class="badge-count" id="producers-count"></span>
+        </div>
+        <p class="panel-hint">Solo tú puedes crear cuentas de productor. Dale el correo y la contraseña que definas aquí a la persona para que entre en <code>/productores</code>. Puedes desactivar a cualquiera cuando quieras — al desactivarlo, deja de poder entrar o subir beats, pero lo que ya vendió sigue en la tienda.</p>
+
+        <form id="create-producer-form" class="inline-form">
+          <div class="field">
+            <label for="producer-name-input">Nombre</label>
+            <input type="text" id="producer-name-input" placeholder="Nombre del productor" required>
+          </div>
+          <div class="field">
+            <label for="producer-email-input">Correo</label>
+            <input type="email" id="producer-email-input" placeholder="correo@ejemplo.com" required>
+          </div>
+          <div class="field">
+            <label for="producer-password-input">Contraseña</label>
+            <div class="password-field-wrap">
+              <input type="password" id="producer-password-input" placeholder="Mín. 6 caracteres" required>
+              <button type="button" class="btn-toggle-password" id="toggle-producer-password">Mostrar</button>
+            </div>
+          </div>
+          <button type="submit" class="btn-primary">Crear productor</button>
+        </form>
+
+        <div id="producers-list"></div>
+      </div>
+
+      <div class="panel">
+        <h2>Comisión de la plataforma</h2>
+        <p class="panel-hint">Porcentaje que se descuenta de cada venta de un beat de productor antes de calcular lo que le corresponde a él.</p>
+        <form id="commission-form" class="inline-form">
+          <div class="field">
+            <label for="commission-input">Comisión (%)</label>
+            <input type="text" id="commission-input" placeholder="Ej: 20">
+          </div>
+          <button type="submit" class="btn-primary">Guardar comisión</button>
+        </form>
       </div>
 
       <div class="panel">

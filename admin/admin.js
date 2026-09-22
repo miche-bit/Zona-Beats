@@ -92,6 +92,9 @@
     loadSocialLinks();
     loadExchangeRates();
     loadSiteConfig();
+    loadProducers();
+    loadPendingTracks();
+    loadCommission();
   }
 
   function showLogin() {
@@ -106,7 +109,7 @@
   }
 
   loginBtn.addEventListener('click', async () => {
-    loginError.style.display = 'none';
+    loginError.classList.remove('show');
     const res = await fetch('/api/admin/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -116,7 +119,8 @@
       passwordInput.value = '';
       showApp();
     } else {
-      loginError.style.display = 'block';
+      void loginError.offsetWidth;
+      loginError.classList.add('show');
     }
   });
 
@@ -288,18 +292,17 @@
 
       let priceEditHtml = '';
       if (currentAdminListSection === 'catalog') {
+        const licMap = {};
+        (track.licenses || []).forEach(l => { licMap[l.license_type] = l.price_cup; });
         priceEditHtml = `
           <div class="price-edit">
-            <label class="checkbox-label">
-              <input type="checkbox" class="track-for-sale" ${track.for_sale ? 'checked' : ''}>
-              <span>En venta</span>
-            </label>
-            <label class="checkbox-label">
-              <input type="checkbox" class="track-exclusive" ${track.is_exclusive ? 'checked' : ''}>
-              <span>Exclusiva</span>
-            </label>
-            <input type="text" class="track-price" placeholder="Precio en CUP" value="${track.price_cup || ''}">
-            <button type="button" class="btn-save-price" data-id="${track.id}">Guardar</button>
+            <div class="license-price-grid">
+              <label>Básica <input type="text" class="lic-price" data-type="basic" placeholder="CUP" value="${licMap.basic || ''}"></label>
+              <label>Premium <input type="text" class="lic-price" data-type="premium" placeholder="CUP" value="${licMap.premium || ''}"></label>
+              <label>Ilimitada <input type="text" class="lic-price" data-type="unlimited" placeholder="CUP" value="${licMap.unlimited || ''}"></label>
+              <label>Exclusiva <input type="text" class="lic-price" data-type="exclusive" placeholder="CUP" value="${licMap.exclusive || ''}"></label>
+            </div>
+            <button type="button" class="btn-save-price" data-id="${track.id}">Guardar precios</button>
           </div>
         `;
       } else if (currentAdminListSection === 'vip') {
@@ -319,21 +322,16 @@
 
       const saveBtn = item.querySelector('.btn-save-price');
       if (saveBtn) {
-        const exclusiveCheckbox = item.querySelector('.track-exclusive');
-        const forSaleCheckbox = item.querySelector('.track-for-sale');
-        exclusiveCheckbox.addEventListener('change', () => {
-          if (exclusiveCheckbox.checked) forSaleCheckbox.checked = true;
-        });
-
         saveBtn.addEventListener('click', () => {
-          const priceCup = item.querySelector('.track-price').value;
-          const forSale = forSaleCheckbox.checked;
-          const isExclusive = exclusiveCheckbox.checked;
-          if ((forSale || isExclusive) && (!priceCup || parseFloat(priceCup) <= 0)) {
-            showToast('Ponle un precio en CUP para poder venderla.', true);
+          const priceInputs = item.querySelectorAll('.lic-price');
+          const prices = {};
+          priceInputs.forEach(inp => { prices[inp.dataset.type] = inp.value; });
+          const anyPrice = Object.values(prices).some(v => parseFloat(v) > 0);
+          if (!anyPrice) {
+            showToast('Ponle precio a al menos una licencia.', true);
             return;
           }
-          savePrice(track.id, priceCup, forSale, isExclusive);
+          savePrice(track.id, prices);
         });
       }
 
@@ -341,16 +339,23 @@
     });
   }
 
-  async function savePrice(id, priceCup, forSale, isExclusive) {
+  async function savePrice(id, prices) {
     const res = await fetch(`/api/admin/tracks/${id}/price`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ priceCup, forSale, isExclusive }),
+      body: JSON.stringify({
+        priceBasic: prices.basic,
+        pricePremium: prices.premium,
+        priceUnlimited: prices.unlimited,
+        priceExclusive: prices.exclusive,
+      }),
     });
     if (res.ok) {
-      showToast('Precio actualizado.');
+      showToast('Precios actualizados.');
+      loadTracks();
     } else {
-      showToast('No se pudo guardar el precio.', true);
+      const err = await res.json().catch(() => ({}));
+      showToast(err.error || 'No se pudo guardar el precio.', true);
     }
   }
 
@@ -528,8 +533,11 @@
       showToast(result.trackMarkedSold ? 'Aprobado — la pista exclusiva pasó a Beats VIP.' : 'Pedido aprobado.');
       loadOrders();
       loadTracks();
+      loadProducers();
     } else {
-      showToast('No se pudo aprobar el pedido.', true);
+      const err = await res.json().catch(() => ({}));
+      showToast(err.error || 'No se pudo aprobar el pedido.', true);
+      loadOrders();
     }
   }
 
@@ -844,6 +852,185 @@
       showToast(err.message, true);
     } finally {
       restoreInput.value = '';
+    }
+  });
+
+  const createProducerForm = document.getElementById('create-producer-form');
+  const producersList = document.getElementById('producers-list');
+  const producersCount = document.getElementById('producers-count');
+
+  const togglePasswordBtn = document.getElementById('toggle-producer-password');
+  togglePasswordBtn.addEventListener('click', () => {
+    const input = document.getElementById('producer-password-input');
+    const showing = input.type === 'text';
+    input.type = showing ? 'password' : 'text';
+    togglePasswordBtn.textContent = showing ? 'Mostrar' : 'Ocultar';
+  });
+
+  async function loadProducers() {
+    const res = await fetch('/api/admin/producers');
+    if (!res.ok) return;
+    const { producers } = await res.json();
+    renderProducers(producers);
+  }
+
+  function renderProducers(producers) {
+    producersList.innerHTML = '';
+    producersCount.textContent = producers.length || '';
+    producersCount.classList.toggle('show', producers.length > 0);
+
+    if (!producers.length) {
+      producersList.innerHTML = '<div class="empty-hint">Todavía no has creado ningún productor.</div>';
+      return;
+    }
+
+    producers.forEach((p) => {
+      const item = document.createElement('div');
+      item.className = 'producer-item';
+      item.innerHTML = `
+        <span class="status-dot ${p.active ? 'active' : 'inactive'}"></span>
+        <div class="info">
+          <div class="name">${escapeHtml(p.name)}</div>
+          <div class="email">${escapeHtml(p.email)}</div>
+          <div class="stats">${p.trackCount} beats · ${p.totalSalesCup} CUP vendidos · ${p.totalEarningsCup.toFixed(2)} CUP a pagarle</div>
+        </div>
+        <div class="actions">
+          <button type="button" class="btn-toggle-producer ${p.active ? 'is-active' : ''}">${p.active ? 'Desactivar' : 'Activar'}</button>
+          <button type="button" class="btn-delete">Eliminar</button>
+        </div>
+      `;
+      item.querySelector('.btn-toggle-producer').addEventListener('click', async () => {
+        const res = await fetch(`/api/admin/producers/${p.id}/toggle`, { method: 'POST' });
+        if (res.ok) {
+          showToast(p.active ? 'Productor desactivado.' : 'Productor activado.');
+          loadProducers();
+        } else {
+          showToast('No se pudo cambiar el estado.', true);
+        }
+      });
+      item.querySelector('.btn-delete').addEventListener('click', async () => {
+        if (!confirm(`¿Eliminar a ${p.name}? Solo se puede si no tiene beats subidos.`)) return;
+        const res = await fetch(`/api/admin/producers/${p.id}`, { method: 'DELETE' });
+        if (res.ok) {
+          showToast('Productor eliminado.');
+          loadProducers();
+        } else {
+          const err = await res.json().catch(() => ({}));
+          showToast(err.error || 'No se pudo eliminar.', true);
+        }
+      });
+      producersList.appendChild(item);
+    });
+  }
+
+  createProducerForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = document.getElementById('producer-name-input').value.trim();
+    const email = document.getElementById('producer-email-input').value.trim();
+    const password = document.getElementById('producer-password-input').value;
+
+    const res = await fetch('/api/admin/producers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, email, password }),
+    });
+
+    if (res.ok) {
+      showToast('Productor creado. Ya puede entrar en /productores con ese correo y contraseña.');
+      createProducerForm.reset();
+      loadProducers();
+    } else {
+      const err = await res.json().catch(() => ({}));
+      showToast(err.error || 'No se pudo crear el productor.', true);
+    }
+  });
+
+  const pendingTracksList = document.getElementById('pending-tracks-list');
+  const pendingTracksCount = document.getElementById('pending-tracks-count');
+
+  async function loadPendingTracks() {
+    const res = await fetch('/api/admin/pending-tracks');
+    if (!res.ok) return;
+    const { tracks } = await res.json();
+    renderPendingTracks(tracks);
+  }
+
+  function renderPendingTracks(tracks) {
+    pendingTracksList.innerHTML = '';
+    pendingTracksCount.textContent = tracks.length || '';
+    pendingTracksCount.classList.toggle('show', tracks.length > 0);
+
+    if (!tracks.length) {
+      pendingTracksList.innerHTML = '<div class="empty-hint">No hay beats pendientes por revisar.</div>';
+      return;
+    }
+
+    tracks.forEach((t) => {
+      const item = document.createElement('div');
+      item.className = 'pending-track-item';
+      const coverSrc = t.cover_filename ? `/api/cover/${t.id}` : '';
+      item.innerHTML = `
+        ${coverSrc ? `<img src="${coverSrc}" alt="">` : `<img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'/%3E" alt="">`}
+        <div class="info">
+          <div class="t">${escapeHtml(t.title)}</div>
+          <div class="m">${escapeHtml(t.genre || 'Sin género')} · ${escapeHtml(t.price_label || '')}</div>
+          <div class="producer">${escapeHtml(t.producer_name || 'Sin productor')} · ${escapeHtml(t.producer_email || '')}</div>
+        </div>
+        <audio controls preload="none" src="/api/admin/preview-audio/${t.id}"></audio>
+        <div class="actions">
+          <button type="button" class="btn-approve-order">Aprobar</button>
+          <button type="button" class="btn-reject-track">Rechazar</button>
+        </div>
+      `;
+      item.querySelector('.btn-approve-order').addEventListener('click', async () => {
+        const res = await fetch(`/api/admin/tracks/${t.id}/approve`, { method: 'POST' });
+        if (res.ok) {
+          showToast('Beat aprobado, ya está visible en la tienda.');
+          loadPendingTracks();
+        } else {
+          showToast('No se pudo aprobar.', true);
+        }
+      });
+      item.querySelector('.btn-reject-track').addEventListener('click', async () => {
+        if (!confirm(`¿Rechazar "${t.title}"? No aparecerá en la tienda.`)) return;
+        const reason = prompt('¿Por qué lo rechazas? (opcional, se lo va a mostrar al productor)') || '';
+        const res = await fetch(`/api/admin/tracks/${t.id}/reject`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason }),
+        });
+        if (res.ok) {
+          showToast('Beat rechazado.');
+          loadPendingTracks();
+        } else {
+          showToast('No se pudo rechazar.', true);
+        }
+      });
+      pendingTracksList.appendChild(item);
+    });
+  }
+
+  const commissionForm = document.getElementById('commission-form');
+  const commissionInput = document.getElementById('commission-input');
+
+  async function loadCommission() {
+    const res = await fetch('/api/admin/commission');
+    if (!res.ok) return;
+    const { commissionPercent } = await res.json();
+    commissionInput.value = commissionPercent;
+  }
+
+  commissionForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const res = await fetch('/api/admin/commission', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ commissionPercent: commissionInput.value }),
+    });
+    if (res.ok) {
+      showToast('Comisión guardada.');
+    } else {
+      showToast('No se pudo guardar la comisión.', true);
     }
   });
 

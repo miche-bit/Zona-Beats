@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Portal de Productores · Zona Beats</title>
+<link rel="stylesheet" href="/productores/productores.css">
+</head>
+<body>
+
+  <div class="login-screen" id="login-screen">
+    <div class="login-box">
+      <div class="login-badge">PORTAL DE PRODUCTORES</div>
+      <h1>Zona Beats</h1>
+      <p>Entra con tu cuenta de productor asociado.</p>
+      <div class="field">
+        <label for="email-input">Correo</label>
+        <input type="email" id="email-input" placeholder="tucorreo@ejemplo.com">
+      </div>
+      <div class="field">
+        <label for="password-input">Contraseña</label>
+        <input type="password" id="password-input" placeholder="••••••••">
+      </div>
+      <button class="btn-primary" id="login-btn">Entrar</button>
+      <div class="error-msg" id="login-error">Correo o contraseña incorrectos.</div>
+    </div>
+  </div>
+
+  <div class="dash-shell" id="dash-shell">
+    <div class="dash-topbar">
+      <div class="dash-brand"><span class="dot"></span> PORTAL DE PRODUCTORES</div>
+      <div class="dash-topbar-actions">
+        <span class="producer-name" id="producer-name-label"></span>
+        <button class="btn-logout" id="logout-btn">Cerrar sesión</button>
+      </div>
+    </div>
+
+    <main class="dash-main">
+
+      <div class="stats-row" id="stats-row">
+        <div class="stat-card">
+          <div class="stat-label">Beats vendidos</div>
+          <div class="stat-value" id="stat-sales">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total generado (CUP)</div>
+          <div class="stat-value" id="stat-total">0</div>
+        </div>
+        <div class="stat-card stat-card-highlight">
+          <div class="stat-label">Tu saldo a cobrar (CUP)</div>
+          <div class="stat-value" id="stat-earnings">0</div>
+        </div>
+      </div>
+
+      <div class="panel panel-enter">
+        <h2>Subir nuevo beat</h2>
+        <p class="panel-hint">Tu beat entra en revisión y aparecerá en la tienda solo cuando el administrador lo apruebe.</p>
+        <form id="upload-form">
+          <div class="upload-grid">
+            <div>
+              <div class="field">
+                <label for="title-input">Título</label>
+                <input type="text" id="title-input" placeholder="Nombre del beat" required>
+              </div>
+              <div class="field">
+                <label for="genre-input">Género / etiqueta</label>
+                <input type="text" id="genre-input" placeholder="Trap, Reggaetón, Drill…">
+              </div>
+              <div class="field">
+                <label for="description-input">Descripción (opcional)</label>
+                <textarea id="description-input" rows="3" placeholder="Notas sobre el beat…"></textarea>
+              </div>
+              <p class="panel-hint" style="margin:0 0 10px;">Pon precio a las licencias que quieras ofrecer. Deja en blanco la que no vayas a vender. "Exclusiva" retira el beat de la tienda para siempre en cuanto se venda.</p>
+              <div class="field">
+                <label for="price-basic-input">Básica (MP3, no exclusiva) — CUP</label>
+                <input type="text" id="price-basic-input" placeholder="Ej: 500">
+              </div>
+              <div class="field">
+                <label for="price-premium-input">Premium (MP3 + WAV) — CUP</label>
+                <input type="text" id="price-premium-input" placeholder="Opcional">
+              </div>
+              <div class="field">
+                <label for="price-unlimited-input">Ilimitada (MP3 + WAV + STEMS) — CUP</label>
+                <input type="text" id="price-unlimited-input" placeholder="Opcional">
+              </div>
+              <div class="field">
+                <label for="price-exclusive-input">Exclusiva (compra única) — CUP</label>
+                <input type="text" id="price-exclusive-input" placeholder="Opcional">
+              </div>
+            </div>
+            <div>
+              <div class="field">
+                <label>Archivo de audio</label>
+                <label class="file-drop" id="audio-drop">
+                  <span id="audio-drop-label">MP3, WAV, M4A, OGG o FLAC · máx 150MB</span>
+                  <input type="file" id="audio-input" accept=".mp3,.wav,.m4a,.ogg,.flac" required>
+                </label>
+              </div>
+              <div class="field">
+                <label>Portada (opcional)</label>
+                <label class="file-drop" id="cover-drop">
+                  <span id="cover-drop-label">JPG, PNG o WEBP · máx 8MB</span>
+                  <input type="file" id="cover-input" accept=".jpg,.jpeg,.png,.webp">
+                </label>
+              </div>
+            </div>
+          </div>
+          <div class="upload-progress-wrap" id="upload-progress-wrap" style="display:none;">
+            <div class="upload-progress-track">
+              <div class="upload-progress-fill" id="upload-progress-fill"></div>
+            </div>
+            <div class="upload-progress-label" id="upload-progress-label">Subiendo… 0%</div>
+          </div>
+          <button type="submit" class="btn-primary" id="upload-btn" style="margin-top:8px;">Enviar a revisión</button>
+        </form>
+      </div>
+
+      <div class="panel panel-enter">
+        <h2>Tus beats</h2>
+        <div id="track-list"></div>
+      </div>
+
+      <div class="panel panel-enter">
+        <h2>Historial de ventas</h2>
+        <div id="earnings-list"></div>
+      </div>
+
+    </main>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="/productores/productores.js"></script>
+</body>
+</html>

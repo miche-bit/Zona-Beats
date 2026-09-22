@@ -27,6 +27,7 @@ const { URL } = require('node:url');
 const db = require('./db');
 const { issueStreamToken, validateStreamToken } = require('./streamAuth');
 const { createBackup, restoreBackup } = require('./backup');
+const producerAuth = require('./producerAuth');
 const { applyWatermark } = require('./watermark');
 
 const PORT = process.env.PORT || 3000;
@@ -77,6 +78,11 @@ function getCookie(req, name) {
 function isAdminAuthed(req) {
   const cookie = getCookie(req, 'admin_session');
   return cookie && verifySession(cookie);
+}
+
+function getAuthedProducer(req) {
+  const token = getCookie(req, 'producer_session');
+  return producerAuth.getProducerFromSession(token);
 }
 
 function sendJSON(res, status, obj) {
@@ -204,20 +210,24 @@ route('GET', '/api/tracks', (req, res, params, query) => {
   if (type === 'playlist') {
     rows = db.prepare(`
       SELECT id, title, genre, description, artist_credit, cover_filename, duration_seconds, plays, likes, created_at
-      FROM tracks WHERE is_playlist = 1 ORDER BY created_at DESC
+      FROM tracks WHERE is_playlist = 1 AND approval_status = 'approved' ORDER BY created_at DESC
     `).all();
   } else if (type === 'vip') {
     rows = db.prepare(`
       SELECT id, title, genre, description, cover_filename, duration_seconds, plays,
              price_label, price_cup, for_sale, is_exclusive, sold, created_at
-      FROM tracks WHERE is_playlist = 0 AND is_exclusive = 1 AND sold = 1 ORDER BY created_at DESC
+      FROM tracks WHERE is_playlist = 0 AND is_exclusive = 1 AND sold = 1 AND approval_status = 'approved' ORDER BY created_at DESC
     `).all();
   } else {
     rows = db.prepare(`
       SELECT id, title, genre, description, cover_filename, duration_seconds, plays,
              price_label, price_cup, for_sale, is_exclusive, sold, created_at
-      FROM tracks WHERE is_playlist = 0 AND sold = 0 ORDER BY created_at DESC
+      FROM tracks WHERE is_playlist = 0 AND sold = 0 AND approval_status = 'approved' ORDER BY created_at DESC
     `).all();
+  }
+
+  if (type === 'catalog') {
+    rows = rows.map(t => ({ ...t, licenses: getTrackLicenses(t.id) }));
   }
 
   sendJSON(res, 200, { tracks: rows });
@@ -283,23 +293,33 @@ route('POST', '/api/orders', async (req, res) => {
   const buyerPhone = (fields.buyerPhone || '').trim().slice(0, 40);
   const currency = (fields.currency || 'CUP').trim().slice(0, 20);
   const displayedPrice = (fields.displayedPrice || '').trim().slice(0, 60);
+  const licenseType = LICENSE_TYPES.includes(fields.licenseType) ? fields.licenseType : null;
 
-  if (!trackId || !buyerName || !buyerPhone || !receiptPart) {
-    return sendJSON(res, 400, { error: 'Faltan datos: nombre, teléfono o comprobante' });
+  if (!trackId || !buyerName || !buyerPhone || !receiptPart || !licenseType) {
+    return sendJSON(res, 400, { error: 'Faltan datos: nombre, teléfono, comprobante o tipo de licencia' });
   }
 
-  const track = db.prepare('SELECT id, title, price_label, for_sale, is_playlist, is_exclusive, sold FROM tracks WHERE id = ?').get(trackId);
+  const track = db.prepare('SELECT id, title, for_sale, is_playlist, is_exclusive, sold, producer_id, approval_status FROM tracks WHERE id = ?').get(trackId);
   if (!track) return sendJSON(res, 404, { error: 'Pista no encontrada' });
 
   if (track.is_playlist) {
     return sendJSON(res, 400, { error: 'Esta pista es gratuita, no está a la venta' });
   }
-  if (track.is_exclusive && track.sold) {
-    return sendJSON(res, 409, { error: 'Esta pista exclusiva ya fue comprada por otra persona' });
+  if (track.approval_status !== 'approved') {
+    return sendJSON(res, 403, { error: 'Esta pista todavía no está disponible' });
+  }
+  if (track.sold) {
+    return sendJSON(res, 409, { error: 'Esta pista ya fue comprada de forma exclusiva por otra persona' });
   }
   if (!track.for_sale) {
     return sendJSON(res, 400, { error: 'Esta pista no está a la venta' });
   }
+
+  const licenseRow = db.prepare('SELECT price_cup FROM track_licenses WHERE track_id = ? AND license_type = ?').get(trackId, licenseType);
+  if (!licenseRow) {
+    return sendJSON(res, 400, { error: 'Esa licencia no está disponible para esta pista' });
+  }
+  const priceCupAtSale = licenseRow.price_cup;
 
   const receiptExt = safeExt(receiptPart.filename, '.jpg');
   if (!ALLOWED_IMAGE_EXT.includes(receiptExt)) {
@@ -312,17 +332,30 @@ route('POST', '/api/orders', async (req, res) => {
   const receiptFilename = `${crypto.randomUUID()}${receiptExt}`;
   fs.writeFileSync(path.join(UPLOADS_RECEIPTS, receiptFilename), receiptPart.data);
 
+  let commissionPercent = 0;
+  let producerEarning = 0;
+  if (track.producer_id) {
+    const platformConfig = db.prepare('SELECT commission_percent FROM platform_config WHERE id = 1').get();
+    commissionPercent = platformConfig.commission_percent;
+    producerEarning = priceCupAtSale * (1 - commissionPercent / 100);
+  }
+
   db.prepare(`
-    INSERT INTO orders (track_id, track_title, price_label, currency, buyer_name, buyer_phone, receipt_filename)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(track.id, track.title, displayedPrice || track.price_label || '', currency, buyerName, buyerPhone, receiptFilename);
+    INSERT INTO orders (track_id, track_title, price_label, currency, buyer_name, buyer_phone, receipt_filename,
+                         producer_id, price_cup_at_sale, commission_percent_at_sale, producer_earning_cup, license_type)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    track.id, track.title, displayedPrice || `${priceCupAtSale} CUP`, currency, buyerName, buyerPhone, receiptFilename,
+    track.producer_id || null, priceCupAtSale, commissionPercent, producerEarning, licenseType
+  );
 
   sendJSON(res, 201, { ok: true });
 });
 
 route('POST', '/api/tracks/:id/token', (req, res, params) => {
-  const track = db.prepare('SELECT id FROM tracks WHERE id = ?').get(params.id);
+  const track = db.prepare('SELECT id, approval_status FROM tracks WHERE id = ?').get(params.id);
   if (!track) return sendJSON(res, 404, { error: 'Pista no encontrada' });
+  if (track.approval_status !== 'approved') return sendJSON(res, 403, { error: 'Esta pista todavía no está disponible' });
   const token = issueStreamToken(track.id);
   db.prepare('UPDATE tracks SET plays = plays + 1 WHERE id = ?').run(track.id);
   sendJSON(res, 200, { token, expiresInSeconds: 1800 });
@@ -350,6 +383,9 @@ route('GET', '/api/download/:id', (req, res, params) => {
 
   if (!track.is_playlist) {
     return sendJSON(res, 403, { error: 'Esta pista no está disponible para descarga' });
+  }
+  if (track.approval_status !== 'approved') {
+    return sendJSON(res, 403, { error: 'Esta pista todavía no está disponible' });
   }
 
   const filePath = path.join(UPLOADS_AUDIO, track.audio_filename);
@@ -455,18 +491,107 @@ route('GET', '/api/admin/check', (req, res) => {
   sendJSON(res, 200, { authenticated: isAdminAuthed(req) });
 });
 
-route('POST', '/api/admin/tracks', async (req, res) => {
-  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+route('POST', '/api/producer/login', async (req, res) => {
+  try {
+    const body = await readBody(req, 1024 * 10);
+    const { email, password } = JSON.parse(body.toString('utf8'));
+    const producer = db.prepare('SELECT * FROM producers WHERE email = ?').get((email || '').trim().toLowerCase());
+    if (!producer || !producer.active) {
+      return sendJSON(res, 401, { error: 'Correo o contraseña incorrectos' });
+    }
+    const valid = producerAuth.verifyPassword(password || '', producer.password_hash, producer.password_salt);
+    if (!valid) {
+      return sendJSON(res, 401, { error: 'Correo o contraseña incorrectos' });
+    }
+    const token = producerAuth.createProducerSession(producer.id);
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Set-Cookie': `producer_session=${encodeURIComponent(token)}; HttpOnly; Path=/; Max-Age=604800; SameSite=Strict`,
+    });
+    res.end(JSON.stringify({ ok: true, name: producer.name }));
+  } catch {
+    sendJSON(res, 400, { error: 'Solicitud inválida' });
+  }
+});
 
+route('POST', '/api/producer/logout', (req, res) => {
+  const token = getCookie(req, 'producer_session');
+  producerAuth.destroyProducerSession(token);
+  res.writeHead(200, {
+    'Content-Type': 'application/json',
+    'Set-Cookie': 'producer_session=; HttpOnly; Path=/; Max-Age=0',
+  });
+  res.end(JSON.stringify({ ok: true }));
+});
+
+route('GET', '/api/producer/check', (req, res) => {
+  const producer = getAuthedProducer(req);
+  sendJSON(res, 200, { authenticated: Boolean(producer), name: producer ? producer.name : null });
+});
+
+route('GET', '/api/producer/tracks', (req, res) => {
+  const producer = getAuthedProducer(req);
+  if (!producer) return sendJSON(res, 401, { error: 'No autorizado' });
+  const tracks = db.prepare('SELECT * FROM tracks WHERE producer_id = ? ORDER BY created_at DESC').all(producer.id);
+  sendJSON(res, 200, { tracks });
+});
+
+route('DELETE', '/api/producer/tracks/:id', (req, res, params) => {
+  const producer = getAuthedProducer(req);
+  if (!producer) return sendJSON(res, 401, { error: 'No autorizado' });
+  const track = db.prepare('SELECT * FROM tracks WHERE id = ? AND producer_id = ?').get(params.id, producer.id);
+  if (!track) return sendJSON(res, 404, { error: 'Beat no encontrado' });
+
+  const soldCount = db.prepare("SELECT COUNT(*) as c FROM orders WHERE track_id = ? AND status = 'approved'").get(params.id).c;
+  if (track.sold || soldCount > 0) {
+    return sendJSON(res, 409, { error: 'No puedes eliminar un beat que ya tiene ventas aprobadas' });
+  }
+
+  const audioPath = path.join(UPLOADS_AUDIO, track.audio_filename);
+  if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
+  if (track.cover_filename) {
+    const coverPath = path.join(UPLOADS_COVERS, track.cover_filename);
+    if (fs.existsSync(coverPath)) fs.unlinkSync(coverPath);
+  }
+  db.prepare('DELETE FROM track_licenses WHERE track_id = ?').run(params.id);
+  db.prepare('DELETE FROM tracks WHERE id = ?').run(params.id);
+  sendJSON(res, 200, { ok: true });
+});
+
+route('GET', '/api/producer/earnings', (req, res) => {
+  const producer = getAuthedProducer(req);
+  if (!producer) return sendJSON(res, 401, { error: 'No autorizado' });
+
+  const orders = db.prepare(`
+    SELECT o.*, t.title as current_title FROM orders o
+    LEFT JOIN tracks t ON t.id = o.track_id
+    WHERE o.producer_id = ? ORDER BY o.created_at DESC
+  `).all(producer.id);
+
+  const approved = orders.filter(o => o.status === 'approved');
+  const totalSalesCup = approved.reduce((sum, o) => sum + (o.price_cup_at_sale || 0), 0);
+  const totalEarningsCup = approved.reduce((sum, o) => sum + (o.producer_earning_cup || 0), 0);
+
+  sendJSON(res, 200, {
+    orders,
+    summary: {
+      totalSales: approved.length,
+      totalSalesCup,
+      totalEarningsCup,
+    },
+  });
+});
+
+async function processTrackUpload(req) {
   const contentType = req.headers['content-type'] || '';
   const boundaryMatch = contentType.match(/boundary=(.+)$/);
-  if (!boundaryMatch) return sendJSON(res, 400, { error: 'Falta boundary multipart' });
+  if (!boundaryMatch) throw { status: 400, error: 'Falta boundary multipart' };
 
   let buffer;
   try {
     buffer = await readBody(req, MAX_AUDIO_BYTES + MAX_COVER_BYTES + 1024 * 100);
   } catch {
-    return sendJSON(res, 413, { error: 'Archivo demasiado grande' });
+    throw { status: 413, error: 'Archivo demasiado grande' };
   }
 
   const parts = parseMultipart(buffer, boundaryMatch[1]);
@@ -481,18 +606,17 @@ route('POST', '/api/admin/tracks', async (req, res) => {
   }
 
   if (!fields.title || !audioPart) {
-    return sendJSON(res, 400, { error: 'Falta título o archivo de audio' });
+    throw { status: 400, error: 'Falta título o archivo de audio' };
   }
 
   const audioExt = safeExt(audioPart.filename, '.mp3');
   if (!ALLOWED_AUDIO_EXT.includes(audioExt)) {
-    return sendJSON(res, 400, { error: 'Formato de audio no permitido' });
+    throw { status: 400, error: 'Formato de audio no permitido' };
   }
   if (audioPart.data.length > MAX_AUDIO_BYTES) {
-    return sendJSON(res, 413, { error: `Audio demasiado grande (máx ${Math.round(MAX_AUDIO_BYTES / 1024 / 1024)}MB)` });
+    throw { status: 413, error: `Audio demasiado grande (máx ${Math.round(MAX_AUDIO_BYTES / 1024 / 1024)}MB)` };
   }
 
-  // ruta temporal por si hay que pasar por ffmpeg
   const tmpUploadPath = path.join(TMP_PROCESSING, `${crypto.randomUUID()}${audioExt}`);
   fs.writeFileSync(tmpUploadPath, audioPart.data);
 
@@ -501,7 +625,7 @@ route('POST', '/api/admin/tracks', async (req, res) => {
 
   if (watermarkConfig && watermarkConfig.voice_filename) {
     const watermarkPath = path.join(UPLOADS_WATERMARK, watermarkConfig.voice_filename);
-    const watermarkedFilename = `${crypto.randomUUID()}.wav`; // ffmpeg siempre exporta a WAV aquí
+    const watermarkedFilename = `${crypto.randomUUID()}.wav`;
     try {
       await applyWatermark({
         inputPath: tmpUploadPath,
@@ -512,11 +636,10 @@ route('POST', '/api/admin/tracks', async (req, res) => {
       });
       savedAudioFilename = watermarkedFilename;
     } catch (err) {
-      console.error('Error aplicando marca de agua:', err.message);
-      return sendJSON(res, 500, { error: 'No se pudo procesar el audio con la marca de agua. Verifica que el archivo no esté dañado.' });
-    } finally {
       fs.unlinkSync(tmpUploadPath);
+      throw { status: 500, error: 'No se pudo procesar el audio con la marca de agua. Verifica que el archivo no esté dañado.' };
     }
+    fs.unlinkSync(tmpUploadPath);
   } else {
     savedAudioFilename = `${crypto.randomUUID()}${audioExt}`;
     fs.renameSync(tmpUploadPath, path.join(UPLOADS_AUDIO, savedAudioFilename));
@@ -531,28 +654,112 @@ route('POST', '/api/admin/tracks', async (req, res) => {
     }
   }
 
-  const isPlaylist = fields.isPlaylist === '1' || fields.isPlaylist === 'true' ? 1 : 0;
-  const isExclusive = !isPlaylist && (fields.isExclusive === '1' || fields.isExclusive === 'true') ? 1 : 0;
-  const forSale = !isPlaylist && (isExclusive || fields.forSale === '1' || fields.forSale === 'true') ? 1 : 0;
-  const artistCredit = (fields.artistCredit || '').trim();
+  return { fields, savedAudioFilename, coverFilename };
+}
 
-  const priceCup = isPlaylist ? 0 : Math.max(0, parseFloat(fields.priceCup) || 0);
-  const priceLabel = isPlaylist ? '' : (priceCup > 0 ? `${priceCup} CUP` : (fields.priceLabel || '').trim());
+const LICENSE_TYPES = ['basic', 'premium', 'unlimited', 'exclusive'];
 
-  if (forSale && priceCup <= 0) {
-    return sendJSON(res, 400, { error: 'Una pista en venta o exclusiva necesita un precio en CUP mayor a 0' });
+function parseLicensePrices(fields) {
+  return {
+    basic: Math.max(0, parseFloat(fields.priceBasic) || 0),
+    premium: Math.max(0, parseFloat(fields.pricePremium) || 0),
+    unlimited: Math.max(0, parseFloat(fields.priceUnlimited) || 0),
+    exclusive: Math.max(0, parseFloat(fields.priceExclusive) || 0),
+  };
+}
+
+function saveLicensesForTrack(trackId, prices) {
+  db.prepare('DELETE FROM track_licenses WHERE track_id = ?').run(trackId);
+  const offered = [];
+  for (const type of LICENSE_TYPES) {
+    if (prices[type] > 0) {
+      db.prepare('INSERT INTO track_licenses (track_id, license_type, price_cup) VALUES (?, ?, ?)').run(trackId, type, prices[type]);
+      offered.push(type);
+    }
   }
+  return offered;
+}
+
+function getTrackLicenses(trackId) {
+  return db.prepare('SELECT license_type, price_cup FROM track_licenses WHERE track_id = ? ORDER BY price_cup ASC').all(trackId);
+}
+
+route('POST', '/api/admin/tracks', async (req, res) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+
+  let upload;
+  try {
+    upload = await processTrackUpload(req);
+  } catch (err) {
+    return sendJSON(res, err.status || 500, { error: err.error || 'Error al subir' });
+  }
+  const { fields, savedAudioFilename, coverFilename } = upload;
+
+  const isPlaylist = fields.isPlaylist === '1' || fields.isPlaylist === 'true' ? 1 : 0;
+  const artistCredit = (fields.artistCredit || '').trim();
+  const prices = isPlaylist ? { basic: 0, premium: 0, unlimited: 0, exclusive: 0 } : parseLicensePrices(fields);
+  const offeredTypes = LICENSE_TYPES.filter(t => prices[t] > 0);
+
+  if (!isPlaylist && offeredTypes.length === 0) {
+    return sendJSON(res, 400, { error: 'Pon precio a al menos una licencia (Básica, Premium, Ilimitada o Exclusiva) en CUP' });
+  }
+
+  const forSale = isPlaylist ? 0 : 1;
+  const isExclusive = !isPlaylist && prices.exclusive > 0 ? 1 : 0;
+  const lowestPrice = offeredTypes.length ? Math.min(...offeredTypes.map(t => prices[t])) : 0;
+  const priceLabel = lowestPrice > 0 ? `Desde ${lowestPrice} CUP` : '';
 
   const result = db.prepare(`
     INSERT INTO tracks (title, genre, description, artist_credit, audio_filename, cover_filename,
-                         price_label, price_cup, for_sale, is_playlist, is_exclusive)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         price_label, price_cup, for_sale, is_playlist, is_exclusive, producer_id, approval_status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'approved')
   `).run(
     fields.title, fields.genre || '', fields.description || '', artistCredit,
-    savedAudioFilename, coverFilename, priceLabel, priceCup, forSale, isPlaylist, isExclusive
+    savedAudioFilename, coverFilename, priceLabel, lowestPrice, forSale, isPlaylist, isExclusive
   );
 
-  sendJSON(res, 201, { id: Number(result.lastInsertRowid) });
+  const trackId = Number(result.lastInsertRowid);
+  if (!isPlaylist) saveLicensesForTrack(trackId, prices);
+
+  sendJSON(res, 201, { id: trackId });
+});
+
+route('POST', '/api/producer/tracks', async (req, res) => {
+  const producer = getAuthedProducer(req);
+  if (!producer) return sendJSON(res, 401, { error: 'No autorizado' });
+
+  let upload;
+  try {
+    upload = await processTrackUpload(req);
+  } catch (err) {
+    return sendJSON(res, err.status || 500, { error: err.error || 'Error al subir' });
+  }
+  const { fields, savedAudioFilename, coverFilename } = upload;
+
+  const prices = parseLicensePrices(fields);
+  const offeredTypes = LICENSE_TYPES.filter(t => prices[t] > 0);
+
+  if (offeredTypes.length === 0) {
+    return sendJSON(res, 400, { error: 'Pon precio a al menos una licencia en CUP' });
+  }
+
+  const isExclusive = prices.exclusive > 0 ? 1 : 0;
+  const lowestPrice = Math.min(...offeredTypes.map(t => prices[t]));
+  const priceLabel = `Desde ${lowestPrice} CUP`;
+
+  const result = db.prepare(`
+    INSERT INTO tracks (title, genre, description, audio_filename, cover_filename,
+                         price_label, price_cup, for_sale, is_playlist, is_exclusive, producer_id, approval_status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, 'pending')
+  `).run(
+    fields.title, fields.genre || '', fields.description || '',
+    savedAudioFilename, coverFilename, priceLabel, lowestPrice, isExclusive, producer.id
+  );
+
+  const trackId = Number(result.lastInsertRowid);
+  saveLicensesForTrack(trackId, prices);
+
+  sendJSON(res, 201, { id: trackId });
 });
 
 route('GET', '/api/admin/tracks', (req, res, params, query) => {
@@ -568,29 +775,42 @@ route('GET', '/api/admin/tracks', (req, res, params, query) => {
     tracks = db.prepare('SELECT * FROM tracks WHERE is_playlist = 0 ORDER BY created_at DESC').all();
   }
 
+  if (type === 'catalog') {
+    tracks = tracks.map(t => ({ ...t, licenses: getTrackLicenses(t.id) }));
+  }
+
   sendJSON(res, 200, { tracks });
 });
 
 route('POST', '/api/admin/tracks/:id/price', async (req, res, params) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
-  const track = db.prepare('SELECT id, is_playlist FROM tracks WHERE id = ?').get(params.id);
+  const track = db.prepare('SELECT id, is_playlist, sold FROM tracks WHERE id = ?').get(params.id);
   if (!track) return sendJSON(res, 404, { error: 'No encontrada' });
   if (track.is_playlist) return sendJSON(res, 400, { error: 'Las pistas de Playlist no tienen precio' });
 
   try {
     const body = await readBody(req, 1024 * 5);
-    const { priceCup, forSale, isExclusive } = JSON.parse(body.toString('utf8'));
-    const cleanPriceCup = Math.max(0, parseFloat(priceCup) || 0);
-    const cleanForSale = forSale || isExclusive;
+    const raw = JSON.parse(body.toString('utf8'));
+    const prices = {
+      basic: Math.max(0, parseFloat(raw.priceBasic ?? raw.priceCup) || 0),
+      premium: Math.max(0, parseFloat(raw.pricePremium) || 0),
+      unlimited: Math.max(0, parseFloat(raw.priceUnlimited) || 0),
+      exclusive: Math.max(0, parseFloat(raw.priceExclusive) || 0),
+    };
+    const offeredTypes = LICENSE_TYPES.filter(t => prices[t] > 0);
 
-    if (cleanForSale && cleanPriceCup <= 0) {
-      return sendJSON(res, 400, { error: 'Una pista en venta o exclusiva necesita un precio en CUP mayor a 0' });
+    if (offeredTypes.length === 0) {
+      return sendJSON(res, 400, { error: 'Pon precio a al menos una licencia' });
     }
 
-    const priceLabel = cleanPriceCup > 0 ? `${cleanPriceCup} CUP` : '';
+    const forSale = 1;
+    const isExclusive = prices.exclusive > 0 ? 1 : 0;
+    const lowestPrice = Math.min(...offeredTypes.map(t => prices[t]));
+    const priceLabel = `Desde ${lowestPrice} CUP`;
 
     db.prepare('UPDATE tracks SET price_label = ?, price_cup = ?, for_sale = ?, is_exclusive = ? WHERE id = ?')
-      .run(priceLabel, cleanPriceCup, cleanForSale ? 1 : 0, isExclusive ? 1 : 0, params.id);
+      .run(priceLabel, lowestPrice, forSale, isExclusive, params.id);
+    saveLicensesForTrack(params.id, prices);
     sendJSON(res, 200, { ok: true });
   } catch {
     sendJSON(res, 400, { error: 'Solicitud inválida' });
@@ -608,6 +828,7 @@ route('DELETE', '/api/admin/tracks/:id', (req, res, params) => {
     const coverPath = path.join(UPLOADS_COVERS, track.cover_filename);
     if (fs.existsSync(coverPath)) fs.unlinkSync(coverPath);
   }
+  db.prepare('DELETE FROM track_licenses WHERE track_id = ?').run(params.id);
   db.prepare('DELETE FROM tracks WHERE id = ?').run(params.id);
   sendJSON(res, 200, { ok: true });
 });
@@ -775,6 +996,152 @@ route('POST', '/api/admin/site-config', async (req, res) => {
   }
 });
 
+route('GET', '/api/admin/commission', (req, res) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  const config = db.prepare('SELECT commission_percent FROM platform_config WHERE id = 1').get();
+  sendJSON(res, 200, { commissionPercent: config.commission_percent });
+});
+
+route('POST', '/api/admin/commission', async (req, res) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  try {
+    const body = await readBody(req, 1024 * 5);
+    const { commissionPercent } = JSON.parse(body.toString('utf8'));
+    const clean = Math.max(0, Math.min(100, parseFloat(commissionPercent) || 0));
+    db.prepare('UPDATE platform_config SET commission_percent = ? WHERE id = 1').run(clean);
+    sendJSON(res, 200, { ok: true });
+  } catch {
+    sendJSON(res, 400, { error: 'Solicitud inválida' });
+  }
+});
+
+route('GET', '/api/admin/producers', (req, res) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  const producers = db.prepare('SELECT id, name, email, active, created_at FROM producers ORDER BY created_at DESC').all();
+  const withStats = producers.map(p => {
+    const stats = db.prepare(`
+      SELECT COUNT(*) as totalTracks,
+             COALESCE(SUM(CASE WHEN status = 'approved' THEN price_cup_at_sale ELSE 0 END), 0) as totalSalesCup,
+             COALESCE(SUM(CASE WHEN status = 'approved' THEN producer_earning_cup ELSE 0 END), 0) as totalEarningsCup
+      FROM orders WHERE producer_id = ?
+    `).get(p.id);
+    const trackCount = db.prepare('SELECT COUNT(*) as c FROM tracks WHERE producer_id = ?').get(p.id).c;
+    return { ...p, trackCount, ...stats };
+  });
+  sendJSON(res, 200, { producers: withStats });
+});
+
+route('POST', '/api/admin/producers', async (req, res) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  try {
+    const body = await readBody(req, 1024 * 5);
+    const { name, email, password } = JSON.parse(body.toString('utf8'));
+    const cleanEmail = (email || '').trim().toLowerCase();
+    const cleanName = (name || '').trim();
+
+    if (!cleanName || !cleanEmail || !password || password.length < 6) {
+      return sendJSON(res, 400, { error: 'Nombre, correo y contraseña (mínimo 6 caracteres) son obligatorios' });
+    }
+
+    const existing = db.prepare('SELECT id FROM producers WHERE email = ?').get(cleanEmail);
+    if (existing) {
+      return sendJSON(res, 409, { error: 'Ya existe un productor con ese correo' });
+    }
+
+    const { hash, salt } = producerAuth.hashPassword(password);
+    const result = db.prepare('INSERT INTO producers (name, email, password_hash, password_salt) VALUES (?, ?, ?, ?)')
+      .run(cleanName, cleanEmail, hash, salt);
+    sendJSON(res, 201, { id: Number(result.lastInsertRowid) });
+  } catch {
+    sendJSON(res, 400, { error: 'Solicitud inválida' });
+  }
+});
+
+route('POST', '/api/admin/producers/:id/toggle', (req, res, params) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  const producer = db.prepare('SELECT active FROM producers WHERE id = ?').get(params.id);
+  if (!producer) return sendJSON(res, 404, { error: 'Productor no encontrado' });
+  db.prepare('UPDATE producers SET active = ? WHERE id = ?').run(producer.active ? 0 : 1, params.id);
+  sendJSON(res, 200, { ok: true, active: !producer.active });
+});
+
+route('DELETE', '/api/admin/producers/:id', (req, res, params) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  const producer = db.prepare('SELECT id FROM producers WHERE id = ?').get(params.id);
+  if (!producer) return sendJSON(res, 404, { error: 'Productor no encontrado' });
+  const trackCount = db.prepare('SELECT COUNT(*) as c FROM tracks WHERE producer_id = ?').get(params.id).c;
+  if (trackCount > 0) {
+    return sendJSON(res, 409, { error: 'Este productor tiene beats subidos. Desactívalo en vez de eliminarlo.' });
+  }
+  db.prepare('DELETE FROM producers WHERE id = ?').run(params.id);
+  db.prepare('DELETE FROM producer_sessions WHERE producer_id = ?').run(params.id);
+  sendJSON(res, 200, { ok: true });
+});
+
+route('GET', '/api/admin/preview-audio/:id', (req, res, params) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  const track = db.prepare('SELECT audio_filename FROM tracks WHERE id = ?').get(params.id);
+  if (!track) return sendJSON(res, 404, { error: 'Pista no encontrada' });
+
+  const filePath = path.join(UPLOADS_AUDIO, track.audio_filename);
+  if (!fs.existsSync(filePath)) return sendJSON(res, 404, { error: 'Archivo no encontrado' });
+
+  const stat = fs.statSync(filePath);
+  const ext = path.extname(track.audio_filename).toLowerCase();
+  const contentType = contentTypeForAudio(ext);
+  const range = req.headers.range;
+
+  if (range) {
+    const match = range.match(/bytes=(\d*)-(\d*)/);
+    let start = match[1] ? parseInt(match[1], 10) : 0;
+    let end = match[2] ? parseInt(match[2], 10) : stat.size - 1;
+    if (end >= stat.size) end = stat.size - 1;
+    res.writeHead(206, {
+      'Content-Type': contentType,
+      'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': end - start + 1,
+    });
+    fs.createReadStream(filePath, { start, end }).pipe(res);
+  } else {
+    res.writeHead(200, { 'Content-Type': contentType, 'Accept-Ranges': 'bytes', 'Content-Length': stat.size });
+    fs.createReadStream(filePath).pipe(res);
+  }
+});
+
+route('GET', '/api/admin/pending-tracks', (req, res) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  const tracks = db.prepare(`
+    SELECT t.*, p.name as producer_name, p.email as producer_email
+    FROM tracks t
+    LEFT JOIN producers p ON p.id = t.producer_id
+    WHERE t.approval_status = 'pending'
+    ORDER BY t.created_at ASC
+  `).all();
+  sendJSON(res, 200, { tracks });
+});
+
+route('POST', '/api/admin/tracks/:id/approve', (req, res, params) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  const track = db.prepare('SELECT id FROM tracks WHERE id = ?').get(params.id);
+  if (!track) return sendJSON(res, 404, { error: 'Pista no encontrada' });
+  db.prepare("UPDATE tracks SET approval_status = 'approved' WHERE id = ?").run(params.id);
+  sendJSON(res, 200, { ok: true });
+});
+
+route('POST', '/api/admin/tracks/:id/reject', async (req, res, params) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  const track = db.prepare('SELECT id FROM tracks WHERE id = ?').get(params.id);
+  if (!track) return sendJSON(res, 404, { error: 'Pista no encontrada' });
+  let reason = '';
+  try {
+    const body = await readBody(req, 1024 * 2);
+    if (body.length) reason = (JSON.parse(body.toString('utf8')).reason || '').slice(0, 300).trim();
+  } catch { /* rechazo sin motivo también es válido */ }
+  db.prepare("UPDATE tracks SET approval_status = 'rejected', rejection_reason = ? WHERE id = ?").run(reason, params.id);
+  sendJSON(res, 200, { ok: true });
+});
+
 route('GET', '/api/admin/backup', (req, res) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   try {
@@ -827,18 +1194,42 @@ route('GET', '/api/admin/orders/:id/receipt', (req, res, params) => {
   sendFile(res, filePath, contentTypeForImage(ext));
 });
 
+function generateCertificateId() {
+  const year = new Date().getFullYear();
+  const row = db.prepare("SELECT COUNT(*) as c FROM orders WHERE certificate_id LIKE ?").get(`LIC-${year}-%`);
+  const seq = String(row.c + 1).padStart(4, '0');
+  return `LIC-${year}-${seq}`;
+}
+
+function generateCertificateHash(order, certificateId) {
+  const payload = `${certificateId}|${order.track_id}|${order.buyer_name}|${order.buyer_phone}|${order.price_cup_at_sale}|${order.license_type}|${order.created_at}`;
+  return crypto.createHash('sha256').update(payload).digest('hex');
+}
+
 route('POST', '/api/admin/orders/:id/approve', (req, res, params) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(params.id);
   if (!order) return sendJSON(res, 404, { error: 'Pedido no encontrado' });
+  if (order.status === 'approved') return sendJSON(res, 409, { error: 'Este pedido ya estaba aprobado' });
 
-  const track = db.prepare('SELECT id, is_exclusive, sold FROM tracks WHERE id = ?').get(order.track_id);
-  if (track && track.is_exclusive && !track.sold) {
-    db.prepare('UPDATE tracks SET sold = 1 WHERE id = ?').run(track.id);
+  let trackMarkedSold = false;
+  if (order.license_type === 'exclusive') {
+    const track = db.prepare('SELECT id, sold FROM tracks WHERE id = ?').get(order.track_id);
+    if (track && track.sold) {
+      return sendJSON(res, 409, { error: 'La licencia exclusiva de este beat ya fue aprobada para otro comprador. No apruebes este pedido — coordina la devolución con este cliente.' });
+    }
+    if (track) {
+      db.prepare('UPDATE tracks SET sold = 1 WHERE id = ?').run(track.id);
+      trackMarkedSold = true;
+    }
   }
 
-  db.prepare("UPDATE orders SET status = 'approved' WHERE id = ?").run(params.id);
-  sendJSON(res, 200, { ok: true, trackMarkedSold: Boolean(track && track.is_exclusive) });
+  const certificateId = generateCertificateId();
+  const certificateHash = generateCertificateHash(order, certificateId);
+  db.prepare("UPDATE orders SET status = 'approved', certificate_id = ?, certificate_hash = ? WHERE id = ?")
+    .run(certificateId, certificateHash, params.id);
+
+  sendJSON(res, 200, { ok: true, trackMarkedSold, certificateId });
 });
 
 route('DELETE', '/api/admin/orders/:id', (req, res, params) => {
@@ -937,6 +1328,7 @@ route('GET', '/api/admin/watermark/preview', (req, res) => {
 
 const STATIC_DIRS = {
   '/admin': path.join(__dirname, 'admin'),
+  '/productores': path.join(__dirname, 'productores'),
   '': path.join(__dirname, 'public'),
 };
 
@@ -947,6 +1339,9 @@ function serveStatic(req, res, pathname) {
   if (pathname === '/admin' || pathname.startsWith('/admin/')) {
     baseDir = STATIC_DIRS['/admin'];
     relativePath = pathname.replace(/^\/admin/, '') || '/index.html';
+  } else if (pathname === '/productores' || pathname.startsWith('/productores/')) {
+    baseDir = STATIC_DIRS['/productores'];
+    relativePath = pathname.replace(/^\/productores/, '') || '/index.html';
   }
   if (relativePath === '/' || relativePath === '') relativePath = '/index.html';
 

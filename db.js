@@ -26,7 +26,19 @@ db.exec(`
     is_playlist INTEGER DEFAULT 0,
     is_exclusive INTEGER DEFAULT 0,
     sold INTEGER DEFAULT 0,
+    producer_id INTEGER,
+    approval_status TEXT DEFAULT 'approved',
+    rejection_reason TEXT DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS track_licenses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    track_id INTEGER NOT NULL,
+    license_type TEXT NOT NULL,
+    price_cup REAL NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(track_id, license_type)
   );
 
   CREATE TABLE IF NOT EXISTS profile (
@@ -58,6 +70,13 @@ db.exec(`
     buyer_phone TEXT NOT NULL,
     receipt_filename TEXT NOT NULL,
     status TEXT DEFAULT 'pending',
+    producer_id INTEGER,
+    price_cup_at_sale REAL DEFAULT 0,
+    commission_percent_at_sale REAL DEFAULT 0,
+    producer_earning_cup REAL DEFAULT 0,
+    license_type TEXT DEFAULT 'basic',
+    certificate_id TEXT,
+    certificate_hash TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -83,6 +102,27 @@ db.exec(`
     promo_text TEXT DEFAULT '',
     promo_active INTEGER DEFAULT 0,
     schedule_text TEXT DEFAULT ''
+  );
+
+  CREATE TABLE IF NOT EXISTS producers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    email TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    password_salt TEXT NOT NULL,
+    active INTEGER DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS producer_sessions (
+    token TEXT PRIMARY KEY,
+    producer_id INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS platform_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    commission_percent REAL DEFAULT 20
   );
 `);
 
@@ -112,6 +152,15 @@ if (!trackCols.includes('artist_credit')) {
 if (!trackCols.includes('likes')) {
   db.exec('ALTER TABLE tracks ADD COLUMN likes INTEGER DEFAULT 0');
 }
+if (!trackCols.includes('producer_id')) {
+  db.exec('ALTER TABLE tracks ADD COLUMN producer_id INTEGER');
+}
+if (!trackCols.includes('approval_status')) {
+  db.exec("ALTER TABLE tracks ADD COLUMN approval_status TEXT DEFAULT 'approved'");
+}
+if (!trackCols.includes('rejection_reason')) {
+  db.exec("ALTER TABLE tracks ADD COLUMN rejection_reason TEXT DEFAULT ''");
+}
 
 const orderCols = db.prepare("PRAGMA table_info(orders)").all().map(c => c.name);
 if (!orderCols.includes('currency')) {
@@ -119,6 +168,39 @@ if (!orderCols.includes('currency')) {
 }
 if (!orderCols.includes('status')) {
   db.exec("ALTER TABLE orders ADD COLUMN status TEXT DEFAULT 'pending'");
+}
+if (!orderCols.includes('producer_id')) {
+  db.exec('ALTER TABLE orders ADD COLUMN producer_id INTEGER');
+}
+if (!orderCols.includes('price_cup_at_sale')) {
+  db.exec('ALTER TABLE orders ADD COLUMN price_cup_at_sale REAL DEFAULT 0');
+}
+if (!orderCols.includes('commission_percent_at_sale')) {
+  db.exec('ALTER TABLE orders ADD COLUMN commission_percent_at_sale REAL DEFAULT 0');
+}
+if (!orderCols.includes('producer_earning_cup')) {
+  db.exec('ALTER TABLE orders ADD COLUMN producer_earning_cup REAL DEFAULT 0');
+}
+if (!orderCols.includes('license_type')) {
+  db.exec("ALTER TABLE orders ADD COLUMN license_type TEXT DEFAULT 'basic'");
+}
+if (!orderCols.includes('certificate_id')) {
+  db.exec('ALTER TABLE orders ADD COLUMN certificate_id TEXT');
+}
+if (!orderCols.includes('certificate_hash')) {
+  db.exec('ALTER TABLE orders ADD COLUMN certificate_hash TEXT');
+}
+
+const existingLicenseTracks = db.prepare(`
+  SELECT id, price_cup, is_exclusive FROM tracks
+  WHERE is_playlist = 0 AND for_sale = 1 AND price_cup > 0
+`).all();
+for (const t of existingLicenseTracks) {
+  const type = t.is_exclusive ? 'exclusive' : 'basic';
+  const already = db.prepare('SELECT id FROM track_licenses WHERE track_id = ? AND license_type = ?').get(t.id, type);
+  if (!already) {
+    db.prepare('INSERT INTO track_licenses (track_id, license_type, price_cup) VALUES (?, ?, ?)').run(t.id, type, t.price_cup);
+  }
 }
 
 const profileCols = db.prepare("PRAGMA table_info(profile)").all().map(c => c.name);
@@ -170,6 +252,11 @@ if (!ratesExist) {
 const siteConfigExists = db.prepare('SELECT id FROM site_config WHERE id = 1').get();
 if (!siteConfigExists) {
   db.prepare(`INSERT INTO site_config (id, promo_text, promo_active, schedule_text) VALUES (1, '', 0, '')`).run();
+}
+
+const platformConfigExists = db.prepare('SELECT id FROM platform_config WHERE id = 1').get();
+if (!platformConfigExists) {
+  db.prepare('INSERT INTO platform_config (id, commission_percent) VALUES (1, 20)').run();
 }
 
 module.exports = db;

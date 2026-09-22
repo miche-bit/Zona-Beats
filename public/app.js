@@ -300,10 +300,12 @@
       let priceChip = '';
       if (currentSection === 'catalog' && track.for_sale && track.price_cup > 0) {
         const priceText = formatPriceInCurrency(track.price_cup, selectedCurrency);
+        const multipleLicenses = (track.licenses || []).length > 1;
+        const label = multipleLicenses ? `Desde ${priceText}` : priceText;
         priceChip = `
           <div class="track-price-chip">
             <svg viewBox="0 0 24 24"><path d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12L8.1 13h7.45c.75 0 1.41-.41 1.75-1.03L20.9 4H4.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z"/></svg>
-            <span title="${escapeHtml(priceText)}">${escapeHtml(priceText)}</span>
+            <span title="${escapeHtml(label)}">${escapeHtml(label)}</span>
           </div>
         `;
       } else if (currentSection === 'vip' && track.price_cup > 0) {
@@ -435,7 +437,9 @@
         downloadBtn.style.display = 'inline-flex';
         downloadBtn.onclick = () => { window.location.href = `/api/download/${track.id}`; };
       } else if (canBuy) {
-        buyPriceLabel.textContent = formatPriceInCurrency(track.price_cup, selectedCurrency);
+        const priceText = formatPriceInCurrency(track.price_cup, selectedCurrency);
+        const multipleLicenses = (track.licenses || []).length > 1;
+        buyPriceLabel.textContent = multipleLicenses ? `Desde ${priceText}` : priceText;
         buyPriceLabel.title = buyPriceLabel.textContent;
         buyBtn.style.display = 'inline-flex';
         buyBtn.onclick = () => openBuyModal(track);
@@ -517,10 +521,97 @@
 
   let receiptFile = null;
 
+  const LICENSE_INFO = {
+    basic: {
+      label: 'Básica',
+      description: 'MP3, uso no exclusivo. Ideal para distribución digital independiente.',
+    },
+    premium: {
+      label: 'Premium',
+      description: 'MP3 + WAV, uso no exclusivo con mayor alcance de distribución.',
+    },
+    unlimited: {
+      label: 'Ilimitada',
+      description: 'MP3 + WAV + STEMS, sin límite de reproducciones ni presentaciones.',
+    },
+    exclusive: {
+      label: 'Exclusiva',
+      description: 'Compra única: el beat se retira del catálogo y queda completamente bajo tu nombre.',
+    },
+  };
+  const LICENSE_ORDER = ['basic', 'premium', 'unlimited', 'exclusive'];
+
+  let selectedLicenseType = null;
+
   function openBuyModal(track) {
     activeModalTrack = track;
     modalTrackTitle.textContent = track.title;
-    modalPrice.textContent = formatPriceInCurrency(track.price_cup, selectedCurrency);
+    selectedLicenseType = null;
+
+    const licenseList = document.getElementById('modal-license-list');
+    const licenses = (track.licenses || []).slice().sort((a, b) => LICENSE_ORDER.indexOf(a.license_type) - LICENSE_ORDER.indexOf(b.license_type));
+
+    if (!licenses.length) {
+      licenseList.innerHTML = '<div class="modal-no-accounts">Esta pista no tiene ninguna licencia disponible en este momento.</div>';
+      document.getElementById('modal-price').style.display = 'none';
+      document.getElementById('modal-instructions').style.display = 'none';
+      modalAccounts.innerHTML = '';
+      document.getElementById('modal-confirm-phone').style.display = 'none';
+      orderForm.style.display = 'none';
+      modalSuccess.style.display = 'none';
+      modalOverlay.classList.add('active');
+      return;
+    }
+
+    licenseList.innerHTML = licenses.map((lic) => {
+      const info = LICENSE_INFO[lic.license_type] || { label: lic.license_type, description: '' };
+      const priceText = formatPriceInCurrency(lic.price_cup, selectedCurrency);
+      return `
+        <button type="button" class="license-option" data-type="${lic.license_type}">
+          <div class="license-option-top">
+            <span class="license-option-label">${escapeHtml(info.label)}</span>
+            <span class="license-option-price">${escapeHtml(priceText)}</span>
+          </div>
+          <div class="license-option-desc">${escapeHtml(info.description)}</div>
+        </button>
+      `;
+    }).join('');
+
+    licenseList.querySelectorAll('.license-option').forEach((btn) => {
+      btn.addEventListener('click', () => selectLicense(btn.dataset.type));
+    });
+
+    document.getElementById('modal-price').style.display = 'none';
+    document.getElementById('modal-instructions').style.display = 'none';
+    modalAccounts.innerHTML = '';
+    document.getElementById('modal-confirm-phone').style.display = 'none';
+    orderForm.style.display = 'none';
+    modalSuccess.style.display = 'none';
+    receiptFile = null;
+    receiptDrop.classList.remove('has-receipt');
+    receiptDropText.style.display = 'block';
+    receiptPreview.style.display = 'none';
+    receiptPreview.src = '';
+    termsAcceptInput.checked = false;
+    orderForm.reset();
+    orderSubmitBtn.classList.add('disabled');
+
+    modalOverlay.classList.add('active');
+  }
+
+  function selectLicense(type) {
+    selectedLicenseType = type;
+    const track = activeModalTrack;
+    const lic = (track.licenses || []).find(l => l.license_type === type);
+    if (!lic) return;
+
+    document.querySelectorAll('.license-option').forEach((btn) => {
+      btn.classList.toggle('selected', btn.dataset.type === type);
+    });
+
+    modalPrice.textContent = formatPriceInCurrency(lic.price_cup, selectedCurrency);
+    document.getElementById('modal-price').style.display = 'block';
+    document.getElementById('modal-instructions').style.display = 'block';
 
     const accountsForCurrency = paymentInfo.accounts.filter(a => a.currency === selectedCurrency);
 
@@ -558,26 +649,15 @@
       confirmPhoneBlock.style.display = 'none';
     }
 
-    orderForm.reset();
     orderForm.style.display = accountsForCurrency.length ? 'block' : 'none';
-    modalSuccess.style.display = 'none';
-    receiptFile = null;
-    receiptDrop.classList.remove('has-receipt');
-    receiptDropText.style.display = 'block';
-    receiptPreview.style.display = 'none';
-    receiptPreview.src = '';
-    termsAcceptInput.checked = false;
-    orderSubmitBtn.classList.add('disabled');
     updateSubmitButtonState();
-
-    modalOverlay.classList.add('active');
   }
 
   function updateSubmitButtonState() {
-    const ready = buyerNameInput.value.trim() && buyerPhoneInput.value.trim() && receiptFile && termsAcceptInput.checked;
+    const ready = selectedLicenseType && buyerNameInput.value.trim() && buyerPhoneInput.value.trim() && receiptFile && termsAcceptInput.checked;
     orderSubmitBtn.disabled = !ready;
     orderSubmitBtn.classList.toggle('disabled', !ready);
-    if (!termsAcceptInput.checked && buyerNameInput.value.trim() && buyerPhoneInput.value.trim() && receiptFile) {
+    if (!termsAcceptInput.checked && selectedLicenseType && buyerNameInput.value.trim() && buyerPhoneInput.value.trim() && receiptFile) {
       orderSubmitBtn.textContent = 'Acepta los términos para continuar';
     } else {
       orderSubmitBtn.textContent = ready
@@ -626,11 +706,13 @@
 
   orderForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    if (!receiptFile || !activeModalTrack || !termsAcceptInput.checked) return;
+    if (!receiptFile || !activeModalTrack || !termsAcceptInput.checked || !selectedLicenseType) return;
 
     const buyerName = buyerNameInput.value.trim();
     const buyerPhone = buyerPhoneInput.value.trim();
-    const displayedPrice = formatPriceInCurrency(activeModalTrack.price_cup, selectedCurrency);
+    const lic = (activeModalTrack.licenses || []).find(l => l.license_type === selectedLicenseType);
+    const displayedPrice = formatPriceInCurrency(lic ? lic.price_cup : 0, selectedCurrency);
+    const licenseLabel = (LICENSE_INFO[selectedLicenseType] || {}).label || selectedLicenseType;
 
     orderSubmitBtn.disabled = true;
     orderSubmitBtn.textContent = 'Enviando…';
@@ -642,6 +724,7 @@
       formData.append('buyerPhone', buyerPhone);
       formData.append('currency', selectedCurrency);
       formData.append('displayedPrice', displayedPrice);
+      formData.append('licenseType', selectedLicenseType);
       formData.append('receipt', receiptFile);
 
       const res = await fetch('/api/orders', { method: 'POST', body: formData });
@@ -655,7 +738,7 @@
 
       if (paymentInfo.contactPhone) {
         const message = encodeURIComponent(
-          `Hola, soy ${buyerName} 👋 Acabo de comprar "${activeModalTrack.title}"` +
+          `Hola, soy ${buyerName} 👋 Acabo de comprar "${activeModalTrack.title}" (Licencia ${licenseLabel})` +
           ` (${displayedPrice}). ` +
           `Ya te envié el comprobante de mi transferencia a través de la plataforma. ¡Gracias!`
         );
