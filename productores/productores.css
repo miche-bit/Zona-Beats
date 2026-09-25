@@ -80,6 +80,31 @@ label {
   margin: -8px 0 18px;
 }
 
+.exclusive-warning {
+  color: #ffc13d;
+  background: rgba(255, 193, 61, 0.07);
+  border: 1px solid rgba(255, 193, 61, 0.25);
+  border-radius: 8px;
+  padding: 10px 12px;
+  line-height: 1.45;
+}
+
+#exclusive-toggle-wrap.locked .checkbox-label {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.exclusive-locked-note {
+  font-size: 12px;
+  color: var(--text-faint);
+  background: var(--bg-elevated);
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  padding: 9px 12px;
+  margin-top: 8px;
+  line-height: 1.45;
+}
+
 /* ---------- Login ---------- */
 .login-screen {
   min-height: 100vh;
@@ -225,7 +250,7 @@ label {
 /* ---------- Tarjetas de estadísticas ---------- */
 .stats-row {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 16px;
   margin-bottom: 28px;
 }
@@ -275,7 +300,10 @@ label {
 }
 .stat-card-highlight .stat-value { color: var(--live); }
 
-@media (max-width: 640px) {
+@media (max-width: 900px) {
+  .stats-row { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 480px) {
   .stats-row { grid-template-columns: 1fr; }
 }
 
@@ -472,3 +500,141 @@ label {
     transition-duration: 0.01ms !important;
   }
 }
+
+.switch-mode { font-size: 13px; color: var(--text-faint); text-align: center; margin: 16px 0 0; }
+.switch-mode button { background: none; border: none; color: var(--accent); font-weight: 600; font-size: 13px; text-decoration: underline; padding: 0; }
+.register-ok {
+  display: none; color: var(--live); background: rgba(61,255,224,0.08);
+  border: 1px solid rgba(61,255,224,0.3); border-radius: 8px;
+  padding: 11px 13px; font-size: 13px; margin-top: 12px; line-height: 1.45;
+}
+.register-ok.show { display: block; animation: riseIn 0.4s var(--ease); }
+
+.panel-header-row-p { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 12px; }
+.panel-header-row-p h2 { margin: 0; }
+.plan-chip {
+  font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700;
+  background: var(--accent); color: #fff; padding: 4px 12px; border-radius: 20px; text-transform: uppercase;
+}
+.plan-warning {
+  background: rgba(255,193,61,0.08); border: 1px solid rgba(255,193,61,0.35);
+  color: #ffc13d; border-radius: 8px; padding: 11px 13px; font-size: 13px; margin-bottom: 16px; line-height: 1.45;
+}
+.plan-warning.danger { background: rgba(255,93,93,0.08); border-color: rgba(255,93,93,0.4); color: var(--danger); }
+.plan-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.plan-fact {
+  background: var(--bg-elevated); border: 1px solid var(--line); border-radius: 9px; padding: 12px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.plan-fact span { font-size: 11px; color: var(--text-faint); font-family: 'JetBrains Mono', monospace; text-transform: uppercase; }
+.plan-fact strong { font-size: 15px; }
+
+.plans-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-top: 18px; }
+.plan-card { background: var(--bg-elevated); border: 1px solid var(--line); border-radius: 11px; padding: 15px; transition: border-color 0.2s var(--ease); }
+.plan-card.current { border-color: var(--accent); background: rgba(124,92,255,0.07); }
+.plan-card-name { font-weight: 700; font-size: 15px; margin-bottom: 2px; }
+.plan-current-tag { font-size: 9.5px; font-family: 'JetBrains Mono', monospace; color: var(--accent); text-transform: uppercase; }
+.plan-card-price { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--live); margin-bottom: 10px; }
+.plan-card-list { list-style: none; padding: 0; margin: 0; }
+.plan-card-list li { font-size: 12px; color: var(--text-dim); padding: 3px 0; }
+
+.profile-row { display: flex; gap: 18px; margin-bottom: 18px; flex-wrap: wrap; }
+.avatar-box { width: 120px; flex-shrink: 0; }
+.avatar-box img { width: 120px; height: 120px; border-radius: 12px; object-fit: cover; display: block; margin-bottom: 8px; }
+.avatar-drop { padding: 10px; font-size: 12px; }
+.profile-fields { flex: 1; min-width: 220px; }
+
+.row-pair, .row-triple { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.row-pair input, .row-triple input, .row-triple select { flex: 1; min-width: 110px; width: auto; }
+.row-triple select { background: var(--bg-elevated); border: 1px solid var(--line); color: var(--text); border-radius: 7px; padding: 10px; font-size: 14px; max-width: 130px; }
+.row-remove {
+  background: transparent; border: 1px solid var(--line); color: var(--text-faint);
+  width: 40px; border-radius: 7px; font-size: 17px; flex-shrink: 0;
+}
+.row-remove:hover { border-color: var(--danger); color: var(--danger); }
+.btn-add-row {
+  background: transparent; border: 1px dashed var(--line); color: var(--text-faint);
+  width: 100%; padding: 9px; border-radius: 7px; font-size: 13px; margin-top: 2px;
+}
+.btn-add-row:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ---------- Registro: ayuda bajo el campo ---------- */
+.field-hint { display: block; font-size: 11.5px; color: var(--text-faint); margin-top: 5px; line-height: 1.4; }
+
+/* ---------- Estado de la solicitud de plan ---------- */
+.plan-request-status {
+  border-radius: 9px; padding: 11px 13px; font-size: 13px; line-height: 1.5; margin-bottom: 16px;
+  border: 1px solid var(--line); background: var(--bg-elevated);
+  animation: riseIn 0.35s var(--ease);
+}
+.plan-request-status.pending { border-color: rgba(255,193,61,0.4); background: rgba(255,193,61,0.07); color: #ffc13d; }
+.plan-request-status.ok { border-color: rgba(61,255,224,0.35); background: rgba(61,255,224,0.07); color: var(--live); }
+.plan-request-status.danger { border-color: rgba(255,93,93,0.4); background: rgba(255,93,93,0.07); color: var(--danger); }
+
+/* ---------- Tarjetas de plan con botón de compra ---------- */
+.plan-card { display: flex; flex-direction: column; }
+.plan-card-list { flex: 1; }
+.plan-usd { color: var(--text-faint); font-size: 11px; }
+.btn-buy-plan {
+  margin-top: 12px; width: 100%; padding: 10px; border-radius: 8px; border: none;
+  background: var(--accent); color: #fff; font-weight: 700; font-size: 13px;
+  transition: transform 0.15s var(--ease), box-shadow 0.2s var(--ease), background 0.2s var(--ease);
+}
+.btn-buy-plan:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 8px 22px -8px rgba(124,92,255,0.7); background: #8f6fff; }
+.btn-buy-plan:disabled { opacity: 0.45; cursor: not-allowed; }
+.plan-card.current .btn-buy-plan { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
+
+/* ---------- Modal de compra de plan ---------- */
+.plan-modal-overlay {
+  position: fixed; inset: 0; z-index: 300; display: none;
+  align-items: flex-start; justify-content: center; overflow-y: auto;
+  padding: 24px 16px; background: rgba(6,5,10,0.78); backdrop-filter: blur(4px);
+}
+.plan-modal-overlay.active { display: flex; animation: fadeIn 0.25s var(--ease); }
+.plan-modal-box {
+  position: relative; width: 100%; max-width: 440px; margin: auto;
+  background: var(--bg-card); border: 1px solid var(--line); border-radius: 16px; padding: 26px 22px;
+  box-shadow: 0 30px 80px -30px rgba(124,92,255,0.45);
+  animation: riseIn 0.4s var(--ease);
+}
+.plan-modal-box h3 { font-family: 'Anton', sans-serif; font-size: 24px; text-transform: uppercase; margin: 0 0 6px; }
+.plan-modal-close {
+  position: absolute; top: 14px; right: 14px; width: 34px; height: 34px; border-radius: 50%;
+  background: var(--bg-elevated); border: 1px solid var(--line); color: var(--text-dim); font-size: 20px; line-height: 1;
+}
+.months-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.month-opt {
+  background: var(--bg-elevated); border: 1px solid var(--line); color: var(--text-dim);
+  border-radius: 8px; padding: 9px 4px; font-size: 12.5px; font-weight: 600;
+  transition: border-color 0.2s var(--ease), color 0.2s var(--ease), background 0.2s var(--ease);
+}
+.month-opt.active { border-color: var(--accent); color: #fff; background: rgba(124,92,255,0.18); }
+.plan-total {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  background: var(--bg-elevated); border: 1px solid var(--line); border-radius: 10px;
+  padding: 12px 14px; margin-bottom: 16px;
+}
+.plan-total span { font-size: 12px; color: var(--text-faint); font-family: 'JetBrains Mono', monospace; text-transform: uppercase; }
+.plan-total strong { font-family: 'JetBrains Mono', monospace; color: var(--live); font-size: 15px; overflow-wrap: anywhere; }
+#plan-currency {
+  width: 100%; background: var(--bg-elevated); border: 1px solid var(--line); color: var(--text);
+  border-radius: 7px; padding: 10px 12px; font-size: 16px;
+}
+.plan-accounts { margin: -6px 0 16px; }
+.plan-account {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; margin-top: 8px;
+}
+.pa-bank { font-size: 11px; color: var(--text-faint); font-family: 'JetBrains Mono', monospace; text-transform: uppercase; }
+.pa-num { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 14px; overflow-wrap: anywhere; }
+.pa-copy {
+  flex-shrink: 0; background: var(--bg-elevated); border: 1px solid var(--line); color: var(--text-dim);
+  padding: 6px 11px; border-radius: 6px; font-size: 12px;
+}
+@media (max-width: 380px) {
+  .months-row { grid-template-columns: repeat(2, 1fr); }
+}
+
+.stat-sub { font-size: 11px; opacity: .75; margin-top: 4px; line-height: 1.3; }
+.paid-tag { display: block; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; margin-top: 2px; color: #f5b942; text-align: right; }
+.paid-tag.is-paid { color: #4ade80; }

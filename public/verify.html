@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Verificar licencia · Zona Beats</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  .verify-wrap { max-width: 640px; margin: 0 auto; padding: 48px 20px 80px; }
+  .verify-badge {
+    display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 10.5px;
+    letter-spacing: 1.2px; color: var(--accent); background: rgba(255, 61, 127, 0.1);
+    border: 1px solid rgba(255, 61, 127, 0.3); padding: 5px 11px; border-radius: 20px; margin-bottom: 16px;
+  }
+  .verify-title { font-family: 'Anton', sans-serif; font-size: 30px; text-transform: uppercase; margin: 0 0 8px; }
+  .verify-sub { color: var(--text-faint); font-size: 14px; margin: 0 0 28px; line-height: 1.5; }
+  .verify-search { display: flex; gap: 10px; margin-bottom: 28px; flex-wrap: wrap; }
+  .verify-search input {
+    flex: 1; min-width: 200px; background: var(--bg-card); border: 1px solid var(--line);
+    color: var(--text); border-radius: 9px; padding: 12px 14px; font-size: 16px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .verify-search input:focus { outline: none; border-color: var(--accent); }
+  .verify-search button {
+    background: var(--accent); color: #0c0a12; font-weight: 700; font-size: 14px;
+    padding: 12px 22px; border-radius: 9px; white-space: nowrap;
+  }
+  .verify-card {
+    background: var(--bg-card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 26px; display: none; animation: verifyIn 0.45s var(--ease);
+  }
+  @keyframes verifyIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+  .verify-card.show { display: block; }
+  .verify-status { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 15px; margin-bottom: 20px; }
+  .verify-status.ok { color: var(--live); }
+  .verify-status.bad { color: #ff5d5d; }
+  .verify-status-dot { width: 10px; height: 10px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+  .verify-row { display: flex; justify-content: space-between; gap: 14px; padding: 10px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
+  .verify-key { color: var(--text-faint); font-size: 12px; font-family: 'JetBrains Mono', monospace; text-transform: uppercase; letter-spacing: 0.4px; }
+  .verify-val { font-size: 14px; font-weight: 600; text-align: right; }
+  .verify-hash {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim);
+    background: var(--bg-elevated); border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 12px; margin-top: 16px; word-break: break-all; line-height: 1.5;
+  }
+  .verify-pdf-btn {
+    display: block; text-align: center; margin-top: 20px; background: var(--live);
+    color: #0c0a12; font-weight: 700; font-size: 14px; padding: 13px; border-radius: 9px; text-decoration: none;
+  }
+  .verify-note { color: var(--text-faint); font-size: 12px; margin-top: 18px; line-height: 1.5; }
+  .verify-file {
+    background: var(--bg-card); border: 1px dashed var(--line); border-radius: 12px;
+    padding: 18px; margin-bottom: 26px;
+  }
+  .verify-file-title { font-weight: 700; font-size: 14px; }
+  .verify-file-drop {
+    display: block; text-align: center; cursor: pointer; padding: 14px;
+    border: 1px solid var(--line); border-radius: 9px; font-size: 13px; color: var(--text-dim);
+    transition: border-color 0.2s var(--ease), color 0.2s var(--ease);
+  }
+  .verify-file-drop:hover { border-color: var(--accent); color: var(--accent); }
+  .verify-file-drop input { display: none; }
+  .lic-mini { font-family: 'JetBrains Mono', monospace; font-size: 12px; padding: 7px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+  .lic-mini a { color: var(--live); }
+  .verify-dl-btn {
+    display: block; text-align: center; margin-top: 20px; background: var(--accent);
+    color: #0c0a12; font-weight: 700; font-size: 15px; padding: 15px; border-radius: 9px; text-decoration: none;
+  }
+  .verify-pdf-btn { margin-top: 10px; }
+</style>
+</head>
+<body>
+  <div class="top-bar">
+    <a class="brand-mark" href="/" style="text-decoration:none;"><span class="dot"></span> ZONA BEATS</a>
+  </div>
+
+  <div class="verify-wrap">
+    <div class="verify-badge">VERIFICACIÓN DE LICENCIA</div>
+    <h1 class="verify-title">Comprobar una licencia</h1>
+    <p class="verify-sub">Escribe el número que aparece en el certificado (por ejemplo, LIC-2026-0001) para confirmar que la compra existe y ver qué autoriza.</p>
+
+    <div class="verify-search">
+      <input type="text" id="cert-input" placeholder="LIC-2026-0001 o un hash SHA-256" autocomplete="off">
+      <button type="button" id="verify-btn">Verificar</button>
+    </div>
+
+    <div class="verify-file">
+      <div class="verify-file-title">¿Tienes un archivo de audio y quieres saber si salió de aquí?</div>
+      <p class="verify-sub" style="margin:4px 0 12px;">Elígelo y calculamos su huella digital en tu propio dispositivo. El archivo no se sube a ningún lado: solo comparamos la huella.</p>
+      <label class="verify-file-drop">
+        <span id="file-label">Elegir archivo de audio</span>
+        <input type="file" id="file-input" accept="audio/*,.wav,.mp3,.flac,.m4a,.ogg">
+      </label>
+    </div>
+
+    <div class="verify-card" id="verify-card"></div>
+  </div>
+
+  <script>
+    const input = document.getElementById('cert-input');
+    const card = document.getElementById('verify-card');
+
+    function esc(s) {
+      const d = document.createElement('div');
+      d.textContent = s || '';
+      return d.innerHTML;
+    }
+
+    function fecha(iso) {
+      const d = new Date(String(iso || '').replace(' ', 'T') + 'Z');
+      if (isNaN(d.getTime())) return iso || '';
+      return d.toLocaleDateString('es', { day: '2-digit', month: 'long', year: 'numeric' });
+    }
+
+    async function verificar(id) {
+      const clean = (id || '').trim().toUpperCase();
+      if (!clean) return;
+      card.className = 'verify-card show';
+      card.innerHTML = '<div class="verify-status">Consultando…</div>';
+
+      try {
+        const res = await fetch('/api/license/' + encodeURIComponent(clean));
+        if (!res.ok) {
+          card.innerHTML =
+            '<div class="verify-status bad"><span class="verify-status-dot"></span>No encontramos ninguna licencia con ese número</div>' +
+            '<p class="verify-note">Revisa que lo hayas escrito igual que en el certificado. Si el número es correcto y aun así no aparece, esa licencia no fue emitida por esta plataforma.</p>';
+          return;
+        }
+        const d = await res.json();
+        card.innerHTML =
+          '<div class="verify-status ok"><span class="verify-status-dot"></span>Licencia válida y registrada</div>' +
+          '<div class="verify-row"><span class="verify-key">Número</span><span class="verify-val">' + esc(d.certificateId) + '</span></div>' +
+          '<div class="verify-row"><span class="verify-key">Beat</span><span class="verify-val">' + esc(d.trackTitle) + '</span></div>' +
+          '<div class="verify-row"><span class="verify-key">Productor</span><span class="verify-val">' + esc(d.producerName) + '</span></div>' +
+          '<div class="verify-row"><span class="verify-key">Comprador</span><span class="verify-val">' + esc(d.buyerName) + '</span></div>' +
+          '<div class="verify-row"><span class="verify-key">Licencia</span><span class="verify-val">' + esc(d.licenseLabel) + '</span></div>' +
+          '<div class="verify-row"><span class="verify-key">Precio</span><span class="verify-val">' + esc(d.priceLabel) + '</span></div>' +
+          '<div class="verify-row"><span class="verify-key">Fecha</span><span class="verify-val">' + esc(fecha(d.createdAt)) + '</span></div>' +
+          '<div class="verify-hash"><strong>Hash SHA-256:</strong><br>' + esc(d.certificateHash) + '</div>' +
+
+          '<a class="verify-pdf-btn" href="/api/license/' + encodeURIComponent(d.certificateId) + '/pdf">Descargar certificado en PDF</a>' +
+          '<p class="verify-note">Este registro acredita qué licencia se otorgó y qué usos autoriza. El hash permite comprobar que el certificado no fue alterado.</p>';
+      } catch {
+        card.innerHTML = '<div class="verify-status bad"><span class="verify-status-dot"></span>No se pudo consultar. Revisa tu conexión.</div>';
+      }
+    }
+
+    async function verificarHash(hash, origen) {
+      card.className = 'verify-card show';
+      card.innerHTML = '<div class="verify-status">Consultando…</div>';
+      let res, d;
+      try {
+        res = await fetch('/api/verify-hash/' + encodeURIComponent(hash));
+        d = await res.json().catch(() => ({}));
+      } catch {
+        card.innerHTML = '<div class="verify-status bad"><span class="verify-status-dot"></span>No se pudo consultar. Revisa tu conexión.</div>';
+        return;
+      }
+      if (!res.ok) {
+        card.innerHTML = '<div class="verify-status bad"><span class="verify-status-dot"></span>' + esc(d.error || 'No encontrado') + '</div>' +
+          (origen === 'archivo' ? '<p class="verify-note">Si el archivo fue editado, recortado o convertido a otro formato, su huella cambia y ya no coincide con el original.</p>' : '');
+        return;
+      }
+      if (d.type === 'license') { input.value = d.certificateId; verificar(d.certificateId); return; }
+      card.innerHTML =
+        '<div class="verify-status ok"><span class="verify-status-dot"></span>Archivo original registrado en esta plataforma</div>' +
+        '<div class="verify-row"><span class="verify-key">Beat</span><span class="verify-val">' + esc(d.trackTitle) + '</span></div>' +
+        '<div class="verify-row"><span class="verify-key">Productor</span><span class="verify-val">' + esc(d.producerName) + '</span></div>' +
+        '<div class="verify-row"><span class="verify-key">Subido</span><span class="verify-val">' + esc(fecha(d.uploadedAt)) + '</span></div>' +
+        '<div class="verify-hash"><strong>Huella SHA-256:</strong><br>' + esc(hash) + '</div>' +
+        '<p class="verify-note" style="margin-top:16px;"><strong>Licencias emitidas para este beat:</strong></p>' +
+        (d.licenciasEmitidas.length
+          ? d.licenciasEmitidas.map(l => '<div class="lic-mini">' + esc(l.licenseLabel) + ' · <a href="/verify/' + encodeURIComponent(l.certificateId) + '">' + esc(l.certificateId) + '</a> · ' + esc(fecha(l.createdAt)) + '</div>').join('')
+          : '<p class="verify-note">Ninguna. Nadie compró una licencia de este beat en la plataforma, así que cualquier uso comercial no está autorizado desde aquí.</p>');
+    }
+
+    function buscar() {
+      const v = input.value.trim();
+      if (/^[a-fA-F0-9]{64}$/.test(v)) verificarHash(v.toLowerCase(), 'texto');
+      else verificar(v);
+    }
+
+    document.getElementById('verify-btn').addEventListener('click', buscar);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') buscar(); });
+
+    document.getElementById('file-input').addEventListener('change', async (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      const label = document.getElementById('file-label');
+      if (!window.crypto || !window.crypto.subtle) {
+        card.className = 'verify-card show';
+        card.innerHTML = '<div class="verify-status bad"><span class="verify-status-dot"></span>Tu navegador no permite calcular la huella aquí. Prueba con Chrome o Safari actualizados.</div>';
+        return;
+      }
+      label.textContent = 'Calculando huella de ' + f.name + '…';
+      const buf = await f.arrayBuffer();
+      const digest = await crypto.subtle.digest('SHA-256', buf);
+      const hex = Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+      label.textContent = f.name;
+      verificarHash(hex, 'archivo');
+    });
+
+    const fromUrl = decodeURIComponent(location.pathname.replace(/^\/verify\/?/, ''));
+    if (fromUrl) {
+      input.value = fromUrl.toUpperCase();
+      verificar(fromUrl);
+    }
+  </script>
+</body>
+</html>

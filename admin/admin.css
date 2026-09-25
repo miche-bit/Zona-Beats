@@ -65,6 +65,15 @@ label {
   margin: -8px 0 18px;
 }
 
+.exclusive-warning {
+  color: #ffc13d;
+  background: rgba(255, 193, 61, 0.07);
+  border: 1px solid rgba(255, 193, 61, 0.25);
+  border-radius: 8px;
+  padding: 10px 12px;
+  line-height: 1.45;
+}
+
 .checkbox-field { margin-bottom: 14px; }
 .checkbox-label {
   display: flex;
@@ -647,6 +656,8 @@ label {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+  flex-wrap: wrap;
+  max-width: 100%;
 }
 
 .status-dot {
@@ -668,6 +679,20 @@ label {
 }
 .btn-toggle-producer:hover { border-color: var(--live); color: var(--live); }
 .btn-toggle-producer.is-active:hover { border-color: var(--danger); color: var(--danger); }
+
+.btn-toggle-exclusive {
+  background: transparent;
+  border: 1px solid rgba(255, 193, 61, 0.4);
+  color: #ffc13d;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.btn-toggle-exclusive:hover { background: rgba(255, 193, 61, 0.1); }
+.btn-toggle-exclusive.is-on { border-color: var(--line); color: var(--text-faint); }
+
+.perm-on { color: #ffc13d; font-weight: 700; }
+.perm-off { color: var(--text-faint); }
 
 /* ---------- Beats pendientes de aprobación ---------- */
 .pending-track-item {
@@ -870,3 +895,113 @@ label {
     transition-duration: 0.01ms !important;
   }
 }
+
+.cert-line {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  font-family: 'JetBrains Mono', monospace;
+  margin-top: 4px;
+}
+.cert-line strong { color: var(--live); }
+.cert-line a { color: var(--accent); }
+
+.producer-item.pending-approval {
+  border-color: rgba(255, 193, 61, 0.45);
+  background: rgba(255, 193, 61, 0.05);
+}
+.tag-pending {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #ffc13d;
+  background: rgba(255, 193, 61, 0.14);
+  border: 1px solid rgba(255, 193, 61, 0.35);
+  padding: 2px 7px;
+  border-radius: 20px;
+  margin-left: 6px;
+}
+.tag-vencido {
+  color: var(--danger);
+  font-weight: 700;
+}
+.plan-edit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.plan-edit select,
+.plan-edit input[type="date"] {
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 13px;
+  width: auto;
+}
+.btn-save-plan {
+  background: transparent;
+  border: 1px solid var(--live);
+  color: var(--live);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.btn-save-plan:hover { background: rgba(61, 255, 224, 0.1); }
+.receipt-gone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--text-faint);
+  background: var(--bg-elevated);
+  border: 1px dashed var(--line);
+}
+
+/* ---- Compras de planes / pagos a productores / monedas propias ---- */
+.tag-ok { color: var(--live); font-weight: 700; }
+.muted { color: var(--text-faint); }
+.wa-link { color: var(--live); text-decoration: none; }
+.wa-link:hover { text-decoration: underline; }
+.plan-request-item.status-approved,
+.plan-request-item.status-rejected { opacity: .72; }
+.subpanel-title {
+  font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--text-dim); margin: 22px 0 10px;
+}
+.payout-item {
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-card);
+  padding: 14px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 10px;
+}
+.payout-item.is-late { border-color: rgba(255, 93, 93, .55); background: rgba(255, 93, 93, .05); }
+.payout-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+.payout-head .buyer { font-weight: 700; }
+.payout-head .meta { font-size: 12px; color: var(--text-dim); margin-top: 2px; word-break: break-word; }
+.payout-amount { font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 700; color: var(--live); text-align: right; }
+.payout-amount span { display: block; font-size: 11px; font-weight: 500; color: var(--text-dim); }
+.payout-due { font-size: 12.5px; color: #ffc13d; }
+.payout-due.late { color: var(--danger); font-weight: 700; }
+.payout-accounts { display: flex; flex-direction: column; gap: 4px; }
+.payout-account { font-size: 12.5px; background: var(--bg-elevated); border-radius: 8px; padding: 6px 10px; word-break: break-all; }
+.payout-account code { font-family: 'JetBrains Mono', monospace; color: var(--text); }
+.payout-detail summary { cursor: pointer; font-size: 12px; color: var(--text-dim); }
+.payout-detail ul { margin: 8px 0 0; padding-left: 18px; font-size: 12px; color: var(--text-dim); display: flex; flex-direction: column; gap: 4px; }
+.payout-item .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.payout-history-row {
+  display: grid; grid-template-columns: 110px 1fr auto; gap: 4px 12px; font-size: 12.5px;
+  padding: 8px 0; border-bottom: 1px solid var(--line); align-items: baseline;
+}
+.payout-history-row .muted { grid-column: 1 / -1; font-size: 11.5px; }
+@media (max-width: 500px) {
+  .payout-history-row { grid-template-columns: 1fr auto; }
+  .payout-history-row > span:first-child { grid-column: 1 / -1; color: var(--text-faint); }
+  .payout-amount { text-align: left; }
+}
+.add-currency-row { display: grid; grid-template-columns: 1fr 140px auto; gap: 10px; align-items: end; margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--line); }
+.add-currency-row .field { margin-bottom: 0; }
+@media (max-width: 600px) { .add-currency-row { grid-template-columns: 1fr; } }
+.custom-tag { font-size: 9.5px; font-weight: 600; color: var(--live); text-transform: uppercase; margin-left: 4px; }
+.rate-row-input-wrap .rate-remove { margin-left: 6px; }

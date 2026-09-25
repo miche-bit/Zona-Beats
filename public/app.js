@@ -38,8 +38,9 @@
   const receiptPreview = document.getElementById('receipt-preview');
 
   let currentTrackId = null;
-  let currentSection = 'catalog'; // catalog | playlist | vip
+  let currentSection = 'catalog'; // catalog | playlist | vip | producers
   let tracksBySection = { catalog: [], playlist: [], vip: [] };
+  let discountPercent = 0;
   let paymentInfo = { contactPhone: '', accounts: [] };
   let exchangeRates = [];
   let selectedCurrency = 'CUP';
@@ -89,8 +90,11 @@
       const config = await res.json();
 
       const promoBanner = document.getElementById('promo-banner');
-      if (config.promoActive && config.promoText) {
-        document.getElementById('promo-banner-text').textContent = config.promoText;
+      const pct = Number(config.discountPercent) || 0;
+      if (config.promoActive && (config.promoText || pct > 0)) {
+        const texto = config.promoText || 'Descuento en todo el catálogo';
+        // El % sale del mismo campo que baja los precios, así nunca hay dos números distintos.
+        document.getElementById('promo-banner-text').textContent = pct > 0 ? '−' + pct + '% · ' + texto : texto;
         promoBanner.style.display = 'flex';
       } else {
         promoBanner.style.display = 'none';
@@ -207,6 +211,10 @@
     paymentInfo = await res.json();
   }
 
+  const searchBarWrap = document.querySelector('.search-bar-wrap');
+  const producersGrid = document.getElementById('producers-grid');
+  const producerDetail = document.getElementById('producer-detail');
+
   document.querySelectorAll('.section-tab').forEach((tab) => {
     tab.addEventListener('click', () => {
       const section = tab.dataset.section;
@@ -215,25 +223,125 @@
 
       document.querySelectorAll('.section-tab').forEach(t => t.classList.toggle('active', t === tab));
 
-      const titles = { catalog: 'Catálogo', playlist: 'Playlist', vip: 'Beats VIP' };
+      const titles = { catalog: 'Catálogo', playlist: 'Playlist', vip: 'Beats VIP', producers: 'Productores' };
       sectionTitle.textContent = titles[section];
 
-      catalogLayout.classList.toggle('no-sidebar', section === 'playlist');
-      paymentMethodsRail.style.display = section === 'playlist' ? 'none' : 'block';
+      const isProducers = section === 'producers';
+      catalogLayout.classList.toggle('no-sidebar', section === 'playlist' || isProducers);
+      paymentMethodsRail.style.display = (section === 'playlist' || isProducers) ? 'none' : 'block';
+      trackGrid.style.display = isProducers ? 'none' : '';
+      searchBarWrap.style.display = isProducers ? 'none' : '';
+      producersGrid.style.display = isProducers ? 'grid' : 'none';
+      producerDetail.style.display = 'none';
+      trackCount.textContent = '';
 
       searchInput.placeholder = section === 'playlist'
         ? 'Buscar por nombre o género…'
         : 'Buscar por nombre, género o precio…';
 
+      if (isProducers) {
+        loadProducersList();
+        return;
+      }
       renderCurrentSection();
       if (!tracksBySection[section].length) loadTracksForSection(section);
     });
   });
 
+  function getFavProducers() {
+    try { return JSON.parse(localStorage.getItem('zonabeats_fav_producers') || '[]'); } catch { return []; }
+  }
+  function toggleFavProducer(id) {
+    const favs = getFavProducers();
+    const i = favs.indexOf(id);
+    if (i === -1) favs.push(id); else favs.splice(i, 1);
+    localStorage.setItem('zonabeats_fav_producers', JSON.stringify(favs));
+    return favs.includes(id);
+  }
+
+  async function loadProducersList() {
+    producersGrid.innerHTML = '<div class="empty-hint">Cargando…</div>';
+    const res = await fetch('/api/producers');
+    const { producers } = await res.json();
+    const favs = getFavProducers();
+    const ordenados = [...producers].sort((a, b) => favs.includes(b.id) - favs.includes(a.id));
+
+    if (!ordenados.length) {
+      producersGrid.innerHTML = '<div class="empty-hint">Todavía no hay productores en la plataforma.</div>';
+      return;
+    }
+
+    producersGrid.innerHTML = ordenados.map(p => `
+      <div class="producer-card" data-id="${p.id}">
+        <button type="button" class="fav-btn ${favs.includes(p.id) ? 'active' : ''}" data-fav="${p.id}" aria-label="Favorito">
+          <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+        </button>
+        ${p.avatar ? `<img class="producer-avatar" src="/api/producer/avatar/${p.id}" alt="">` : `<div class="producer-avatar producer-avatar-fallback">${escapeHtml((p.name||'?').charAt(0).toUpperCase())}</div>`}
+        <div class="producer-card-name">${escapeHtml(p.name)}</div>
+        <div class="producer-card-bio">${escapeHtml(p.bio || '')}</div>
+        <div class="producer-card-count">${p.beats} beat${p.beats === 1 ? '' : 's'}</div>
+      </div>
+    `).join('');
+
+    producersGrid.querySelectorAll('.fav-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = Number(btn.dataset.fav);
+        btn.classList.toggle('active', toggleFavProducer(id));
+      });
+    });
+    producersGrid.querySelectorAll('.producer-card').forEach(card => {
+      card.addEventListener('click', () => openProducerDetail(Number(card.dataset.id)));
+    });
+  }
+
+  async function openProducerDetail(id) {
+    producersGrid.style.display = 'none';
+    producerDetail.style.display = 'block';
+    producerDetail.innerHTML = '<div class="empty-hint">Cargando…</div>';
+    const res = await fetch(`/api/producers/${id}/tracks`);
+    if (!res.ok) { producerDetail.innerHTML = '<div class="empty-hint">No se pudo cargar este productor.</div>'; return; }
+    const { producer, tracks, discountPercent: dp } = await res.json();
+    discountPercent = dp || 0;
+
+    const socialHtml = (producer.socialLinks || []).map(l => {
+      const platform = detectPlatform(l.url);
+      const icon = SOCIAL_ICONS[platform] || SOCIAL_ICONS.generic;
+      return `<a href="${escapeHtml(l.url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(l.label || platform)}">${icon}</a>`;
+    }).join('');
+
+    producerDetail.innerHTML = `
+      <button type="button" class="back-to-producers">&larr; Todos los productores</button>
+      <div class="producer-detail-head">
+        ${producer.avatar ? `<img class="producer-avatar-lg" src="/api/producer/avatar/${producer.id}" alt="">` : `<div class="producer-avatar-lg producer-avatar-fallback">${escapeHtml((producer.name||'?').charAt(0).toUpperCase())}</div>`}
+        <div>
+          <h2>${escapeHtml(producer.name)}</h2>
+          <p>${escapeHtml(producer.bio || '')}</p>
+          ${socialHtml ? `<div class="hero-social">${socialHtml}</div>` : ''}
+        </div>
+      </div>
+      <div class="track-grid" id="producer-track-grid"></div>
+    `;
+
+    producerDetail.querySelector('.back-to-producers').addEventListener('click', () => {
+      producerDetail.style.display = 'none';
+      producersGrid.style.display = 'grid';
+    });
+
+    const grid = document.getElementById('producer-track-grid');
+    const savedSection = currentSection;
+    currentSection = 'catalog';
+    renderTracks(tracks, tracks.length, grid);
+    currentSection = savedSection;
+
+    if (!tracks.length) grid.innerHTML = '<div class="empty-hint">Este productor todavía no tiene beats en venta.</div>';
+  }
+
   async function loadTracksForSection(section) {
     const res = await fetch(`/api/tracks?type=${section}`);
-    const { tracks } = await res.json();
-    tracksBySection[section] = tracks;
+    const data = await res.json();
+    tracksBySection[section] = data.tracks;
+    if (section === 'catalog' && typeof data.discountPercent === 'number') discountPercent = data.discountPercent;
     renderCurrentSection();
   }
 
@@ -260,8 +368,9 @@
     renderTracks(filtered, allTracks.length);
   }
 
-  function renderTracks(tracks, totalBeforeFilter) {
-    trackGrid.innerHTML = '';
+  function renderTracks(tracks, totalBeforeFilter, targetGrid) {
+    const grid = targetGrid || trackGrid;
+    grid.innerHTML = '';
     trackCount.textContent = tracks.length ? `${tracks.length} PISTA${tracks.length === 1 ? '' : 'S'}` : '';
 
     const hasSearch = Boolean(searchQuery);
@@ -293,6 +402,10 @@
         ? `<div class="track-genre-badge">${escapeHtml(track.genre)}</div>`
         : '';
 
+      const producerBadge = track.producer_name
+        ? `<div class="track-producer-badge${track.genre ? ' below-genre' : ''}">prod. ${escapeHtml(track.producer_name)}</div>`
+        : '';
+
       const exclusiveBadge = track.is_exclusive
         ? `<div class="track-exclusive-badge">★ Exclusiva</div>`
         : '';
@@ -302,9 +415,12 @@
         const priceText = formatPriceInCurrency(track.price_cup, selectedCurrency);
         const multipleLicenses = (track.licenses || []).length > 1;
         const label = multipleLicenses ? `Desde ${priceText}` : priceText;
+        const tieneDescuento = discountPercent > 0 && track.original_cup && track.original_cup > track.price_cup;
+        const originalText = tieneDescuento ? formatPriceInCurrency(track.original_cup, selectedCurrency) : '';
         priceChip = `
           <div class="track-price-chip">
             <svg viewBox="0 0 24 24"><path d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12L8.1 13h7.45c.75 0 1.41-.41 1.75-1.03L20.9 4H4.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z"/></svg>
+            ${tieneDescuento ? `<span class="price-strike">${escapeHtml(originalText)}</span>` : ''}
             <span title="${escapeHtml(label)}">${escapeHtml(label)}</span>
           </div>
         `;
@@ -339,6 +455,7 @@
           ${coverHtml}
           ${exclusiveBadge}
           ${genreBadge}
+          ${producerBadge}
           <div class="play-overlay">
             <div class="play-btn-circle">
               <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
@@ -361,7 +478,7 @@
         });
       }
 
-      trackGrid.appendChild(card);
+      grid.appendChild(card);
     });
   }
 
@@ -422,7 +539,7 @@
 
       currentTrackId = track.id;
       audioEl.src = `/api/stream/${track.id}?t=${token}`;
-      audioEl.play();
+      audioEl.play().catch(() => {});
 
       playerTitle.textContent = track.title;
       playerCover.src = track.cover_filename ? `/api/cover/${track.id}` : '';
@@ -497,18 +614,25 @@
     audioEl.currentTime = pct * audioEl.duration;
   });
 
+  // Si el token venció se pide otro UNA vez; si el archivo está dañado no se reintenta en bucle.
+  let ultimoReintento = { id: null, at: 0 };
   audioEl.addEventListener('error', async () => {
     if (currentTrackId == null) return;
     const list = tracksBySection[currentSection] || [];
     const track = list.find(t => t.id === currentTrackId);
     if (!track) return;
+    if (ultimoReintento.id === track.id && Date.now() - ultimoReintento.at < 60000) {
+      markPlayingCard(null);
+      return;
+    }
+    ultimoReintento = { id: track.id, at: Date.now() };
     const wasTime = audioEl.currentTime;
     const res = await fetch(`/api/tracks/${track.id}/token`, { method: 'POST' });
     if (!res.ok) return;
     const { token } = await res.json();
     audioEl.src = `/api/stream/${track.id}?t=${token}`;
     audioEl.currentTime = wasTime;
-    audioEl.play();
+    audioEl.play().catch(() => {});
   });
 
   const orderForm = document.getElementById('order-form');
@@ -524,19 +648,19 @@
   const LICENSE_INFO = {
     basic: {
       label: 'Básica',
-      description: 'MP3, uso no exclusivo. Ideal para distribución digital independiente.',
+      description: 'Nivel 1. Puedes crear y distribuir tu canción, pero NO monetizarla en ningún medio. No exclusiva: el beat sigue a la venta.',
     },
     premium: {
       label: 'Premium',
-      description: 'MP3 + WAV, uso no exclusivo con mayor alcance de distribución.',
+      description: 'Nivel 2. Mismos derechos que la Básica con mejor calidad de archivo. Tampoco permite monetizar. No exclusiva.',
     },
     unlimited: {
       label: 'Ilimitada',
-      description: 'MP3 + WAV + STEMS, sin límite de reproducciones ni presentaciones.',
+      description: 'Nivel 3. Permite distribuir y MONETIZAR sin límite. Incluye WAV y STEMS si el productor los subió. Compra única: el beat se retira del catálogo. No es exclusiva ni va a Beats VIP.',
     },
     exclusive: {
       label: 'Exclusiva',
-      description: 'Compra única: el beat se retira del catálogo y queda completamente bajo tu nombre.',
+      description: 'Nivel 4. Todos los derechos comerciales y exclusividad. Incluye WAV y STEMS si el productor los subió. El beat se retira para siempre y aparece en Beats VIP a tu nombre.',
     },
   };
   const LICENSE_ORDER = ['basic', 'premium', 'unlimited', 'exclusive'];
@@ -733,6 +857,11 @@
         throw new Error(err.error || 'No se pudo enviar el comprobante');
       }
 
+      const orderData = await res.json().catch(() => ({}));
+      if (orderData.orderToken) {
+        guardarCompra({ token: orderData.orderToken, title: activeModalTrack.title, license: licenseLabel, createdAt: new Date().toISOString() });
+      }
+
       orderForm.style.display = 'none';
       modalSuccess.style.display = 'block';
 
@@ -765,8 +894,137 @@
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     if (termsModalOverlay.classList.contains('active')) closeTermsModal();
+    else if (purchasesOverlay.classList.contains('active')) purchasesOverlay.classList.remove('active');
     else closeBuyModal();
   });
+
+  // ---------- Mis compras: el comprador ve el estado y descarga solo al aprobarse ----------
+  const COMPRAS_KEY = 'zonabeats_compras';
+  const purchasesBtn = document.getElementById('my-purchases-btn');
+  const purchasesBadge = document.getElementById('my-purchases-badge');
+  const purchasesOverlay = document.getElementById('purchases-overlay');
+  const purchasesList = document.getElementById('purchases-list');
+  let comprasEstado = {};
+  let comprasTimer = null;
+
+  function leerCompras() {
+    try { return JSON.parse(localStorage.getItem(COMPRAS_KEY) || '[]').filter(c => c && /^[a-f0-9]{48}$/.test(c.token)); }
+    catch { return []; }
+  }
+  function escribirCompras(lista) {
+    try { localStorage.setItem(COMPRAS_KEY, JSON.stringify(lista.slice(0, 50))); } catch { /* modo privado: solo en memoria */ }
+    comprasMemoria = lista;
+  }
+  let comprasMemoria = leerCompras();
+  function compras() { const l = leerCompras(); return l.length ? l : comprasMemoria; }
+
+  function guardarCompra(c) {
+    const lista = compras().filter(x => x.token !== c.token);
+    lista.unshift({ downloaded: false, ...c });
+    escribirCompras(lista);
+    actualizarBotonCompras();
+    revisarCompras();
+  }
+
+  function actualizarBotonCompras() {
+    const lista = compras();
+    purchasesBtn.style.display = lista.length ? 'inline-flex' : 'none';
+    const listas = lista.filter(c => comprasEstado[c.token] && comprasEstado[c.token].status === 'approved' && !c.downloaded).length;
+    purchasesBadge.textContent = listas ? String(listas) : '';
+  }
+
+  function descargarAhora(url) {
+    const a = document.createElement('a');
+    a.href = url; a.download = ''; a.style.display = 'none';
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+
+  async function revisarCompras() {
+    const lista = compras();
+    if (!lista.length) return;
+    let hayPendientes = false;
+    let cambio = false;
+    for (const c of lista) {
+      try {
+        const r = await fetch('/api/purchase/' + c.token, { cache: 'no-store' });
+        if (r.status === 404) { comprasEstado[c.token] = { status: 'missing' }; continue; }
+        if (!r.ok) { hayPendientes = true; continue; }
+        const d = await r.json();
+        const antes = comprasEstado[c.token] && comprasEstado[c.token].status;
+        comprasEstado[c.token] = d;
+        if (d.status === 'pending') hayPendientes = true;
+        if (d.status === 'approved' && !c.downloaded && d.downloadUrl) {
+          c.downloaded = true; cambio = true;
+          descargarAhora(d.downloadUrl);
+          if (antes === 'pending') abrirCompras();
+        }
+      } catch { hayPendientes = true; }
+    }
+    if (cambio) escribirCompras(lista);
+    actualizarBotonCompras();
+    if (purchasesOverlay.classList.contains('active')) pintarCompras();
+    clearTimeout(comprasTimer);
+    if (hayPendientes) comprasTimer = setTimeout(revisarCompras, 30000);
+  }
+
+  function pintarCompras() {
+    const lista = compras();
+    if (!lista.length) {
+      purchasesList.innerHTML = '<p class="purchases-hint">Todavía no has comprado nada desde este dispositivo.</p>';
+      return;
+    }
+    purchasesList.innerHTML = lista.map((c) => {
+      const d = comprasEstado[c.token] || {};
+      const fecha = new Date(c.createdAt || d.createdAt || Date.now()).toLocaleDateString('es', { day: '2-digit', month: 'short', year: 'numeric' });
+      let estado = '<span class="purchase-status pending">Comprobando…</span>';
+      let acciones = '';
+      if (d.status === 'pending') estado = '<span class="purchase-status pending">Esperando que el vendedor apruebe tu pago</span>';
+      if (d.status === 'missing') estado = '<span class="purchase-status missing">No encontramos esta compra. Escríbele al vendedor por WhatsApp.</span>';
+      if (d.status === 'approved') {
+        estado = '<span class="purchase-status approved">Aprobada · Licencia ' + escapeHtml(d.certificateId || '') + '</span>';
+        acciones = '<div class="purchase-actions">' +
+          (d.downloadUrl ? '<a class="purchase-dl" href="' + d.downloadUrl + '" download>' + (d.fileKind === 'zip' ? 'Descargar WAV + STEMS (.zip)' : 'Descargar beat') + '</a>'
+                         : '<span class="purchase-meta">El vendedor te enviará el archivo por WhatsApp.</span>') +
+          (d.pdfUrl ? '<a class="purchase-pdf" href="' + d.pdfUrl + '" target="_blank" rel="noopener">Licencia en PDF</a>' : '') +
+          '</div>';
+      }
+      return '<div class="purchase-card' + (d.status === 'approved' ? ' is-approved' : '') + '">' +
+        '<div class="purchase-title">' + escapeHtml(c.title || d.trackTitle || 'Beat') + '</div>' +
+        '<div class="purchase-meta">Licencia ' + escapeHtml(c.license || d.licenseLabel || '') + ' · ' + fecha + '</div>' +
+        estado + acciones +
+        '<button type="button" class="purchase-forget" data-token="' + c.token + '">Quitar de este dispositivo</button>' +
+        '</div>';
+    }).join('');
+    purchasesList.querySelectorAll('.purchase-forget').forEach((b) => b.addEventListener('click', () => {
+      if (!confirm('¿Quitar esta compra de este dispositivo? Si no guardaste el link que te mandó el vendedor, no podrás volver a verla aquí.')) return;
+      escribirCompras(compras().filter(x => x.token !== b.dataset.token));
+      pintarCompras(); actualizarBotonCompras();
+    }));
+  }
+
+  function abrirCompras() {
+    modalOverlay.classList.remove('active');
+    pintarCompras();
+    purchasesOverlay.classList.add('active');
+  }
+  purchasesBtn.addEventListener('click', () => { abrirCompras(); revisarCompras(); });
+  document.getElementById('modal-see-purchases-btn').addEventListener('click', abrirCompras);
+  document.getElementById('purchases-close-btn').addEventListener('click', () => purchasesOverlay.classList.remove('active'));
+  purchasesOverlay.addEventListener('click', (e) => { if (e.target === purchasesOverlay) purchasesOverlay.classList.remove('active'); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) revisarCompras(); });
+
+  // Link privado que manda el vendedor por WhatsApp: /?compra=TOKEN
+  (function tomarCompraDeLaUrl() {
+    const params = new URLSearchParams(location.search);
+    const t = (params.get('compra') || '').toLowerCase();
+    if (/^[a-f0-9]{48}$/.test(t)) {
+      if (!compras().some(c => c.token === t)) {
+        const lista = compras(); lista.unshift({ token: t, createdAt: new Date().toISOString(), downloaded: false }); escribirCompras(lista);
+      }
+      history.replaceState(null, '', location.pathname);
+      setTimeout(abrirCompras, 300);
+    }
+  })();
 
   async function init() {
     await loadExchangeRates();
@@ -774,6 +1032,8 @@
     loadSiteConfig();
     loadPaymentInfo();
     loadSocialLinks();
+    actualizarBotonCompras();
+    revisarCompras();
     await loadTracksForSection('catalog');
   }
 

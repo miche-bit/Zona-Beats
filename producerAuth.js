@@ -26,8 +26,10 @@ function getProducerFromSession(token) {
   if (!token) return null;
   const row = db.prepare('SELECT * FROM producer_sessions WHERE token = ?').get(token);
   if (!row || row.expires_at < Date.now()) return null;
-  const producer = db.prepare('SELECT id, name, email, active FROM producers WHERE id = ?').get(row.producer_id);
-  if (!producer || !producer.active) return null;
+  const producer = db.prepare('SELECT id, name, email, active, disabled_reason FROM producers WHERE id = ?').get(row.producer_id);
+  if (!producer) return null;
+  // Una cuenta desactivada por plan vencido puede entrar solo para renovar; la desactivada a mano no.
+  if (!producer.active && producer.disabled_reason !== 'plan_vencido') return null;
   return producer;
 }
 

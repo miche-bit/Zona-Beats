@@ -18,9 +18,13 @@
   const artistCreditInput = document.getElementById('artist-credit-input');
   const playlistOnlyFields = document.getElementById('playlist-only-fields');
   const catalogOnlyFields = document.getElementById('catalog-only-fields');
-  const forSaleInput = document.getElementById('for-sale-input');
   const isExclusiveInput = document.getElementById('is-exclusive-input');
-  const priceInput = document.getElementById('price-input');
+  const priceBasicInput = document.getElementById('price-basic-input');
+  const pricePremiumInput = document.getElementById('price-premium-input');
+  const priceUnlimitedInput = document.getElementById('price-unlimited-input');
+  const priceExclusiveInput = document.getElementById('price-exclusive-input');
+  const licenseModeFields = document.getElementById('license-mode-fields');
+  const exclusiveModeFields = document.getElementById('exclusive-mode-fields');
   const audioInput = document.getElementById('audio-input');
   const coverInput = document.getElementById('cover-input');
   const audioDrop = document.getElementById('audio-drop');
@@ -95,6 +99,9 @@
     loadProducers();
     loadPendingTracks();
     loadCommission();
+    loadHistory();
+    loadPlanRequests();
+    loadPayouts();
   }
 
   function showLogin() {
@@ -154,15 +161,26 @@
     playlistOnlyFields.style.display = isPlaylist ? 'block' : 'none';
     catalogOnlyFields.style.display = isPlaylist ? 'none' : 'block';
     if (isPlaylist) {
-      forSaleInput.checked = false;
       isExclusiveInput.checked = false;
-      priceInput.value = '';
+      licenseModeFields.style.display = 'block';
+      exclusiveModeFields.style.display = 'none';
+      priceBasicInput.value = '';
+      pricePremiumInput.value = '';
+      priceUnlimitedInput.value = '';
+      priceExclusiveInput.value = '';
     }
   });
 
   isExclusiveInput.addEventListener('change', () => {
-    if (isExclusiveInput.checked) {
-      forSaleInput.checked = true;
+    const exclusive = isExclusiveInput.checked;
+    licenseModeFields.style.display = exclusive ? 'none' : 'block';
+    exclusiveModeFields.style.display = exclusive ? 'block' : 'none';
+    if (exclusive) {
+      priceBasicInput.value = '';
+      pricePremiumInput.value = '';
+      priceUnlimitedInput.value = '';
+    } else {
+      priceExclusiveInput.value = '';
     }
   });
 
@@ -179,10 +197,17 @@
       return;
     }
 
-    if (!isPlaylistInput.checked && (forSaleInput.checked || isExclusiveInput.checked)) {
-      const priceValue = parseFloat(priceInput.value);
-      if (!priceValue || priceValue <= 0) {
-        showToast('Ponle un precio en CUP a la pista para poder venderla.', true);
+    const isExclusiveMode = isExclusiveInput.checked;
+    const prices = isExclusiveMode
+      ? { basic: '', premium: '', unlimited: '', exclusive: priceExclusiveInput.value }
+      : { basic: priceBasicInput.value, premium: pricePremiumInput.value, unlimited: priceUnlimitedInput.value, exclusive: '' };
+
+    if (!isPlaylistInput.checked) {
+      const anyPrice = Object.values(prices).some(v => parseFloat(v) > 0);
+      if (!anyPrice) {
+        showToast(isExclusiveMode
+          ? 'Ponle el precio exclusivo a la pista.'
+          : 'Ponle precio a al menos una licencia (Básica, Premium o Ilimitada).', true);
         return;
       }
     }
@@ -193,9 +218,10 @@
     formData.append('description', descriptionInput.value);
     formData.append('isPlaylist', isPlaylistInput.checked ? '1' : '0');
     formData.append('artistCredit', artistCreditInput.value);
-    formData.append('forSale', forSaleInput.checked ? '1' : '0');
-    formData.append('isExclusive', isExclusiveInput.checked ? '1' : '0');
-    formData.append('priceCup', priceInput.value);
+    formData.append('priceBasic', prices.basic);
+    formData.append('pricePremium', prices.premium);
+    formData.append('priceUnlimited', prices.unlimited);
+    formData.append('priceExclusive', prices.exclusive);
     formData.append('audio', audioInput.files[0]);
     if (coverInput.files.length) formData.append('cover', coverInput.files[0]);
 
@@ -222,12 +248,12 @@
       if (xhr.status >= 200 && xhr.status < 300) {
         showToast('Pista publicada correctamente.');
         uploadForm.reset();
-        forSaleInput.checked = false;
         isExclusiveInput.checked = false;
         isPlaylistInput.checked = false;
         playlistOnlyFields.style.display = 'none';
         catalogOnlyFields.style.display = 'block';
-        priceInput.value = '';
+        licenseModeFields.style.display = 'block';
+        exclusiveModeFields.style.display = 'none';
         document.getElementById('audio-drop-label').textContent = 'MP3, WAV, M4A, OGG o FLAC · máx 150MB';
         document.getElementById('cover-drop-label').textContent = 'JPG, PNG o WEBP · máx 8MB';
         audioDrop.classList.remove('has-file');
@@ -291,7 +317,9 @@
       const metaExtra = track.artist_credit ? ` · ${escapeHtml(track.artist_credit)}` : '';
 
       let priceEditHtml = '';
-      if (currentAdminListSection === 'catalog') {
+      if (currentAdminListSection === 'catalog' && track.sold) {
+        priceEditHtml = `<div class="vip-sold-tag">${track.is_exclusive ? 'Vendida (Exclusiva) · en Beats VIP' : 'Vendida (Ilimitada) · fuera del catálogo'}</div>`;
+      } else if (currentAdminListSection === 'catalog') {
         const licMap = {};
         (track.licenses || []).forEach(l => { licMap[l.license_type] = l.price_cup; });
         priceEditHtml = `
@@ -361,7 +389,12 @@
 
   async function deleteTrack(id, title) {
     if (!confirm(`¿Eliminar "${title}"? Esta acción no se puede deshacer.`)) return;
-    const res = await fetch(`/api/admin/tracks/${id}`, { method: 'DELETE' });
+    let res = await fetch(`/api/admin/tracks/${id}`, { method: 'DELETE' });
+    if (res.status === 409) {
+      const err = await res.json().catch(() => ({}));
+      if (!confirm((err.error || 'Esta pista tiene ventas.') + '\n\n¿Eliminarla de todas formas?')) return;
+      res = await fetch(`/api/admin/tracks/${id}?force=1`, { method: 'DELETE' });
+    }
     if (res.ok) {
       showToast('Pista eliminada.');
       loadTracks();
@@ -401,19 +434,11 @@
     }
   });
 
-  const CURRENCY_OPTIONS = [
-    { code: 'CUP', label: 'CUP' },
-    { code: 'MLC', label: 'MLC' },
-    { code: 'USDT_BEP20', label: 'USDT (BEP20)' },
-    { code: 'USDT_TRC20', label: 'USDT (TRC20)' },
-    { code: 'USDT_POLYGON', label: 'USDT (Polygon)' },
-    { code: 'SALDO_MOVIL', label: 'Saldo Móvil' },
-  ];
 
   function addAccountRow(currency = 'CUP', bank = '', number = '') {
     const row = document.createElement('div');
     row.className = 'account-row with-currency';
-    const options = CURRENCY_OPTIONS.map(c => `<option value="${c.code}" ${c.code === currency ? 'selected' : ''}>${c.label}</option>`).join('');
+    const options = currencyOptionsHtml(currency);
     row.innerHTML = `
       <select class="account-currency">${options}</select>
       <input type="text" class="account-bank" placeholder="Banco / plataforma" value="${escapeHtml(bank)}">
@@ -489,9 +514,16 @@
       const item = document.createElement('div');
       item.className = 'order-item';
 
+      const verifyUrl = order.certificate_id ? location.origin + '/verify/' + order.certificate_id : '';
       const message = encodeURIComponent(
-        `Hola ${order.buyer_name} 👋 Recibí tu comprobante por "${order.track_title}"` +
-        `${order.price_label ? ` (${order.price_label})` : ''}. Ya lo estoy revisando, en breve te envío tu pista. ¡Gracias por tu compra!`
+        order.certificate_id
+          ? 'Hola ' + order.buyer_name + ' \u{1F44B} Tu compra de "' + order.track_title + '"'
+            + (order.price_label ? ' (' + order.price_label + ')' : '') + ' quedo aprobada.\n\n'
+            + 'Tu licencia: ' + order.certificate_id + '\n'
+            + 'Descarga tu certificado y compruebalo aqui: ' + verifyUrl + '\n\n'
+            + 'Guarda ese enlace, es tu comprobante oficial. Gracias por tu compra!'
+          : 'Hola ' + order.buyer_name + ' \u{1F44B} Recibi tu comprobante por "' + order.track_title + '"'
+            + (order.price_label ? ' (' + order.price_label + ')' : '') + '. Ya lo estoy revisando, en breve te envio tu pista. Gracias por tu compra!'
       );
       const phoneDigits = (order.buyer_phone || '').replace(/[^0-9]/g, '');
       const whatsappHref = phoneDigits ? `https://wa.me/${phoneDigits}?text=${message}` : null;
@@ -502,9 +534,10 @@
           <div class="buyer">${escapeHtml(order.buyer_name)}</div>
           <div class="track">${escapeHtml(order.track_title)}${order.price_label ? ` · ${escapeHtml(order.price_label)}` : ''}</div>
           <div class="meta">${escapeHtml(order.buyer_phone)} · ${formatOrderDate(order.created_at)}${order.status === 'approved' ? ' · <span class=\"order-approved-tag\">Aprobado</span>' : ''}</div>
+          ${order.certificate_id ? `<div class="cert-line">Licencia <strong>${escapeHtml(order.certificate_id)}</strong> · <a href="/api/license/${encodeURIComponent(order.certificate_id)}/pdf" target="_blank" rel="noopener">ver PDF</a></div>` : ''}
         </div>
         <div class="actions">
-          ${whatsappHref ? `<a class="btn-whatsapp-order" href="${whatsappHref}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
+          ${whatsappHref ? `<a class="btn-whatsapp-order" href="${whatsappHref}" target="_blank" rel="noopener">${order.certificate_id ? 'Enviar licencia' : 'WhatsApp'}</a>` : ''}
           ${order.status !== 'approved' ? `<button class="btn-approve-order" type="button">Aprobar</button>` : ''}
           <button class="btn-delete" type="button">Eliminar</button>
         </div>
@@ -520,7 +553,7 @@
         approveBtn.addEventListener('click', () => approveOrder(order.id));
       }
 
-      item.querySelector('.btn-delete').addEventListener('click', () => deleteOrder(order.id, order.buyer_name));
+      item.querySelector('.btn-delete').addEventListener('click', () => deleteOrder(order.id, order.buyer_name, order.certificate_id));
 
       ordersList.appendChild(item);
     });
@@ -530,10 +563,18 @@
     const res = await fetch(`/api/admin/orders/${id}/approve`, { method: 'POST' });
     if (res.ok) {
       const result = await res.json();
-      showToast(result.trackMarkedSold ? 'Aprobado — la pista exclusiva pasó a Beats VIP.' : 'Pedido aprobado.');
+      let msg = 'Pedido aprobado.';
+      if (result.wentToVip) {
+        msg = 'Aprobado — la pista exclusiva se retiró del catálogo y pasó a Beats VIP.';
+      } else if (result.trackMarkedSold) {
+        msg = 'Aprobado — licencia Ilimitada: la pista se retiró del catálogo (no va a Beats VIP).';
+      }
+      showToast(msg + ' El comprador ya puede descargar desde «Mis compras».');
+      if (result.warning) alert(result.warning);
       loadOrders();
       loadTracks();
       loadProducers();
+      loadHistory();
     } else {
       const err = await res.json().catch(() => ({}));
       showToast(err.error || 'No se pudo aprobar el pedido.', true);
@@ -541,11 +582,17 @@
     }
   }
 
-  async function deleteOrder(id, buyerName) {
-    if (!confirm(`¿Eliminar el comprobante de "${buyerName}"? Ya no vas a poder verlo después.`)) return;
-    const res = await fetch(`/api/admin/orders/${id}`, { method: 'DELETE' });
+  async function deleteOrder(id, buyerName, certificateId) {
+    const aviso = certificateId
+      ? '¿Eliminar la foto del comprobante de "' + buyerName + '"?\n\nLa licencia ' + certificateId + ' se conserva: el comprador va a poder seguir verificándola y descargando su PDF. Solo se borra la imagen para liberar espacio.'
+      : '¿Eliminar el comprobante de "' + buyerName + '"? Este pedido no tiene licencia emitida, así que se borra por completo.';
+    if (!confirm(aviso)) return;
+    const res = await fetch('/api/admin/orders/' + id, { method: 'DELETE' });
     if (res.ok) {
-      showToast('Comprobante eliminado.');
+      const r = await res.json().catch(() => ({}));
+      showToast(r.keptLicense
+        ? 'Foto eliminada. La licencia ' + r.certificateId + ' sigue activa.'
+        : 'Comprobante eliminado.');
       loadOrders();
     } else {
       showToast('No se pudo eliminar el comprobante.', true);
@@ -730,22 +777,31 @@
 
   function renderExchangeRates(rates) {
     exchangeRatesList.innerHTML = '';
-    rates.forEach((rate) => {
-      const row = document.createElement('div');
-      row.className = 'rate-row';
-      const isCup = rate.code === 'CUP';
-      row.innerHTML = `
-        <div class="rate-row-label">${escapeHtml(rate.label)}</div>
-        <div class="rate-row-input-wrap">
-          ${isCup
-            ? `<span>Moneda base — siempre 1</span>`
-            : `<input type="text" class="rate-value" data-code="${rate.code}" data-label="${escapeHtml(rate.label)}" placeholder="0" value="${rate.cupPerUnit || ''}"><span>CUP por unidad</span>`
-          }
-        </div>
-      `;
-      exchangeRatesList.appendChild(row);
-    });
+    rates.forEach(appendRateRow);
   }
+
+  function appendRateRow(rate) {
+    const row = document.createElement('div');
+    row.className = 'rate-row';
+    const isCup = rate.code === 'CUP';
+    row.innerHTML = `
+      <div class="rate-row-label">${escapeHtml(rate.label)}${rate.custom ? ' <span class="custom-tag">agregado por ti</span>' : ''}</div>
+      <div class="rate-row-input-wrap">
+        ${isCup
+          ? `<span>Moneda base — siempre 1</span>`
+          : `<input type="text" class="rate-value" data-code="${escapeHtml(rate.code)}" data-label="${escapeHtml(rate.label)}" placeholder="0" value="${rate.cupPerUnit || ''}"><span>CUP por unidad</span>`
+        }
+        ${rate.custom ? '<button type="button" class="account-remove-btn rate-remove" aria-label="Quitar método">&times;</button>' : ''}
+      </div>
+    `;
+    const rm = row.querySelector('.rate-remove');
+    if (rm) rm.addEventListener('click', () => {
+      if (confirm('¿Quitar "' + rate.label + '"? Pulsa «Guardar tasas» después para confirmarlo. Las cuentas en esa moneda dejarán de mostrarse.')) row.remove();
+    });
+    exchangeRatesList.appendChild(row);
+  }
+
+  let configuredCurrencies = Object.entries(CURRENCY_LABELS).map(([code, label]) => ({ code, label }));
 
   async function loadExchangeRates() {
     const res = await fetch('/api/admin/exchange-rates');
@@ -757,8 +813,38 @@
       label,
       cupPerUnit: byCode[code] ? byCode[code].cupPerUnit : (code === 'CUP' ? 1 : 0),
     }));
+    // monedas / métodos que el admin agregó a mano
+    rates.forEach(r => { if (!CURRENCY_LABELS[r.code]) fullList.push({ ...r, custom: true }); });
+    configuredCurrencies = fullList.map(r => ({ code: r.code, label: r.label }));
     renderExchangeRates(fullList);
+    refreshAccountCurrencySelects();
   }
+
+  function refreshAccountCurrencySelects() {
+    accountsList.querySelectorAll('.account-currency').forEach(sel => {
+      const cur = sel.value;
+      sel.innerHTML = currencyOptionsHtml(cur);
+    });
+  }
+
+  function currencyOptionsHtml(selected) {
+    const list = configuredCurrencies.slice();
+    if (selected && !list.some(c => c.code === selected)) list.push({ code: selected, label: selected });
+    return list.map(c => `<option value="${escapeHtml(c.code)}" ${c.code === selected ? 'selected' : ''}>${escapeHtml(c.label)}</option>`).join('');
+  }
+
+  document.getElementById('add-currency-btn').addEventListener('click', () => {
+    const labelEl = document.getElementById('new-currency-label');
+    const rateEl = document.getElementById('new-currency-rate');
+    const label = labelEl.value.trim();
+    if (!label) { showToast('Escribe el nombre del método o moneda (ej: Zelle, USD efectivo, Bizum).', true); return; }
+    const code = label.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 30);
+    if (!code) { showToast('Nombre no válido.', true); return; }
+    if (exchangeRatesList.querySelector(`[data-code="${code}"]`) || code === 'CUP') { showToast('Ese método ya existe.', true); return; }
+    appendRateRow({ code, label, cupPerUnit: parseFloat(rateEl.value.replace(',', '.')) || 0, custom: true });
+    labelEl.value = ''; rateEl.value = '';
+    showToast('Agregado. Pulsa «Guardar tasas» para que se vea en la tienda.');
+  });
 
   exchangeRatesForm.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -779,6 +865,7 @@
 
     if (res.ok) {
       showToast('Tasas de cambio guardadas.');
+      loadExchangeRates();
     } else {
       showToast('No se pudieron guardar las tasas.', true);
     }
@@ -791,6 +878,7 @@
     promoActiveInput.checked = config.promoActive;
     promoTextInput.value = config.promoText || '';
     scheduleTextInput.value = config.scheduleText || '';
+    document.getElementById('discount-input').value = config.discountPercent || 0;
   }
 
   siteConfigForm.addEventListener('submit', async (e) => {
@@ -802,13 +890,16 @@
         promoActive: promoActiveInput.checked,
         promoText: promoTextInput.value.trim(),
         scheduleText: scheduleTextInput.value.trim(),
+        discountPercent: document.getElementById('discount-input').value.trim() || '0',
       }),
     });
 
     if (res.ok) {
-      showToast('Configuración guardada.');
+      showToast('Promoción guardada. Los precios del catálogo ya reflejan el descuento.');
+      loadTracks();
     } else {
-      showToast('No se pudo guardar la configuración.', true);
+      const err = await res.json().catch(() => ({}));
+      showToast(err.error || 'No se pudo guardar la configuración.', true);
     }
   });
 
@@ -874,51 +965,105 @@
     renderProducers(producers);
   }
 
+  const PLAN_INFO = {
+    free:   { label: 'Free',   com: 30, beats: '5 beats' },
+    pro:    { label: 'Pro',    com: 20, beats: '50 beats' },
+    studio: { label: 'Studio', com: 10, beats: 'ilimitados' },
+  };
+
   function renderProducers(producers) {
     producersList.innerHTML = '';
-    producersCount.textContent = producers.length || '';
+    const pendientes = producers.filter(p => !p.approved).length;
+    producersCount.textContent = pendientes ? pendientes + ' por aprobar' : (producers.length || '');
     producersCount.classList.toggle('show', producers.length > 0);
 
     if (!producers.length) {
-      producersList.innerHTML = '<div class="empty-hint">Todavía no has creado ningún productor.</div>';
+      producersList.innerHTML = '<div class="empty-hint">Todavía no hay productores registrados.</div>';
       return;
     }
 
     producers.forEach((p) => {
+      const plan = PLAN_INFO[p.plan] || PLAN_INFO.free;
+      const vencido = p.plan !== 'free' && p.plan_paid_until && new Date(p.plan_paid_until + 'T23:59:59') < new Date();
       const item = document.createElement('div');
-      item.className = 'producer-item';
-      item.innerHTML = `
-        <span class="status-dot ${p.active ? 'active' : 'inactive'}"></span>
-        <div class="info">
-          <div class="name">${escapeHtml(p.name)}</div>
-          <div class="email">${escapeHtml(p.email)}</div>
-          <div class="stats">${p.trackCount} beats · ${p.totalSalesCup} CUP vendidos · ${p.totalEarningsCup.toFixed(2)} CUP a pagarle</div>
-        </div>
-        <div class="actions">
-          <button type="button" class="btn-toggle-producer ${p.active ? 'is-active' : ''}">${p.active ? 'Desactivar' : 'Activar'}</button>
-          <button type="button" class="btn-delete">Eliminar</button>
-        </div>
-      `;
+      item.className = 'producer-item' + (p.approved ? '' : ' pending-approval');
+      item.innerHTML =
+        '<span class="status-dot ' + (p.active ? 'active' : 'inactive') + '"></span>' +
+        '<div class="info">' +
+          '<div class="name">' + escapeHtml(p.name) + (p.approved ? '' : ' <span class="tag-pending">por aprobar</span>') + '</div>' +
+          '<div class="email">' + escapeHtml(p.email) +
+            (p.contact_phone ? ' · <a class="wa-link" href="https://wa.me/' + String(p.contact_phone).replace(/[^0-9]/g, '') + '" target="_blank" rel="noopener">WhatsApp ' + escapeHtml(p.contact_phone) + '</a>' : ' · <span class="muted">sin teléfono</span>') +
+          '</div>' +
+          (p.disabled_reason === 'plan_vencido' ? '<div class="stats"><span class="tag-vencido">DESACTIVADO POR FALTA DE PAGO</span> — pasaron 15 días sin renovar. Puedes eliminarlo o esperar a que pague.</div>' : '') +
+          '<div class="stats">Plan <strong>' + plan.label + '</strong> · ' + plan.com + '% comisión · ' + plan.beats +
+            (p.plan_paid_until ? ' · paga hasta ' + escapeHtml(p.plan_paid_until) : '') +
+            (vencido ? ' <span class="tag-vencido">VENCIDO</span>' : '') + '</div>' +
+          '<div class="stats">' + p.trackCount + ' beats · ' + p.totalSalesCup + ' CUP vendidos · ' + Number(p.pendingPayoutCup || 0).toLocaleString('es', { maximumFractionDigits: 2 }) + ' CUP pendientes de pagarle</div>' +
+          '<div class="plan-edit">' +
+            '<select class="plan-select">' +
+              ['free','pro','studio'].map(k => '<option value="' + k + '"' + (p.plan === k ? ' selected' : '') + '>' + PLAN_INFO[k].label + '</option>').join('') +
+            '</select>' +
+            '<input type="date" class="plan-until" value="' + escapeHtml(p.plan_paid_until || '') + '">' +
+            '<button type="button" class="btn-save-plan">Guardar plan</button>' +
+          '</div>' +
+        '</div>' +
+        '<div class="actions">' +
+          (p.approved ? '' : '<button type="button" class="btn-approve-order btn-approve-prod">Aprobar</button>') +
+          '<button type="button" class="btn-toggle-exclusive ' + (p.exclusive_enabled ? 'is-on' : '') + '">' + (p.exclusive_enabled ? 'Quitar Exclusiva' : 'Habilitar Exclusiva') + '</button>' +
+          '<button type="button" class="btn-toggle-producer ' + (p.active ? 'is-active' : '') + '">' + (p.active ? 'Desactivar' : 'Activar') + '</button>' +
+          '<button type="button" class="btn-delete">Eliminar</button>' +
+        '</div>';
+
+      const apr = item.querySelector('.btn-approve-prod');
+      if (apr) apr.addEventListener('click', async () => {
+        const r = await fetch('/api/admin/producers/' + p.id + '/approve', { method: 'POST' });
+        showToast(r.ok ? 'Productor aprobado. Ya puede entrar y subir beats.' : 'No se pudo aprobar.', !r.ok);
+        loadProducers();
+      });
+
+      item.querySelector('.btn-save-plan').addEventListener('click', async () => {
+        const plan = item.querySelector('.plan-select').value;
+        const paidUntil = item.querySelector('.plan-until').value;
+        if (plan !== 'free' && !paidUntil) {
+          showToast('Ponle hasta qué fecha tiene pagado el plan.', true);
+          return;
+        }
+        const r = await fetch('/api/admin/producers/' + p.id + '/plan', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ plan, paidUntil }),
+        });
+        showToast(r.ok ? 'Plan actualizado.' : 'No se pudo guardar el plan.', !r.ok);
+        loadProducers();
+      });
+
+      item.querySelector('.btn-toggle-exclusive').addEventListener('click', async () => {
+        const r = await fetch('/api/admin/producers/' + p.id + '/toggle-exclusive', { method: 'POST' });
+        if (r.ok) { const d = await r.json(); showToast(d.exclusiveEnabled ? 'Exclusiva habilitada.' : 'Exclusiva quitada.'); loadProducers(); }
+        else showToast('No se pudo cambiar.', true);
+      });
+
       item.querySelector('.btn-toggle-producer').addEventListener('click', async () => {
-        const res = await fetch(`/api/admin/producers/${p.id}/toggle`, { method: 'POST' });
-        if (res.ok) {
-          showToast(p.active ? 'Productor desactivado.' : 'Productor activado.');
-          loadProducers();
-        } else {
-          showToast('No se pudo cambiar el estado.', true);
-        }
+        const r = await fetch('/api/admin/producers/' + p.id + '/toggle', { method: 'POST' });
+        if (r.ok) { showToast(p.active ? 'Productor desactivado.' : 'Productor activado.'); loadProducers(); }
+        else showToast('No se pudo cambiar el estado.', true);
       });
+
       item.querySelector('.btn-delete').addEventListener('click', async () => {
-        if (!confirm(`¿Eliminar a ${p.name}? Solo se puede si no tiene beats subidos.`)) return;
-        const res = await fetch(`/api/admin/producers/${p.id}`, { method: 'DELETE' });
-        if (res.ok) {
-          showToast('Productor eliminado.');
-          loadProducers();
+        const deuda = Number(p.pendingPayoutCup || 0);
+        if (!confirm('¿Eliminar a ' + p.name + '?\n\nSe borran TODOS sus beats y archivos de la app. Las ventas ya aprobadas y sus licencias se conservan. Esto no se puede deshacer.' +
+          (deuda > 0 ? '\n\nATENCIÓN: todavía le debes ' + deuda.toLocaleString('es') + ' CUP por ventas. Si lo eliminas, esa deuda desaparece del panel «Pagos a productores».' : ''))) return;
+        const r = await fetch('/api/admin/producers/' + p.id, { method: 'DELETE' });
+        if (r.ok) {
+          const d = await r.json();
+          showToast('Productor eliminado (' + d.tracksEliminados + ' beats borrados, ' + d.ventasConservadas + ' ventas conservadas).' +
+            (d.deudaPendienteCup > 0 ? ' Ojo: le quedaban ' + d.deudaPendienteCup + ' CUP sin pagar.' : ''));
+          loadProducers(); loadTracks(); loadPayouts(); loadPlanRequests();
         } else {
-          const err = await res.json().catch(() => ({}));
-          showToast(err.error || 'No se pudo eliminar.', true);
+          const e = await r.json().catch(() => ({}));
+          showToast(e.error || 'No se pudo eliminar.', true);
         }
       });
+
       producersList.appendChild(item);
     });
   }
@@ -1010,29 +1155,228 @@
     });
   }
 
-  const commissionForm = document.getElementById('commission-form');
-  const commissionInput = document.getElementById('commission-input');
+  const platformForm = document.getElementById('platform-config-form');
+  const adminPhoneInput = document.getElementById('admin-phone-input');
+  const planProPriceInput = document.getElementById('plan-pro-price-input');
+  const planStudioPriceInput = document.getElementById('plan-studio-price-input');
 
   async function loadCommission() {
-    const res = await fetch('/api/admin/commission');
+    const res = await fetch('/api/admin/platform-config');
     if (!res.ok) return;
-    const { commissionPercent } = await res.json();
-    commissionInput.value = commissionPercent;
+    const d = await res.json();
+    adminPhoneInput.value = d.adminPhone || '';
+    planProPriceInput.value = d.planPriceProCup || '';
+    planStudioPriceInput.value = d.planPriceStudioCup || '';
   }
 
-  commissionForm.addEventListener('submit', async (e) => {
+  platformForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const res = await fetch('/api/admin/commission', {
+    const res = await fetch('/api/admin/platform-config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ commissionPercent: commissionInput.value }),
+      body: JSON.stringify({
+        adminPhone: adminPhoneInput.value,
+        planPriceProCup: planProPriceInput.value,
+        planPriceStudioCup: planStudioPriceInput.value,
+      }),
     });
-    if (res.ok) {
-      showToast('Comisión guardada.');
-    } else {
-      showToast('No se pudo guardar la comisión.', true);
-    }
+    if (res.ok) showToast('Precios de los planes guardados.');
+    else { const e2 = await res.json().catch(() => ({})); showToast(e2.error || 'No se pudo guardar.', true); }
   });
+
+  const historyList = document.getElementById('history-list');
+  const historyCount = document.getElementById('history-count');
+
+  async function loadHistory() {
+    const res = await fetch('/api/admin/orders-history');
+    if (!res.ok) return;
+    const { orders } = await res.json();
+    historyCount.textContent = orders.length || '';
+    historyCount.classList.toggle('show', orders.length > 0);
+    historyList.innerHTML = '';
+    if (!orders.length) {
+      historyList.innerHTML = '<div class="empty-hint">Todavía no hay compras aprobadas.</div>';
+      return;
+    }
+    orders.forEach((o) => {
+      const item = document.createElement('div');
+      item.className = 'order-item';
+      const vendedor = o.producer_name ? ('Productor: ' + escapeHtml(o.producer_name)) : 'Tuyo';
+      const wa = (o.buyer_phone || '').replace(/[^0-9]/g, '');
+      const linkCompra = o.buyer_token ? location.origin + '/?compra=' + o.buyer_token : '';
+      const waText = encodeURIComponent('Hola ' + o.buyer_name + ' \u{1F44B} Tu compra de "' + o.track_title + '" está aprobada.\n\n' +
+        (linkCompra ? 'Descarga tu beat y tu licencia aquí (este link es solo tuyo, no lo compartas):\n' + linkCompra + '\n\n' : '') +
+        'Número de licencia: ' + (o.certificate_id || '') + '\nCualquiera puede verificarla en: ' + location.origin + '/verify/' + (o.certificate_id || '') + '\n\n¡Gracias por tu compra!');
+      item.innerHTML =
+        (o.receipt_filename
+          ? '<img class="receipt-thumb" src="/api/admin/orders/' + o.id + '/receipt" alt="">'
+          : '<div class="receipt-thumb receipt-gone">sin foto</div>') +
+        '<div class="info">' +
+          '<div class="buyer">' + escapeHtml(o.buyer_name) + '</div>' +
+          '<div class="track">' + escapeHtml(o.track_title) + ' · ' + escapeHtml(o.price_label || '') + '</div>' +
+          '<div class="meta">' + escapeHtml(o.buyer_phone) + ' · ' + formatOrderDate(o.created_at) + ' · ' + vendedor + '</div>' +
+          (o.certificate_id ? '<div class="cert-line">Licencia <strong>' + escapeHtml(o.certificate_id) + '</strong></div>' : '') +
+        '</div>' +
+        '<div class="actions">' +
+          (o.certificate_id ? '<a class="btn-whatsapp-order" href="/api/license/' + encodeURIComponent(o.certificate_id) + '/pdf" target="_blank" rel="noopener">Descargar PDF</a>' : '') +
+          (wa ? '<a class="btn-toggle-producer" href="https://wa.me/' + wa + '?text=' + waText + '" target="_blank" rel="noopener">Enviar link por WhatsApp</a>' : '') +
+          (linkCompra ? '<button type="button" class="btn-toggle-producer btn-copy-link">Copiar link de descarga</button>' : '') +
+        '</div>';
+      const cp = item.querySelector('.btn-copy-link');
+      if (cp) cp.addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText(linkCompra); showToast('Link copiado. Es privado: solo mándaselo al comprador.'); }
+        catch { prompt('Copia este link y mándaselo al comprador:', linkCompra); }
+      });
+      if (o.receipt_filename) {
+        item.querySelector('.receipt-thumb').addEventListener('click', () => {
+          receiptModalImg.src = '/api/admin/orders/' + o.id + '/receipt';
+          receiptModalOverlay.classList.add('active');
+        });
+      }
+      historyList.appendChild(item);
+    });
+  }
+
+  // ---------- Compras de planes (productores) ----------
+  const planRequestsList = document.getElementById('plan-requests-list');
+  const planRequestsCount = document.getElementById('plan-requests-count');
+  const PLAN_NAMES = { pro: 'Pro', studio: 'Studio', free: 'Free' };
+
+  async function loadPlanRequests() {
+    const res = await fetch('/api/admin/plan-requests');
+    if (!res.ok) return;
+    const { requests } = await res.json();
+    const pend = requests.filter(r => r.status === 'pending');
+    planRequestsCount.textContent = pend.length || '';
+    planRequestsCount.classList.toggle('show', pend.length > 0);
+    planRequestsList.innerHTML = '';
+    if (!requests.length) {
+      planRequestsList.innerHTML = '<div class="empty-hint">Ningún productor ha comprado un plan todavía.</div>';
+      return;
+    }
+    requests.forEach((r) => {
+      const item = document.createElement('div');
+      item.className = 'order-item plan-request-item status-' + r.status;
+      const wa = String(r.producer_phone || '').replace(/[^0-9]/g, '');
+      const estado = r.status === 'pending' ? '<span class="tag-pending">por revisar</span>'
+        : r.status === 'approved' ? '<span class="tag-ok">aprobado · hasta ' + escapeHtml(r.paid_until_result || '') + '</span>'
+        : '<span class="tag-vencido">rechazado</span>' + (r.reject_reason ? ' — ' + escapeHtml(r.reject_reason) : '');
+      item.innerHTML =
+        (r.receipt_filename
+          ? '<img class="receipt-thumb" src="/api/admin/plan-requests/' + r.id + '/receipt" alt="Comprobante">'
+          : '<div class="receipt-thumb receipt-gone">sin foto</div>') +
+        '<div class="info">' +
+          '<div class="buyer">' + escapeHtml(r.producer_name || 'Productor eliminado') + '</div>' +
+          '<div class="track">Plan <strong>' + (PLAN_NAMES[r.plan] || r.plan) + '</strong> · ' + r.months + (r.months === 1 ? ' mes' : ' meses') +
+            ' · ' + Number(r.amount_cup).toLocaleString('es') + ' CUP' + (r.currency && r.currency !== 'CUP' ? ' (pagó en ' + escapeHtml(r.currency) + ')' : '') + '</div>' +
+          '<div class="meta">' + escapeHtml(r.producer_email || '') + (r.producer_phone ? ' · ' + escapeHtml(r.producer_phone) : '') +
+            ' · ' + formatOrderDate(r.created_at) + ' · plan actual: ' + (PLAN_NAMES[r.current_plan] || r.current_plan || '—') + '</div>' +
+          '<div class="meta">' + estado + '</div>' +
+        '</div>' +
+        '<div class="actions">' +
+          (r.status === 'pending'
+            ? '<button type="button" class="btn-approve-order btn-approve-plan">Aprobar y activar</button>' +
+              '<button type="button" class="btn-reject-track btn-reject-plan">Rechazar</button>'
+            : '') +
+          (wa ? '<a class="btn-toggle-producer" href="https://wa.me/' + wa + '" target="_blank" rel="noopener">WhatsApp</a>' : '') +
+        '</div>';
+      const thumb = item.querySelector('img.receipt-thumb');
+      if (thumb) thumb.addEventListener('click', () => {
+        receiptModalImg.src = '/api/admin/plan-requests/' + r.id + '/receipt';
+        receiptModalOverlay.classList.add('active');
+      });
+      const ap = item.querySelector('.btn-approve-plan');
+      if (ap) ap.addEventListener('click', async () => {
+        if (!confirm('¿Confirmas que recibiste ' + Number(r.amount_cup).toLocaleString('es') + ' CUP de ' + r.producer_name + '? Se activará el plan ' + (PLAN_NAMES[r.plan] || r.plan) + ' por ' + r.months + ' mes(es).')) return;
+        ap.disabled = true;
+        const res2 = await fetch('/api/admin/plan-requests/' + r.id + '/approve', { method: 'POST' });
+        if (res2.ok) {
+          const d = await res2.json();
+          showToast('Plan ' + (PLAN_NAMES[d.plan] || d.plan) + ' activo hasta ' + d.paidUntil + (d.extendido ? ' (se sumó a lo que ya tenía).' : '.'));
+          loadPlanRequests(); loadProducers(); loadPayouts();
+        } else {
+          const e2 = await res2.json().catch(() => ({}));
+          showToast(e2.error || 'No se pudo aprobar.', true);
+          ap.disabled = false;
+        }
+      });
+      const rj = item.querySelector('.btn-reject-plan');
+      if (rj) rj.addEventListener('click', async () => {
+        const reason = prompt('¿Por qué lo rechazas? El productor lo verá en su portal (ej: el monto no coincide, no llegó la transferencia).');
+        if (reason === null) return;
+        const res2 = await fetch('/api/admin/plan-requests/' + r.id + '/reject', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }),
+        });
+        showToast(res2.ok ? 'Compra de plan rechazada.' : 'No se pudo rechazar.', !res2.ok);
+        loadPlanRequests();
+      });
+      planRequestsList.appendChild(item);
+    });
+  }
+
+  // ---------- Pagos a productores ----------
+  const payoutsList = document.getElementById('payouts-list');
+  const payoutsCount = document.getElementById('payouts-count');
+  const payoutsHistory = document.getElementById('payouts-history');
+  const fmtCup = (n) => Number(n || 0).toLocaleString('es', { maximumFractionDigits: 2 }) + ' CUP';
+
+  async function loadPayouts() {
+    const res = await fetch('/api/admin/payouts');
+    if (!res.ok) return;
+    const { pendientes, historial } = await res.json();
+    const vencidos = pendientes.filter(p => p.vencido).length;
+    payoutsCount.textContent = pendientes.length ? (vencidos ? vencidos + ' atrasado' + (vencidos > 1 ? 's' : '') : pendientes.length) : '';
+    payoutsCount.classList.toggle('show', pendientes.length > 0);
+    payoutsList.innerHTML = '';
+    if (!pendientes.length) {
+      payoutsList.innerHTML = '<div class="empty-hint">No le debes nada a ningún productor ahora mismo.</div>';
+    }
+    pendientes.forEach((p) => {
+      const item = document.createElement('div');
+      item.className = 'payout-item' + (p.vencido ? ' is-late' : '');
+      const wa = String(p.phone || '').replace(/[^0-9]/g, '');
+      const vence = p.venceEl ? new Date(p.venceEl) : null;
+      const cuentas = p.cuentas.length
+        ? p.cuentas.map(c => '<div class="payout-account"><strong>' + escapeHtml(c.currency) + '</strong> · ' + escapeHtml(c.bank || '') + ' · <code>' + escapeHtml(c.number || '') + '</code></div>').join('')
+        : '<div class="payout-account muted">No ha puesto cuentas de cobro todavía — pídeselas por WhatsApp.</div>';
+      const detalle = p.ordenes.map(o =>
+        '<li>' + escapeHtml(o.track_title) + ' · ' + escapeHtml(o.license_type || '') + ' · vendido en ' + fmtCup(o.price_cup_at_sale) +
+        ' − ' + Number(o.commission_percent_at_sale || 0) + '% = <strong>' + fmtCup(o.producer_earning_cup) + '</strong></li>').join('');
+      item.innerHTML =
+        '<div class="payout-head">' +
+          '<div>' +
+            '<div class="buyer">' + escapeHtml(p.name) + ' <span class="muted">· plan ' + escapeHtml(p.plan) + ' (paga en ' + escapeHtml(p.plazo) + ')</span></div>' +
+            '<div class="meta">' + escapeHtml(p.email) + (p.phone ? ' · ' + escapeHtml(p.phone) : '') + '</div>' +
+          '</div>' +
+          '<div class="payout-amount">' + fmtCup(p.totalCup) + '<span>' + p.ventas + ' venta' + (p.ventas > 1 ? 's' : '') + '</span></div>' +
+        '</div>' +
+        '<div class="payout-due ' + (p.vencido ? 'late' : '') + '">' +
+          (vence ? (p.vencido ? 'ATRASADO — debías pagarle antes del ' : 'Págale antes del ') + vence.toLocaleString('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '') +
+        '</div>' +
+        '<div class="payout-accounts">' + cuentas + '</div>' +
+        '<details class="payout-detail"><summary>Ver ventas</summary><ul>' + detalle + '</ul></details>' +
+        '<div class="actions">' +
+          '<button type="button" class="btn-approve-order btn-mark-paid">Marcar como pagado</button>' +
+          (wa ? '<a class="btn-toggle-producer" href="https://wa.me/' + wa + '?text=' + encodeURIComponent('Hola ' + p.name + ', te acabo de transferir ' + fmtCup(p.totalCup) + ' por tus ventas en Zona Beats.') + '" target="_blank" rel="noopener">Avisar por WhatsApp</a>' : '') +
+        '</div>';
+      item.querySelector('.btn-mark-paid').addEventListener('click', async (ev) => {
+        const note = prompt('¿Ya le transferiste ' + fmtCup(p.totalCup) + ' a ' + p.name + '?\n\nNota opcional (ej: número de transferencia):', '');
+        if (note === null) return;
+        ev.target.disabled = true;
+        const r2 = await fetch('/api/admin/payouts/' + p.producerId, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ note, orderIds: p.ordenes.map(o => o.id) }),
+        });
+        if (r2.ok) { showToast('Pago registrado. ' + p.name + ' lo verá como cobrado en su portal.'); loadPayouts(); loadProducers(); }
+        else { const e2 = await r2.json().catch(() => ({})); showToast(e2.error || 'No se pudo registrar el pago.', true); ev.target.disabled = false; }
+      });
+      payoutsList.appendChild(item);
+    });
+
+    payoutsHistory.innerHTML = historial.length
+      ? historial.map(h => '<div class="payout-history-row"><span>' + formatOrderDate(h.created_at) + '</span><span>' + escapeHtml(h.producer_name) + '</span><strong>' + fmtCup(h.amount_cup) + '</strong><span class="muted">' + h.orders_count + ' venta(s)' + (h.note ? ' · ' + escapeHtml(h.note) : '') + '</span></div>').join('')
+      : '<div class="empty-hint">Todavía no has registrado pagos.</div>';
+  }
 
   checkAuth();
 })();

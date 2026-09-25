@@ -74,19 +74,33 @@
               <div id="catalog-only-fields">
                 <div class="field checkbox-field">
                   <label class="checkbox-label">
-                    <input type="checkbox" id="for-sale-input">
-                    <span>Poner esta pista a la venta</span>
-                  </label>
-                </div>
-                <div class="field checkbox-field">
-                  <label class="checkbox-label">
                     <input type="checkbox" id="is-exclusive-input">
-                    <span>Exclusiva (compra única — al aprobarse la venta, desaparece del catálogo y pasa a Beats VIP)</span>
+                    <span>Vender esta pista solo como <strong>Exclusiva</strong> (una sola vez)</span>
                   </label>
                 </div>
-                <div class="field">
-                  <label for="price-input">Precio en CUP</label>
-                  <input type="text" id="price-input" placeholder="Ej: 500">
+
+                <div id="license-mode-fields">
+                  <p class="panel-hint" style="margin:0 0 10px;">Estas licencias se pueden vender varias veces, a personas distintas. Pon precio a las que quieras ofrecer.</p>
+                  <div class="field">
+                    <label for="price-basic-input">Básica (MP3) — CUP</label>
+                    <input type="text" id="price-basic-input" placeholder="Ej: 500">
+                  </div>
+                  <div class="field">
+                    <label for="price-premium-input">Premium (MP3 + WAV) — CUP</label>
+                    <input type="text" id="price-premium-input" placeholder="Opcional">
+                  </div>
+                  <div class="field">
+                    <label for="price-unlimited-input">Ilimitada (MP3 + WAV + STEMS) — CUP</label>
+                    <input type="text" id="price-unlimited-input" placeholder="Opcional">
+                  </div>
+                </div>
+
+                <div id="exclusive-mode-fields" style="display:none;">
+                  <p class="panel-hint exclusive-warning" style="margin:0 0 10px;">Al venderse, la pista se retira del catálogo para siempre y pasa a Beats VIP. Por eso no puede ofrecer licencias normales al mismo tiempo.</p>
+                  <div class="field">
+                    <label for="price-exclusive-input">Precio exclusivo — CUP</label>
+                    <input type="text" id="price-exclusive-input" placeholder="Ej: 5000">
+                  </div>
                 </div>
               </div>
             </div>
@@ -132,6 +146,11 @@
             <input type="text" id="promo-text-input" placeholder="Ej: 20% de descuento en beats exclusivos esta semana">
           </div>
           <div class="field">
+            <label for="discount-input">Descuento del catálogo (%)</label>
+            <input type="text" id="discount-input" placeholder="Ej: 20 (0 = sin descuento)">
+            <p class="panel-hint" style="margin:6px 0 0;">Este es el <strong>único</strong> lugar donde se fija el descuento. Solo se aplica mientras el banner esté activo y baja el precio de <strong>todos</strong> los beats del catálogo. Si escribes un % aquí, el banner lo muestra automáticamente.</p>
+          </div>
+          <div class="field">
             <label for="schedule-text-input">Horario de atención</label>
             <input type="text" id="schedule-text-input" placeholder="Ej: Lun-Sáb 9am-8pm">
           </div>
@@ -146,6 +165,18 @@
         </p>
         <form id="exchange-rates-form">
           <div id="exchange-rates-list"></div>
+          <div class="add-currency-row">
+            <div class="field">
+              <label for="new-currency-label">Agregar otro método de pago / moneda</label>
+              <input type="text" id="new-currency-label" placeholder="Ej: Zelle, USD efectivo, Bizum, Transfermóvil EUR">
+            </div>
+            <div class="field">
+              <label for="new-currency-rate">CUP por unidad</label>
+              <input type="text" id="new-currency-rate" placeholder="Ej: 400">
+            </div>
+            <button type="button" class="btn-secondary" id="add-currency-btn">+ Agregar</button>
+          </div>
+          <p class="panel-hint" style="margin:6px 0 0;">Lo que agregues aquí aparece en la tienda en «Ver precios en», en los métodos de pago y en la lista de monedas de «Cobros y ventas». Luego añade tu cuenta de esa moneda en «Cobros y ventas» para que el cliente sepa a dónde pagar.</p>
           <button type="submit" class="btn-primary" style="margin-top:16px;">Guardar tasas</button>
         </form>
       </div>
@@ -173,7 +204,7 @@
           <h2>Productores</h2>
           <span class="badge-count" id="producers-count"></span>
         </div>
-        <p class="panel-hint">Solo tú puedes crear cuentas de productor. Dale el correo y la contraseña que definas aquí a la persona para que entre en <code>/productores</code>. Puedes desactivar a cualquiera cuando quieras — al desactivarlo, deja de poder entrar o subir beats, pero lo que ya vendió sigue en la tienda.</p>
+        <p class="panel-hint">Los productores se registran solos en <code>/productores</code> (con su teléfono) y aparecen aquí para que los apruebes. También puedes crear una cuenta tú mismo. Puedes desactivar a cualquiera cuando quieras — al desactivarlo, deja de poder entrar o subir beats, pero lo que ya vendió sigue en la tienda.</p>
 
         <form id="create-producer-form" class="inline-form">
           <div class="field">
@@ -198,15 +229,52 @@
       </div>
 
       <div class="panel">
-        <h2>Comisión de la plataforma</h2>
-        <p class="panel-hint">Porcentaje que se descuenta de cada venta de un beat de productor antes de calcular lo que le corresponde a él.</p>
-        <form id="commission-form" class="inline-form">
+        <h2>Planes de productores</h2>
+        <p class="panel-hint">La comisión la define el plan de cada productor (Free 30%, Pro 20%, Studio 10%) y se calcula con el plan que tenga <strong>en el momento en que apruebas la venta</strong>. Aquí fijas lo que cobras por cada plan al mes y tu WhatsApp de contacto.</p>
+        <form id="platform-config-form" class="inline-form">
           <div class="field">
-            <label for="commission-input">Comisión (%)</label>
-            <input type="text" id="commission-input" placeholder="Ej: 20">
+            <label for="admin-phone-input">Tu WhatsApp (lo ven los productores)</label>
+            <input type="text" id="admin-phone-input" placeholder="Ej: 5355633280">
           </div>
-          <button type="submit" class="btn-primary">Guardar comisión</button>
+          <div class="field">
+            <label for="plan-pro-price-input">Plan Pro (CUP / mes)</label>
+            <input type="text" id="plan-pro-price-input" placeholder="Ej: 5000">
+          </div>
+          <div class="field">
+            <label for="plan-studio-price-input">Plan Studio (CUP / mes)</label>
+            <input type="text" id="plan-studio-price-input" placeholder="Ej: 15000">
+          </div>
+          <button type="submit" class="btn-primary">Guardar</button>
         </form>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header-row">
+          <h2>Compras de planes</h2>
+          <span class="badge-count" id="plan-requests-count"></span>
+        </div>
+        <p class="panel-hint">Cuando un productor compra o renueva un plan desde su portal, su comprobante aparece aquí. Al aprobarlo, el plan se activa (o se extiende si ya lo tenía) por los meses que pagó.</p>
+        <div id="plan-requests-list"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header-row">
+          <h2>Pagos a productores</h2>
+          <span class="badge-count" id="payouts-count"></span>
+        </div>
+        <p class="panel-hint">Lo que le debes a cada productor por ventas ya aprobadas (su parte, después de tu comisión). La fecha límite sale del plan: Free 14 días, Pro 3 días, Studio 24 horas desde la venta más antigua sin pagar. Cuando le transfieras, pulsa «Marcar como pagado».</p>
+        <div id="payouts-list"></div>
+        <h3 class="subpanel-title">Pagos ya hechos</h3>
+        <div id="payouts-history"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header-row">
+          <h2>Historial de compras</h2>
+          <span class="badge-count" id="history-count"></span>
+        </div>
+        <p class="panel-hint">Compras ya aprobadas, con su licencia. Aquí puedes volver a descargar el PDF cuando el comprador lo pida.</p>
+        <div id="history-list"></div>
       </div>
 
       <div class="panel">

@@ -10,9 +10,14 @@
 
   <div class="top-bar">
     <div class="brand-mark"><span class="dot"></span> ZONA BEATS</div>
-    <div class="currency-picker">
-      <label for="currency-select" class="currency-picker-label">Ver precios en</label>
-      <select id="currency-select"></select>
+    <div class="top-bar-right">
+      <button type="button" class="my-purchases-btn" id="my-purchases-btn" style="display:none;">
+        Mis compras <span class="my-purchases-badge" id="my-purchases-badge"></span>
+      </button>
+      <div class="currency-picker">
+        <label for="currency-select" class="currency-picker-label">Ver precios en</label>
+        <select id="currency-select"></select>
+      </div>
     </div>
   </div>
 
@@ -43,6 +48,7 @@
     <button class="section-tab active" data-section="catalog">Catálogo</button>
     <button class="section-tab" data-section="playlist">Playlist</button>
     <button class="section-tab" data-section="vip">Beats VIP</button>
+    <button class="section-tab" data-section="producers">Productores</button>
   </div>
 
   <div class="section-header">
@@ -64,6 +70,9 @@
     </aside>
 
     <div class="catalog-main">
+      <div id="producers-grid" class="producers-grid" style="display:none;"></div>
+      <div id="producer-detail" class="producer-detail" style="display:none;"></div>
+
       <main id="track-grid" class="track-grid"></main>
       <div id="empty-state" class="empty-state" style="display:none;">
         <h3 id="empty-state-title">Aún no hay pistas</h3>
@@ -78,6 +87,7 @@
 
   <footer class="footer-note">
     <div>SOLO ESCUCHA · SIN DESCARGA · CONTENIDO ORIGINAL PROTEGIDO</div>
+    <div class="footer-verify"><a href="/verify">Verificar una licencia comprada aquí</a></div>
     <div class="dev-credit">
       Desarrollado por <strong>爪丨匚卄乇.studios</strong> · <a href="https://wa.me/5355633280" target="_blank" rel="noopener">+53 55633280</a>
     </div>
@@ -181,6 +191,8 @@
         <a class="modal-whatsapp-btn" id="modal-whatsapp-btn" href="#" target="_blank" rel="noopener">
           Avisar por WhatsApp
         </a>
+        <p class="modal-success-text modal-success-note">Cuando el vendedor apruebe tu pago, tu beat y tu licencia en PDF se descargan <strong>aquí mismo</strong>, en «Mis compras». No cierres la página o vuelve a entrar desde este mismo teléfono.</p>
+        <button type="button" class="btn-outline-wide" id="modal-see-purchases-btn">Ver mis compras</button>
       </div>
     </div>
   </div>
@@ -192,16 +204,30 @@
       <h3 class="terms-title">Descargo de responsabilidad y política de licenciamiento</h3>
 
       <div class="terms-body">
-        <h4>1. Sobre los Beats Estándar (Licencia No Exclusiva)</h4>
-        <p>Al adquirir un beat bajo nuestra licencia estándar, el comprador obtiene el derecho de utilizarlo para crear una canción, distribuirla en plataformas digitales (Spotify, Apple Music, etc.) y monetizarla en redes sociales (YouTube, TikTok, etc.).</p>
-        <p>Sin embargo, es fundamental entender que esta licencia NO es exclusiva. Esto significa que, aunque tú tienes el poder de explotar tu canción comercialmente, el productor se reserva el derecho de vender el mismo archivo de audio exacto a otros artistas. Por lo tanto, otra persona podrá tener una copia idéntica del beat, utilizarla para su propia canción y hacer lo mismo que tú con ella (distribuirla, monetizarla, etc.), siempre que respete los términos de su propia licencia.</p>
-        <p><strong>Aclaración importante:</strong> en ningún caso la licencia estándar otorga la propiedad del beat ni el derecho a revenderlo o sublicenciarlo como instrumental a terceros.</p>
+        <h4>1. Licencias Básica - Premium (No Exclusivas) y Licencia Ilimitada</h4>
+        <p>Al adquirir un beat bajo nuestra licencia estándar (Básica - Premium), el comprador obtiene el derecho de utilizarlo para crear una canción y distribuirla en plataformas digitales (Spotify, Apple Music, etc.). Sin embargo, <strong>NO obtiene derecho a monetizarla</strong>, ni en plataformas digitales, ni en redes sociales (YouTube, TikTok, etc.), ni por ningún otro medio, salvo que adquiera una licencia superior o cuente con autorización expresa y por escrito.</p>
+        <p>Es fundamental entender que esta licencia NO es exclusiva. Esto significa que, aunque tú puedes distribuir tu canción, el productor se reserva el derecho de vender el mismo archivo de audio exacto a otros artistas. Por lo tanto, otra persona podrá tener una copia idéntica del beat, utilizarla para su propia canción y distribuirla bajo los mismos términos, siempre que respete su propia licencia y sin monetizarla.</p>
+
+        <p><strong>Jerarquía de monetización (de menor a mayor):</strong></p>
+        <p><strong>Nivel 1 – Licencia Básica:</strong> permite crear y distribuir la canción en plataformas digitales. NO permite monetización en ningún medio (streams, redes sociales, ventas, etc.). Solo difusión.</p>
+        <p><strong>Nivel 2 – Licencia Premium:</strong> mantiene los mismos derechos de distribución que la Básica, pero tampoco permite monetización. Puede incluir beneficios adicionales de entrega o calidad de archivos, pero la monetización sigue deshabilitada.</p>
+        <p><strong>Nivel 3 – Licencia Ilimitada:</strong> permite distribución + monetización en plataformas digitales y redes sociales, sin límite de streams ni ventas. Incluye entrega de archivos en MP3 + WAV + STEMS. El beat se elimina de forma inmediata y definitiva del catálogo de ventas. NO se publica en la sección "Beats VIP". No otorga exclusividad total ni propiedad del beat.</p>
+        <p><strong>Nivel 4 – Licencia Exclusiva Total</strong> (ver punto 2): monetización total, exclusividad, propiedad comercial, masterización y sincronización. Incluye MP3 + WAV + STEMS, eliminación definitiva del catálogo y publicación en "Beats VIP" (previa autorización del comprador).</p>
+
+        <p><strong>¿Qué pasa con los compradores de licencias Básica - Premium si otro cliente compra la Licencia Ilimitada?</strong></p>
+        <p>Los compradores que hayan adquirido previamente una licencia Básica o Premium conservan los derechos ya otorgados bajo su licencia: pueden seguir distribuyendo la canción, pero NO pueden monetizarla.</p>
+        <p>La compra de la Licencia Ilimitada por parte de otro cliente no invalida ni revoca las licencias Básica o Premium anteriores. Estas siguen vigentes en sus propios términos.</p>
+        <p>El comprador de la Licencia Ilimitada es el único que, a partir de ese momento, queda facultado para monetizar esa pista (siempre que no exista una licencia Exclusiva Total posterior).</p>
+        <p>Los compradores Básica - Premium no pueden oponerse a que el comprador Ilimitado monetice, ni reclamar exclusividad, regalías adicionales o compensación alguna.</p>
+        <p>Una vez vendida la Licencia Ilimitada, el beat se elimina del catálogo de ventas. Por lo tanto, no se venderán nuevas licencias (Básica, Premium o Ilimitada) a partir de ese momento, salvo decisión expresa del productor.</p>
+        <p>Si un comprador Básica - Premium desea monetizar, deberá adquirir una licencia superior que lo permita (Ilimitada o Exclusiva), siempre que el beat aún esté disponible en el catálogo. Si ya fue retirado por una venta Ilimitada, no podrá adquirirla después.</p>
+        <p><strong>Aclaración importante:</strong> en ningún caso las licencias Básica y Premium otorgan la propiedad del beat ni el derecho a revenderlo o sublicenciarlo como instrumental a terceros.</p>
 
         <h4>2. Sobre los Beats Exclusivos (Licencia Exclusiva Total)</h4>
         <p>Los beats etiquetados como EXCLUSIVOS tienen una política completamente diferente.</p>
         <p><strong>Única compra:</strong> este beat será vendido una sola vez en toda la historia. Una vez realizada la transacción, el beat se retira de manera definitiva del catálogo público y de la tienda.</p>
         <p><strong>Sin copias:</strong> al ser una licencia única, garantizamos que ningún otro artista, productor o persona podrá tener una copia de ese audio para uso comercial. La pista queda "bajo tu nombre".</p>
-        <p><strong>Derechos totales:</strong> el comprador adquiere todos los derechos de uso comercial, masterización y sincronización de la pista, pudiendo registrar la canción como propia sin temor a futuros conflictos de copyright por el uso del beat.</p>
+        <p><strong>Derechos totales:</strong> el comprador adquiere todos los derechos de uso comercial, masterización y sincronización de la pista, pudiendo registrar la canción como propia sin temor a futuros conflictos de copyright por el uso del beat. La entrega incluye las 3 licencias/archivos: MP3 + WAV + STEMS. Además, el beat se elimina de forma inmediata y definitiva del catálogo de ventas.</p>
 
         <h4>3. Sección "Beats VIP" y créditos</h4>
         <p>Para mantener la transparencia y dar visibilidad a los compradores de licencias exclusivas, todos los beats vendidos bajo esta modalidad aparecerán listados en nuestra sección "Beats VIP".</p>
@@ -214,9 +240,21 @@
 
         <h4>5. Cláusula general</h4>
         <p>El productor se reserva la propiedad intelectual de la composición subyacente del beat. La compra (tanto estándar como exclusiva) otorga derechos de uso sobre la grabación maestra (audio), pero no transfiere automáticamente los derechos de publicación o composición (créditos de producción) a menos que se negocie explícitamente por escrito. Para los beats exclusivos, se incluye un contrato de cesión de derechos que detalla todos los alcances legales.</p>
+        <p>Asimismo, si el creador de la obra original (productor/beatmaker) no cumple con los términos de licenciamiento establecidos, será expulsado permanentemente de la app. Las pruebas de dicho incumplimiento se verificarán mediante los <strong>hashes de los archivos y las licencias en PDF</strong> entregadas a los compradores, que acreditan los términos otorgados y el uso autorizado. La expulsión será definitiva y sin derecho a reembolso, apelación o reinscripción, sin perjuicio de las acciones legales que correspondan.</p>
+        <p>Cualquier persona puede comprobar una licencia o un archivo en la página <a href="/verify" style="color:var(--live);">Verificar licencia</a>, con el número de licencia, el hash o el propio archivo de audio.</p>
       </div>
 
       <button type="button" class="btn-primary-wide" id="terms-modal-accept-btn">Entendido, cerrar</button>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="purchases-overlay">
+    <div class="modal-box modal-box-purchases">
+      <button class="modal-close" id="purchases-close-btn" aria-label="Cerrar">&times;</button>
+      <div class="modal-eyebrow">TUS COMPRAS EN ESTE DISPOSITIVO</div>
+      <h3 class="terms-title">Mis compras</h3>
+      <p class="purchases-hint">Se actualiza sola. Cuando el vendedor apruebe tu pago, la descarga empieza automáticamente.</p>
+      <div id="purchases-list"></div>
     </div>
   </div>
 

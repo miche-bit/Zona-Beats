@@ -191,4 +191,4 @@ function restoreBackup(projectRoot, zipBuffer) {
   return entries.length;
 }
 
-module.exports = { createBackup, restoreBackup };
+module.exports = { createBackup, restoreBackup, buildZip };

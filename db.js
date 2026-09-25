@@ -16,6 +16,9 @@ db.exec(`
     description TEXT DEFAULT '',
     artist_credit TEXT DEFAULT '',
     audio_filename TEXT NOT NULL,
+    master_filename TEXT DEFAULT '',
+    master_hash TEXT DEFAULT '',
+    stems_filename TEXT DEFAULT '',
     cover_filename TEXT DEFAULT '',
     duration_seconds INTEGER DEFAULT 0,
     plays INTEGER DEFAULT 0,
@@ -111,6 +114,16 @@ db.exec(`
     password_hash TEXT NOT NULL,
     password_salt TEXT NOT NULL,
     active INTEGER DEFAULT 1,
+    exclusive_enabled INTEGER DEFAULT 0,
+    approved INTEGER DEFAULT 0,
+    plan TEXT DEFAULT 'free',
+    plan_paid_until TEXT DEFAULT '',
+    avatar_filename TEXT DEFAULT '',
+    bio TEXT DEFAULT '',
+    social_links_json TEXT DEFAULT '[]',
+    accounts_json TEXT DEFAULT '[]',
+    contact_phone TEXT DEFAULT '',
+    disabled_reason TEXT DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -122,7 +135,37 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS platform_config (
     id INTEGER PRIMARY KEY CHECK (id = 1),
-    commission_percent REAL DEFAULT 20
+    commission_percent REAL DEFAULT 20,
+    admin_phone TEXT DEFAULT '',
+    discount_percent REAL DEFAULT 0,
+    plan_price_pro_cup REAL DEFAULT 5000,
+    plan_price_studio_cup REAL DEFAULT 15000
+  );
+
+  CREATE TABLE IF NOT EXISTS plan_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    producer_id INTEGER NOT NULL,
+    plan TEXT NOT NULL,
+    months INTEGER NOT NULL DEFAULT 1,
+    amount_cup REAL NOT NULL DEFAULT 0,
+    currency TEXT DEFAULT 'CUP',
+    receipt_filename TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    reject_reason TEXT DEFAULT '',
+    paid_until_result TEXT DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    resolved_at TEXT DEFAULT ''
+  );
+
+  CREATE TABLE IF NOT EXISTS producer_payouts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    producer_id INTEGER NOT NULL,
+    producer_name TEXT DEFAULT '',
+    amount_cup REAL NOT NULL DEFAULT 0,
+    orders_count INTEGER DEFAULT 0,
+    account_text TEXT DEFAULT '',
+    note TEXT DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 `);
 
@@ -158,6 +201,17 @@ if (!trackCols.includes('producer_id')) {
 if (!trackCols.includes('approval_status')) {
   db.exec("ALTER TABLE tracks ADD COLUMN approval_status TEXT DEFAULT 'approved'");
 }
+if (!trackCols.includes('master_filename')) {
+  db.exec("ALTER TABLE tracks ADD COLUMN master_filename TEXT DEFAULT ''");
+}
+if (!trackCols.includes('master_hash')) {
+  db.exec("ALTER TABLE tracks ADD COLUMN master_hash TEXT DEFAULT ''");
+}
+
+if (!trackCols.includes('wav_filename')) db.exec("ALTER TABLE tracks ADD COLUMN wav_filename TEXT DEFAULT ''");
+if (!trackCols.includes('stems_filename')) {
+  db.exec("ALTER TABLE tracks ADD COLUMN stems_filename TEXT DEFAULT ''");
+}
 if (!trackCols.includes('rejection_reason')) {
   db.exec("ALTER TABLE tracks ADD COLUMN rejection_reason TEXT DEFAULT ''");
 }
@@ -190,6 +244,35 @@ if (!orderCols.includes('certificate_id')) {
 if (!orderCols.includes('certificate_hash')) {
   db.exec('ALTER TABLE orders ADD COLUMN certificate_hash TEXT');
 }
+
+const producerCols = db.prepare("PRAGMA table_info(producers)").all().map(c => c.name);
+if (!producerCols.includes('exclusive_enabled')) {
+  db.exec('ALTER TABLE producers ADD COLUMN exclusive_enabled INTEGER DEFAULT 0');
+}
+
+if (!producerCols.includes('approved')) db.exec('ALTER TABLE producers ADD COLUMN approved INTEGER DEFAULT 0');
+if (!producerCols.includes('plan')) db.exec("ALTER TABLE producers ADD COLUMN plan TEXT DEFAULT 'free'");
+if (!producerCols.includes('plan_paid_until')) db.exec("ALTER TABLE producers ADD COLUMN plan_paid_until TEXT DEFAULT ''");
+if (!producerCols.includes('avatar_filename')) db.exec("ALTER TABLE producers ADD COLUMN avatar_filename TEXT DEFAULT ''");
+if (!producerCols.includes('bio')) db.exec("ALTER TABLE producers ADD COLUMN bio TEXT DEFAULT ''");
+if (!producerCols.includes('social_links_json')) db.exec("ALTER TABLE producers ADD COLUMN social_links_json TEXT DEFAULT '[]'");
+if (!producerCols.includes('accounts_json')) db.exec("ALTER TABLE producers ADD COLUMN accounts_json TEXT DEFAULT '[]'");
+if (!producerCols.includes('contact_phone')) db.exec("ALTER TABLE producers ADD COLUMN contact_phone TEXT DEFAULT ''");
+if (!producerCols.includes('disabled_reason')) db.exec("ALTER TABLE producers ADD COLUMN disabled_reason TEXT DEFAULT ''");
+db.exec("UPDATE producers SET approved = 1 WHERE approved IS NULL OR (approved = 0 AND created_at < datetime('now','-1 second') AND active = 1 AND plan IS NULL)");
+
+const platCols = db.prepare("PRAGMA table_info(platform_config)").all().map(c => c.name);
+if (!platCols.includes('admin_phone')) db.exec("ALTER TABLE platform_config ADD COLUMN admin_phone TEXT DEFAULT ''");
+if (!platCols.includes('discount_percent')) db.exec("ALTER TABLE platform_config ADD COLUMN discount_percent REAL DEFAULT 0");
+if (!platCols.includes('plan_price_pro_cup')) db.exec("ALTER TABLE platform_config ADD COLUMN plan_price_pro_cup REAL DEFAULT 5000");
+if (!platCols.includes('plan_price_studio_cup')) db.exec("ALTER TABLE platform_config ADD COLUMN plan_price_studio_cup REAL DEFAULT 15000");
+
+const orderCols2 = db.prepare("PRAGMA table_info(orders)").all().map(c => c.name);
+if (!orderCols2.includes('producer_paid')) db.exec('ALTER TABLE orders ADD COLUMN producer_paid INTEGER DEFAULT 0');
+if (!orderCols2.includes('payout_id')) db.exec('ALTER TABLE orders ADD COLUMN payout_id INTEGER');
+if (!orderCols2.includes('approved_at')) db.exec("ALTER TABLE orders ADD COLUMN approved_at TEXT DEFAULT ''");
+if (!orderCols2.includes('buyer_token')) db.exec("ALTER TABLE orders ADD COLUMN buyer_token TEXT DEFAULT ''");
+db.exec("CREATE INDEX IF NOT EXISTS idx_orders_buyer_token ON orders(buyer_token)");
 
 const existingLicenseTracks = db.prepare(`
   SELECT id, price_cup, is_exclusive FROM tracks
