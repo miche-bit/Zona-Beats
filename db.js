@@ -7,6 +7,8 @@ const DB_DIR = path.join(DATA_ROOT, 'db');
 if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
 
 const db = new DatabaseSync(path.join(DB_DIR, 'app.db'));
+// Si otro proceso (una copia, una herramienta) tiene la base ocupada un instante, se espera en vez de fallar.
+db.exec('PRAGMA busy_timeout = 5000');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS tracks (
@@ -274,6 +276,153 @@ if (!orderCols2.includes('approved_at')) db.exec("ALTER TABLE orders ADD COLUMN 
 if (!orderCols2.includes('buyer_token')) db.exec("ALTER TABLE orders ADD COLUMN buyer_token TEXT DEFAULT ''");
 db.exec("CREATE INDEX IF NOT EXISTS idx_orders_buyer_token ON orders(buyer_token)");
 
+// ---- Planes en USD, retiros, bonos y referidos ----
+const platCols2 = db.prepare("PRAGMA table_info(platform_config)").all().map(c => c.name);
+const addPlat = (col, def) => { if (!platCols2.includes(col)) db.exec(`ALTER TABLE platform_config ADD COLUMN ${col} ${def}`); };
+addPlat('plan_price_pro_usd', 'REAL DEFAULT 5');
+addPlat('plan_price_studio_usd', 'REAL DEFAULT 19');
+addPlat('payout_rates_json', "TEXT DEFAULT '{}'");
+addPlat('likes_per_bonus', 'INTEGER DEFAULT 1000');
+addPlat('likes_bonus_cup', 'REAL DEFAULT 2000');
+addPlat('referrals_per_bonus', 'INTEGER DEFAULT 10');
+addPlat('referral_bonus_cup', 'REAL DEFAULT 200');
+
+const producerCols2 = db.prepare("PRAGMA table_info(producers)").all().map(c => c.name);
+if (!producerCols2.includes('referral_code')) db.exec("ALTER TABLE producers ADD COLUMN referral_code TEXT DEFAULT ''");
+if (!producerCols2.includes('referred_by')) db.exec('ALTER TABLE producers ADD COLUMN referred_by INTEGER');
+if (!producerCols2.includes('referral_units_credited')) db.exec('ALTER TABLE producers ADD COLUMN referral_units_credited INTEGER DEFAULT 0');
+
+const trackCols3 = db.prepare("PRAGMA table_info(tracks)").all().map(c => c.name);
+if (!trackCols3.includes('bonus_units_credited')) db.exec('ALTER TABLE tracks ADD COLUMN bonus_units_credited INTEGER DEFAULT 0');
+
+const orderCols3 = db.prepare("PRAGMA table_info(orders)").all().map(c => c.name);
+if (!orderCols3.includes('withdrawal_id')) db.exec('ALTER TABLE orders ADD COLUMN withdrawal_id INTEGER');
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS track_likes (
+    track_id INTEGER NOT NULL,
+    voter TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (track_id, voter)
+  );
+
+  CREATE TABLE IF NOT EXISTS producer_credits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    producer_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    amount_cup REAL NOT NULL DEFAULT 0,
+    detail TEXT DEFAULT '',
+    withdrawal_id INTEGER,
+    paid INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS producer_withdrawals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    producer_id INTEGER NOT NULL,
+    producer_name TEXT DEFAULT '',
+    amount_cup REAL NOT NULL DEFAULT 0,
+    currency TEXT DEFAULT 'CUP',
+    currency_label TEXT DEFAULT 'CUP',
+    rate_cup_per_unit REAL DEFAULT 1,
+    fee_units REAL DEFAULT 0,
+    amount_units REAL DEFAULT 0,
+    net_units REAL DEFAULT 0,
+    account_text TEXT DEFAULT '',
+    status TEXT DEFAULT 'pending',
+    note TEXT DEFAULT '',
+    due_at TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    resolved_at TEXT DEFAULT ''
+  );
+`);
+
+// ---- Auditoría: subidas por partes, entregas completas, rechazos, VIP e índices ----
+const trackCols4 = db.prepare("PRAGMA table_info(tracks)").all().map(c => c.name);
+if (!trackCols4.includes('mp3_filename')) db.exec("ALTER TABLE tracks ADD COLUMN mp3_filename TEXT DEFAULT ''");
+if (!trackCols4.includes('wav_hash')) db.exec("ALTER TABLE tracks ADD COLUMN wav_hash TEXT DEFAULT ''");
+if (!trackCols4.includes('stems_hash')) db.exec("ALTER TABLE tracks ADD COLUMN stems_hash TEXT DEFAULT ''");
+if (!trackCols4.includes('mp3_hash')) db.exec("ALTER TABLE tracks ADD COLUMN mp3_hash TEXT DEFAULT ''");
+
+const orderCols4 = db.prepare("PRAGMA table_info(orders)").all().map(c => c.name);
+if (!orderCols4.includes('reject_reason')) db.exec("ALTER TABLE orders ADD COLUMN reject_reason TEXT DEFAULT ''");
+if (!orderCols4.includes('rejected_at')) db.exec("ALTER TABLE orders ADD COLUMN rejected_at TEXT DEFAULT ''");
+if (!orderCols4.includes('vip_public')) db.exec('ALTER TABLE orders ADD COLUMN vip_public INTEGER DEFAULT 0');
+
+// Billetera por moneda: lo que pagó el comprador en su moneda y lo que le toca al productor en esa misma moneda.
+const orderCols5 = db.prepare("PRAGMA table_info(orders)").all().map(c => c.name);
+if (!orderCols5.includes('wallet_currency')) {
+  db.exec("ALTER TABLE orders ADD COLUMN wallet_currency TEXT DEFAULT ''");
+  db.exec('ALTER TABLE orders ADD COLUMN paid_units REAL DEFAULT 0');
+  db.exec('ALTER TABLE orders ADD COLUMN rate_at_sale REAL DEFAULT 1');
+  db.exec('ALTER TABLE orders ADD COLUMN producer_earning_units REAL DEFAULT 0');
+  // las compras de antes quedan en la billetera de CUP (así se venían pagando)
+  db.exec("UPDATE orders SET wallet_currency = 'CUP', paid_units = price_cup_at_sale, rate_at_sale = 1, producer_earning_units = producer_earning_cup");
+}
+// Créditos y cargos en cualquier moneda (p. ej. un plan pagado con el saldo en USDT es un cargo negativo en USDT)
+const credCols = db.prepare("PRAGMA table_info(producer_credits)").all().map(c => c.name);
+if (!credCols.includes('currency')) {
+  db.exec("ALTER TABLE producer_credits ADD COLUMN currency TEXT DEFAULT 'CUP'");
+  db.exec('ALTER TABLE producer_credits ADD COLUMN amount_units REAL DEFAULT NULL');
+}
+const wCols = db.prepare("PRAGMA table_info(producer_withdrawals)").all().map(c => c.name);
+if (!wCols.includes('wallet')) db.exec("ALTER TABLE producer_withdrawals ADD COLUMN wallet TEXT DEFAULT 'CUP'");
+// Retiros por monto libre: cuánto se descuenta de la billetera (en su moneda)
+const wCols2 = db.prepare("PRAGMA table_info(producer_withdrawals)").all().map(c => c.name);
+if (!wCols2.includes('debit_units')) {
+  db.exec('ALTER TABLE producer_withdrawals ADD COLUMN debit_units REAL DEFAULT NULL');
+  db.exec("UPDATE producer_withdrawals SET debit_units = CASE WHEN COALESCE(wallet, 'CUP') = 'CUP' THEN amount_cup ELSE amount_units END");
+}
+
+// Entradas que el administrador o un productor borró de sus historiales.
+// Solo se ocultan de esa lista: el saldo, las ventas y las licencias no cambian.
+db.exec(`CREATE TABLE IF NOT EXISTS historial_oculto (
+  lista TEXT NOT NULL,
+  clave TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (lista, clave)
+)`);
+
+// Previews que se hicieron con la marca de agua (plan Free): si el productor sube de plan se rehacen sin ella.
+const trackCols5 = db.prepare("PRAGMA table_info(tracks)").all().map(c => c.name);
+if (!trackCols5.includes('preview_marca')) {
+  db.exec('ALTER TABLE tracks ADD COLUMN preview_marca INTEGER DEFAULT 0');
+  const wm = db.prepare('SELECT voice_filename FROM watermark_config WHERE id = 1').get();
+  if (wm && wm.voice_filename) {
+    db.exec("UPDATE tracks SET preview_marca = 1 WHERE producer_id IN (SELECT id FROM producers WHERE COALESCE(plan, 'free') = 'free')");
+  }
+}
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS app_secrets (
+    clave TEXT PRIMARY KEY,
+    valor TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS uploads (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    original_name TEXT DEFAULT '',
+    ext TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    received INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_orders_track ON orders(track_id);
+  CREATE INDEX IF NOT EXISTS idx_orders_producer ON orders(producer_id);
+  CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+  CREATE INDEX IF NOT EXISTS idx_orders_withdrawal ON orders(withdrawal_id);
+  CREATE INDEX IF NOT EXISTS idx_tracks_producer ON tracks(producer_id);
+  CREATE INDEX IF NOT EXISTS idx_tracks_status ON tracks(approval_status);
+  CREATE INDEX IF NOT EXISTS idx_producers_ref ON producers(referred_by);
+  CREATE INDEX IF NOT EXISTS idx_credits_producer ON producer_credits(producer_id);
+  CREATE INDEX IF NOT EXISTS idx_uploads_owner ON uploads(owner);
+`);
+
+// Código de referido para los productores que se registraron antes de existir el sistema de referidos
+db.exec("UPDATE producers SET referral_code = upper(substr(hex(randomblob(4)), 1, 7)) WHERE referral_code IS NULL OR referral_code = ''");
+
 const existingLicenseTracks = db.prepare(`
   SELECT id, price_cup, is_exclusive FROM tracks
   WHERE is_playlist = 0 AND for_sale = 1 AND price_cup > 0
@@ -324,6 +473,7 @@ if (!ratesExist) {
   const defaultRates = JSON.stringify([
     { code: 'CUP', label: 'CUP', cupPerUnit: 1 },
     { code: 'MLC', label: 'MLC', cupPerUnit: 0 },
+    { code: 'USD', label: 'USD', cupPerUnit: 0 },
     { code: 'USDT_BEP20', label: 'USDT (BEP20)', cupPerUnit: 0 },
     { code: 'USDT_TRC20', label: 'USDT (TRC20)', cupPerUnit: 0 },
     { code: 'USDT_POLYGON', label: 'USDT (Polygon)', cupPerUnit: 0 },

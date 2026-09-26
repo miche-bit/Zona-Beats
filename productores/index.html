@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Portal de Productores · Zona Beats</title>
+<meta name="theme-color" content="#0c0a12">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/productores/productores.css">
 </head>
 <body>
@@ -21,10 +23,16 @@
         </div>
         <div class="field">
           <label for="password-input">Contraseña</label>
-          <input type="password" id="password-input" placeholder="••••••••">
+          <div class="password-wrap">
+            <input type="password" id="password-input" placeholder="••••••••" autocomplete="current-password">
+            <button type="button" class="btn-show-pass" data-target="password-input">Mostrar</button>
+          </div>
         </div>
         <button class="btn-primary" id="login-btn">Entrar</button>
         <div class="error-msg" id="login-error">Correo o contraseña incorrectos.</div>
+        <div class="disabled-box" id="disabled-box"></div>
+        <p class="switch-mode"><button type="button" id="forgot-pass">¿Olvidaste tu contraseña?</button></p>
+        <div class="forgot-box" id="forgot-box"></div>
         <p class="switch-mode">¿No tienes cuenta? <button type="button" id="go-register">Regístrate aquí</button></p>
       </div>
 
@@ -46,7 +54,15 @@
         </div>
         <div class="field">
           <label for="reg-password">Contraseña</label>
-          <input type="password" id="reg-password" placeholder="Mínimo 6 caracteres">
+          <div class="password-wrap">
+            <input type="password" id="reg-password" placeholder="Mínimo 6 caracteres" autocomplete="new-password">
+            <button type="button" class="btn-show-pass" data-target="reg-password">Mostrar</button>
+          </div>
+          <span class="field-hint">Toca «Mostrar» para revisar que la escribiste bien.</span>
+        </div>
+        <div class="field">
+          <label for="reg-ref">Código de quien te invitó (opcional)</label>
+          <input type="text" id="reg-ref" placeholder="Ej: A1B2C3D" autocapitalize="characters">
         </div>
         <button class="btn-primary" id="register-btn">Crear cuenta</button>
         <div class="error-msg" id="register-error"></div>
@@ -67,201 +83,347 @@
       </div>
     </div>
 
+    <nav class="dash-tabs" id="dash-tabs" aria-label="Secciones">
+      <button type="button" class="dash-tab active" data-tab="resumen">Resumen</button>
+      <button type="button" class="dash-tab" data-tab="subir">Subir beat</button>
+      <button type="button" class="dash-tab" data-tab="beats">Mis beats</button>
+      <button type="button" class="dash-tab" data-tab="dinero">Dinero</button>
+      <button type="button" class="dash-tab" data-tab="stats">Estadísticas</button>
+      <button type="button" class="dash-tab" data-tab="plan">Plan</button>
+      <button type="button" class="dash-tab" data-tab="perfil">Perfil</button>
+    </nav>
+
     <main class="dash-main">
 
-      <div class="stats-row" id="stats-row">
-        <div class="stat-card">
-          <div class="stat-label">Beats vendidos</div>
-          <div class="stat-value" id="stat-sales">0</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Total generado (CUP)</div>
-          <div class="stat-value" id="stat-total">0</div>
-        </div>
-        <div class="stat-card stat-card-highlight">
-          <div class="stat-label">Por cobrar (CUP)</div>
-          <div class="stat-value" id="stat-earnings">0</div>
-          <div class="stat-sub" id="stat-due"></div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Ya cobrado (CUP)</div>
-          <div class="stat-value" id="stat-paid">0</div>
-        </div>
-      </div>
-
-      <div class="panel panel-enter" id="plan-panel">
-        <div class="panel-header-row-p">
-          <h2>Tu plan</h2>
-          <span class="plan-chip" id="plan-chip">Free</span>
-        </div>
+      <!-- ===== RESUMEN ===== -->
+      <section class="tab-page active" data-page="resumen">
         <div id="plan-warning" class="plan-warning" style="display:none;"></div>
-        <div id="plan-request-status" class="plan-request-status" style="display:none;"></div>
-        <div class="plan-facts" id="plan-facts"></div>
-        <p class="panel-hint" id="plan-contact" style="margin-top:14px;"></p>
-        <div class="plans-grid" id="plans-grid"></div>
-      </div>
-
-      <div class="panel panel-enter">
-        <h2>Tu perfil público</h2>
-        <p class="panel-hint">Así te ven los compradores en la sección "Productores" de la tienda.</p>
-        <div class="profile-row">
-          <div class="avatar-box">
-            <img id="avatar-preview" alt="" style="display:none;">
-            <label class="file-drop avatar-drop" id="avatar-drop">
-              <span id="avatar-drop-label">Subir foto</span>
-              <input type="file" id="avatar-input" accept=".jpg,.jpeg,.png,.webp">
-            </label>
+        <div class="stats-row" id="stats-row">
+          <div class="stat-card stat-card-highlight">
+            <div class="stat-label">Disponible para retirar</div>
+            <div class="stat-value" id="stat-available">0</div>
+            <div class="stat-sub" id="stat-available-other">CUP</div>
           </div>
-          <div class="profile-fields">
-            <div class="field">
-              <label for="profile-name">Nombre artístico</label>
-              <input type="text" id="profile-name" placeholder="Tu nombre">
-            </div>
-            <div class="field">
-              <label for="profile-bio">Bio corta</label>
-              <textarea id="profile-bio" rows="2" placeholder="Una línea sobre ti…"></textarea>
-            </div>
-            <div class="field">
-              <label for="profile-phone">Tu WhatsApp</label>
-              <input type="text" id="profile-phone" placeholder="Ej: 53512345678">
-            </div>
+          <div class="stat-card">
+            <div class="stat-label">En retiro</div>
+            <div class="stat-value" id="stat-withdrawing">0</div>
+            <div class="stat-sub">CUP</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Ya cobrado</div>
+            <div class="stat-value" id="stat-paid">0</div>
+            <div class="stat-sub">CUP</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Beats vendidos</div>
+            <div class="stat-value" id="stat-sales">0</div>
+            <div class="stat-sub" id="stat-total"></div>
           </div>
         </div>
 
-        <div class="field">
-          <label>Tus redes sociales</label>
-          <div id="social-list"></div>
-          <button type="button" class="btn-add-row" id="add-social">+ Agregar red</button>
+        <div class="withdraw-notice" id="withdraw-notice" style="display:none;"></div>
+
+        <div class="incentive-card" id="incentive-card"></div>
+
+        <div class="panel">
+          <h2>Invita productores</h2>
+          <p class="panel-hint" id="ref-hint">Comparte tu enlace. Cuando el administrador apruebe a los productores que invitaste, ganas un bono.</p>
+          <div class="ref-box">
+            <input type="text" id="ref-link" readonly>
+            <button type="button" class="btn-secondary-p" id="ref-copy">Copiar</button>
+          </div>
+          <div class="ref-progress" id="ref-progress"></div>
         </div>
+      </section>
 
-        <div class="field">
-          <label>Tus cuentas de cobro</label>
-          <p class="panel-hint" id="currency-hint" style="margin:0 0 8px;"></p>
-          <div id="accounts-list"></div>
-          <button type="button" class="btn-add-row" id="add-account">+ Agregar cuenta</button>
+      <!-- ===== SUBIR ===== -->
+      <section class="tab-page" data-page="subir">
+        <div class="panel">
+          <h2>Subir nuevo beat</h2>
+          <p class="panel-hint">Tu beat entra en revisión y aparecerá en la tienda solo cuando el administrador lo apruebe.</p>
+          <p class="plan-rules" id="plan-format-note"></p>
+          <form id="upload-form">
+            <div class="upload-grid">
+              <div class="upload-col">
+                <div class="field">
+                  <label for="title-input">Título</label>
+                  <input type="text" id="title-input" placeholder="Nombre del beat" required maxlength="120">
+                </div>
+                <div class="field">
+                  <label for="genre-input">Género / etiqueta</label>
+                  <input type="text" id="genre-input" placeholder="Trap, Reggaetón, Drill…" maxlength="60">
+                </div>
+                <div class="field">
+                  <label for="description-input">Descripción</label>
+                  <textarea id="description-input" rows="3" maxlength="600" placeholder="BPM, tonalidad, a qué suena… (los compradores lo ven al tocar «Descripción»)"></textarea>
+                </div>
+                <div class="field checkbox-field" id="playlist-toggle-wrap">
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="is-playlist-input">
+                    <span>Es una colaboración <strong>gratuita</strong> (va a Playlist, no se vende)</span>
+                  </label>
+                </div>
+                <div id="artist-credit-field" style="display:none;" class="field">
+                  <label for="artist-credit-input">Artista(s) colaborador(es)</label>
+                  <input type="text" id="artist-credit-input" placeholder="Ej: Feat. Otro Artista" maxlength="120">
+                </div>
+                <div class="field checkbox-field" id="exclusive-toggle-wrap">
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="make-exclusive-input">
+                    <span>Vender este beat solo como <strong>Exclusivo</strong> (una sola vez, aparece en Beats VIP)</span>
+                  </label>
+                </div>
+
+                <div id="sale-fields">
+                  <div id="license-mode-fields">
+                    <p class="panel-hint compact">Pon precio a las licencias que quieras vender. Cada licencia con precio exige su archivo.</p>
+                    <div class="field lic-field" data-lic="basic">
+                      <label for="price-basic-input">Básica (MP3) — CUP</label>
+                      <input type="text" id="price-basic-input" inputmode="decimal" placeholder="Ej: 500">
+                    </div>
+                    <div class="field lic-field" data-lic="premium">
+                      <label for="price-premium-input">Premium (MP3 + WAV) — CUP</label>
+                      <input type="text" id="price-premium-input" inputmode="decimal" placeholder="Si pones precio, sube el WAV">
+                    </div>
+                    <div class="field lic-field" data-lic="unlimited">
+                      <label for="price-unlimited-input">Ilimitada (MP3 + WAV + STEMS) — CUP</label>
+                      <input type="text" id="price-unlimited-input" inputmode="decimal" placeholder="Si pones precio, sube WAV y STEMS">
+                    </div>
+                  </div>
+                  <div id="exclusive-mode-fields" style="display:none;">
+                    <p class="panel-hint exclusive-warning">Al venderse, el beat se retira de la tienda para siempre y queda solo para ese comprador. Exige WAV y STEMS.</p>
+                    <div class="field">
+                      <label for="price-exclusive-input">Precio exclusivo — CUP</label>
+                      <input type="text" id="price-exclusive-input" inputmode="decimal" placeholder="Ej: 5000">
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="upload-col">
+                <div class="field">
+                  <label>Archivo de audio <span class="req-tag">obligatorio</span></label>
+                  <label class="file-drop" id="audio-drop">
+                    <span id="audio-drop-label">MP3 320 kbps · máx 250 MB</span>
+                    <input type="file" id="audio-input" accept=".mp3,audio/mpeg" required>
+                  </label>
+                  <span class="field-hint">Con este archivo se crea el preview que escucha el público (y el MP3 que recibe el comprador).</span>
+                </div>
+                <div class="field" id="wav-stems-field">
+                  <label>Archivo WAV <span class="req-tag" id="wav-req" style="display:none;">obligatorio</span></label>
+                  <label class="file-drop" id="wav-drop">
+                    <span id="wav-drop-label">WAV en alta calidad · máx 1 GB</span>
+                    <input type="file" id="wav-input" accept=".wav,audio/wav">
+                  </label>
+                  <span class="field-hint" id="wav-note"></span>
+                </div>
+                <div class="field" id="stems-field">
+                  <label>STEMS comprimidos <span class="req-tag" id="stems-req" style="display:none;">obligatorio</span></label>
+                  <label class="file-drop" id="stems-drop">
+                    <span id="stems-drop-label">ZIP (o RAR/7Z) con las pistas separadas · máx 4 GB</span>
+                    <input type="file" id="stems-input" accept=".zip,.rar,.7z">
+                  </label>
+                </div>
+                <div class="field">
+                  <label>Portada <span class="req-tag">obligatoria</span></label>
+                  <label class="file-drop cover-drop-wrap" id="cover-drop">
+                    <img class="cover-preview" id="cover-preview" alt="" style="display:none;">
+                    <span id="cover-drop-label">Cuadrada 3000x3000 px · JPG, PNG o WEBP · máx 8 MB</span>
+                    <input type="file" id="cover-input" accept=".jpg,.jpeg,.png,.webp">
+                  </label>
+                  <span class="field-hint warn" id="cover-note"></span>
+                </div>
+              </div>
+            </div>
+            <div class="upload-progress-wrap" id="upload-progress-wrap" style="display:none;">
+              <div class="upload-progress-track"><div class="upload-progress-fill" id="upload-progress-fill"></div></div>
+              <div class="upload-progress-row">
+                <div class="upload-progress-label" id="upload-progress-label">Subiendo… 0%</div>
+                <button type="button" class="btn-link-p" id="upload-cancel">Pausar</button>
+              </div>
+              <p class="panel-hint compact">Si se corta la conexión, la subida sigue sola. Si cierras la página, vuelve a elegir los mismos archivos y pulsa el botón: sigue donde quedó.</p>
+            </div>
+            <button type="submit" class="btn-primary" id="upload-btn">Enviar a revisión</button>
+          </form>
         </div>
+      </section>
 
-        <button type="button" class="btn-primary" id="save-profile">Guardar perfil</button>
-      </div>
+      <!-- ===== MIS BEATS ===== -->
+      <section class="tab-page" data-page="beats">
+        <div class="panel">
+          <div class="panel-header-row-p">
+            <h2>Tus beats</h2>
+            <span class="plan-chip ghost" id="beats-count"></span>
+          </div>
+          <p class="panel-hint">Puedes eliminar cualquier beat que no tenga ventas aprobadas.</p>
+          <div id="track-list"></div>
+        </div>
+      </section>
 
-      <div class="panel panel-enter">
-        <h2>Subir nuevo beat</h2>
-        <p class="panel-hint">Tu beat entra en revisión y aparecerá en la tienda solo cuando el administrador lo apruebe.</p>
-        <form id="upload-form">
-          <div class="upload-grid">
+      <!-- ===== DINERO ===== -->
+      <section class="tab-page" data-page="dinero">
+        <div class="panel">
+          <h2>Retirar dinero</h2>
+          <div class="balance-line">
             <div>
-              <div class="field">
-                <label for="title-input">Título</label>
-                <input type="text" id="title-input" placeholder="Nombre del beat" required>
-              </div>
-              <div class="field">
-                <label for="genre-input">Género / etiqueta</label>
-                <input type="text" id="genre-input" placeholder="Trap, Reggaetón, Drill…">
-              </div>
-              <div class="field">
-                <label for="description-input">Descripción (opcional)</label>
-                <textarea id="description-input" rows="3" placeholder="Notas sobre el beat…"></textarea>
-              </div>
-              <div class="field checkbox-field">
-                <label class="checkbox-label">
-                  <input type="checkbox" id="is-playlist-input">
-                  <span>Es una colaboración <strong>gratuita</strong> (va a Playlist, no se vende)</span>
-                </label>
-              </div>
-
-              <div id="artist-credit-field" style="display:none;" class="field">
-                <label for="artist-credit-input">Artista(s) colaborador(es)</label>
-                <input type="text" id="artist-credit-input" placeholder="Ej: Feat. Otro Artista">
-              </div>
-
-              <div class="field checkbox-field" id="exclusive-toggle-wrap">
-                <label class="checkbox-label">
-                  <input type="checkbox" id="make-exclusive-input">
-                  <span>Vender este beat solo como <strong>Exclusivo</strong> (una sola vez, aparece en Beats VIP)</span>
-                </label>
-              </div>
-
-              <div id="sale-fields">
-              <div id="license-mode-fields">
-                <p class="panel-hint" style="margin:0 0 10px;">Estas licencias se pueden vender varias veces, a personas distintas. Pon precio a las que quieras ofrecer y deja en blanco las demás.</p>
-                <div class="field">
-                  <label for="price-basic-input">Básica (MP3) — CUP</label>
-                  <input type="text" id="price-basic-input" placeholder="Ej: 500">
-                </div>
-                <div class="field">
-                  <label for="price-premium-input">Premium (MP3 + WAV) — CUP</label>
-                  <input type="text" id="price-premium-input" placeholder="Opcional">
-                </div>
-                <div class="field">
-                  <label for="price-unlimited-input">Ilimitada (MP3 + WAV + STEMS) — CUP</label>
-                  <input type="text" id="price-unlimited-input" placeholder="Opcional">
-                </div>
-              </div>
-
-              <div id="exclusive-mode-fields" style="display:none;">
-                <p class="panel-hint exclusive-warning" style="margin:0 0 10px;">Al venderse, el beat se retira de la tienda para siempre y queda solo para ese comprador. Por eso no puede ofrecer licencias normales al mismo tiempo.</p>
-                <div class="field">
-                  <label for="price-exclusive-input">Precio exclusivo — CUP</label>
-                  <input type="text" id="price-exclusive-input" placeholder="Ej: 5000">
-                </div>
-              </div>
-              </div>
+              <div class="stat-label">Disponible</div>
+              <div class="balance-big wallets" id="w-available">0 CUP</div>
+              <div class="stat-sub" id="w-breakdown"></div>
             </div>
-            <div>
+            <button type="button" class="btn-primary btn-withdraw" id="withdraw-btn">Retirar dinero</button>
+          </div>
+          <div id="w-current"></div>
+          <p class="panel-hint" id="w-term"></p>
+        </div>
+        <div class="panel">
+          <h2>Movimientos de tu cuenta</h2>
+          <p class="panel-hint compact">Todo lo que entra y sale de tu saldo: ventas, bonos, planes y retiros, del más nuevo al más viejo. Borrar una entrada solo la quita de esta lista: tu saldo no cambia.</p>
+          <div class="mov-filters" id="mov-filters">
+            <button type="button" class="mov-chip active" data-tipo="">Todos</button>
+            <button type="button" class="mov-chip" data-tipo="venta">Ventas</button>
+            <button type="button" class="mov-chip" data-tipo="retiro">Retiros</button>
+            <button type="button" class="mov-chip" data-tipo="plan">Planes</button>
+            <button type="button" class="mov-chip" data-tipo="bono">Bonos</button>
+          </div>
+          <div class="hist-tools">
+            <button type="button" class="hist-btn" id="mov-download">⭳ Descargar</button>
+            <button type="button" class="hist-btn danger" id="mov-clear">Borrar historial</button>
+            <button type="button" class="hist-btn" id="mov-restore" hidden>Restaurar borrados</button>
+          </div>
+          <div id="mov-list"></div>
+          <button type="button" class="btn-add-row" id="mov-more" style="display:none;">Ver más</button>
+        </div>
+      </section>
+
+      <!-- ===== ESTADÍSTICAS ===== -->
+      <section class="tab-page" data-page="stats">
+        <div class="panel">
+          <h2>Tus referidos</h2>
+          <div id="stats-referidos"></div>
+        </div>
+        <div class="panel" id="stats-bono-panel" style="display:none;">
+          <h2>Bono Studio por me gusta</h2>
+          <div id="stats-bono"></div>
+        </div>
+        <div class="panel">
+          <h2>Tus beats en números</h2>
+          <div id="stats-beats"></div>
+        </div>
+      </section>
+
+      <!-- ===== PLAN ===== -->
+      <section class="tab-page" data-page="plan">
+        <div class="panel" id="plan-panel">
+          <div class="panel-header-row-p">
+            <h2>Tu plan</h2>
+            <span class="plan-chip" id="plan-chip">Free</span>
+          </div>
+          <div id="plan-request-status" class="plan-request-status" style="display:none;"></div>
+          <div class="plan-facts" id="plan-facts"></div>
+          <p class="panel-hint" id="plan-contact" style="margin-top:14px;"></p>
+          <div class="plans-grid" id="plans-grid"></div>
+          <p class="panel-hint" id="plan-rate-note" style="margin-top:12px;"></p>
+        </div>
+      </section>
+
+      <!-- ===== PERFIL ===== -->
+      <section class="tab-page" data-page="perfil">
+        <div class="panel">
+          <h2>Tu perfil público</h2>
+          <p class="panel-hint">Así te ven los compradores en la sección "Productores" de la tienda.</p>
+          <div class="profile-row">
+            <div class="avatar-box">
+              <img id="avatar-preview" alt="" style="display:none;">
+              <label class="file-drop avatar-drop" id="avatar-drop">
+                <span id="avatar-drop-label">Subir foto</span>
+                <input type="file" id="avatar-input" accept=".jpg,.jpeg,.png,.webp">
+              </label>
+            </div>
+            <div class="profile-fields">
               <div class="field">
-                <label>Archivo de audio</label>
-                <label class="file-drop" id="audio-drop">
-                  <span id="audio-drop-label">MP3, WAV, M4A, OGG o FLAC · máx 150MB</span>
-                  <input type="file" id="audio-input" accept=".mp3,.wav,.m4a,.ogg,.flac" required>
-                </label>
-              </div>
-              <div class="field" id="wav-stems-field">
-                <label>Archivo WAV (opcional)</label>
-                <p class="panel-hint" style="margin:0 0 8px;font-size:12px;">Solo hace falta si vendes Premium, Ilimitada o Exclusiva.</p>
-                <label class="file-drop" id="wav-drop">
-                  <span id="wav-drop-label">WAV en alta calidad</span>
-                  <input type="file" id="wav-input" accept=".wav">
-                </label>
-              </div>
-              <div class="field" id="stems-field">
-                <label>STEMS (opcional)</label>
-                <p class="panel-hint" style="margin:0 0 8px;font-size:12px;">Un ZIP con las pistas separadas. Solo hace falta para Ilimitada o Exclusiva.</p>
-                <label class="file-drop" id="stems-drop">
-                  <span id="stems-drop-label">Archivo ZIP con los stems</span>
-                  <input type="file" id="stems-input" accept=".zip">
-                </label>
+                <label for="profile-name">Nombre artístico</label>
+                <input type="text" id="profile-name" placeholder="Tu nombre" maxlength="80">
               </div>
               <div class="field">
-                <label>Portada (opcional)</label>
-                <p class="panel-hint" style="margin:0 0 8px;font-size:12px;">Usa una imagen <strong>cuadrada de 3000x3000 píxeles</strong>. Si no es cuadrada, se recorta y se ve mal en la tienda.</p>
-                <label class="file-drop" id="cover-drop">
-                  <span id="cover-drop-label">JPG, PNG o WEBP · 3000x3000 px · máx 8MB</span>
-                  <input type="file" id="cover-input" accept=".jpg,.jpeg,.png,.webp">
-                </label>
+                <label for="profile-bio">Bio corta</label>
+                <textarea id="profile-bio" rows="2" maxlength="400" placeholder="Una línea sobre ti…"></textarea>
+              </div>
+              <div class="field">
+                <label for="profile-phone">Tu WhatsApp</label>
+                <input type="text" id="profile-phone" placeholder="Ej: 53512345678" maxlength="40">
               </div>
             </div>
           </div>
-          <div class="upload-progress-wrap" id="upload-progress-wrap" style="display:none;">
-            <div class="upload-progress-track">
-              <div class="upload-progress-fill" id="upload-progress-fill"></div>
-            </div>
-            <div class="upload-progress-label" id="upload-progress-label">Subiendo… 0%</div>
+
+          <div class="field" id="social-field">
+            <label>Tus redes sociales</label>
+            <p class="panel-hint compact" id="redes-plan-note"></p>
+            <div id="social-list"></div>
+            <button type="button" class="btn-add-row" id="add-social">+ Agregar red</button>
           </div>
-          <button type="submit" class="btn-primary" id="upload-btn" style="margin-top:8px;">Enviar a revisión</button>
-        </form>
-      </div>
 
-      <div class="panel panel-enter">
-        <h2>Tus beats</h2>
-        <div id="track-list"></div>
-      </div>
+          <div class="field">
+            <label>Tus cuentas de cobro</label>
+            <p class="panel-hint compact" id="currency-hint"></p>
+            <div id="accounts-list"></div>
+            <button type="button" class="btn-add-row" id="add-account">+ Agregar cuenta</button>
+          </div>
 
-      <div class="panel panel-enter">
-        <h2>Historial de ventas</h2>
-        <div id="earnings-list"></div>
-      </div>
+          <button type="button" class="btn-primary" id="save-profile">Guardar perfil</button>
+        </div>
+
+        <div class="panel">
+          <h2>Cambiar contraseña</h2>
+          <p class="panel-hint">Al cambiarla se cierra tu sesión en los otros teléfonos o computadoras.</p>
+          <div class="cfg-grid-p">
+            <div class="field">
+              <label for="pass-current">Contraseña actual</label>
+              <div class="password-wrap">
+                <input type="password" id="pass-current" autocomplete="current-password">
+                <button type="button" class="btn-show-pass" data-target="pass-current">Mostrar</button>
+              </div>
+            </div>
+            <div class="field">
+              <label for="pass-new">Contraseña nueva</label>
+              <div class="password-wrap">
+                <input type="password" id="pass-new" placeholder="Mínimo 6 caracteres" autocomplete="new-password">
+                <button type="button" class="btn-show-pass" data-target="pass-new">Mostrar</button>
+              </div>
+            </div>
+          </div>
+          <button type="button" class="btn-secondary-p" id="save-password">Cambiar contraseña</button>
+        </div>
+      </section>
 
     </main>
+  </div>
+
+  <!-- Modal de retiro -->
+  <div class="plan-modal-overlay" id="withdraw-modal" role="dialog" aria-modal="true" aria-labelledby="withdraw-title">
+    <div class="plan-modal-box">
+      <button type="button" class="plan-modal-close" id="withdraw-close" aria-label="Cerrar">&times;</button>
+      <div class="login-badge">RETIRAR DINERO</div>
+      <h3 id="withdraw-title">Retirar</h3>
+      <div class="field" id="withdraw-wallet-field">
+        <label for="withdraw-wallet">¿Qué saldo quieres retirar?</label>
+        <select id="withdraw-wallet" class="select-p"></select>
+        <span class="field-hint">Cada venta queda en la moneda en que pagó el comprador. Los bonos van al saldo en CUP.</span>
+      </div>
+      <div class="field">
+        <label for="withdraw-currency">¿En qué moneda quieres cobrar?</label>
+        <select id="withdraw-currency" class="select-p"></select>
+      </div>
+      <div class="field">
+        <label for="withdraw-amount" id="withdraw-amount-label">¿Cuánto quieres retirar?</label>
+        <div class="amount-row">
+          <input type="text" inputmode="decimal" id="withdraw-amount" autocomplete="off">
+          <button type="button" class="btn-secondary-p" id="withdraw-all">Todo</button>
+        </div>
+        <span class="field-hint" id="withdraw-amount-hint"></span>
+      </div>
+      <div class="w-summary" id="w-summary"></div>
+      <button type="button" class="btn-primary" id="withdraw-confirm">Confirmar retiro y avisar al administrador</button>
+      <p class="panel-hint center" id="withdraw-foot"></p>
+    </div>
   </div>
 
   <div class="plan-modal-overlay" id="plan-modal" role="dialog" aria-modal="true" aria-labelledby="plan-modal-title">
@@ -279,6 +441,19 @@
           <button type="button" class="month-opt" data-m="6">6 meses</button>
           <button type="button" class="month-opt" data-m="12">12 meses</button>
         </div>
+      </div>
+
+      <div class="pay-balance" id="plan-balance-box" style="display:none;">
+        <div class="pay-balance-title">Pagar con tu saldo</div>
+        <p class="panel-hint compact" style="margin:0 0 10px;">Se descuenta de lo que ganaste en la plataforma y el plan se activa al instante, sin retirar ni mandar comprobante.</p>
+        <div class="field" style="margin-bottom:10px;">
+          <label for="plan-wallet">¿De qué saldo?</label>
+          <select id="plan-wallet" class="select-p"></select>
+        </div>
+        <div class="w-row"><span>Se descuenta</span><strong id="plan-wallet-cost">—</strong></div>
+        <div class="w-row"><span>Te queda</span><strong id="plan-wallet-rest">—</strong></div>
+        <button type="button" class="btn-primary" id="plan-balance-btn">Activar ya con mi saldo</button>
+        <div class="or-sep"><span>o paga por transferencia</span></div>
       </div>
 
       <div class="plan-total">
@@ -305,8 +480,39 @@
     </div>
   </div>
 
+  <!-- Modal para editar un beat -->
+  <div class="plan-modal-overlay" id="edit-modal" role="dialog" aria-modal="true" aria-labelledby="edit-title">
+    <div class="plan-modal-box">
+      <button type="button" class="plan-modal-close" id="edit-close" aria-label="Cerrar">&times;</button>
+      <div class="login-badge">EDITAR BEAT</div>
+      <h3 id="edit-title">Editar</h3>
+      <p class="panel-hint" id="edit-hint"></p>
+      <div class="field">
+        <label for="edit-title-input">Título</label>
+        <input type="text" id="edit-title-input" maxlength="120">
+      </div>
+      <div class="field">
+        <label for="edit-genre-input">Género / etiqueta</label>
+        <input type="text" id="edit-genre-input" maxlength="60">
+      </div>
+      <div class="field">
+        <label for="edit-description-input">Descripción</label>
+        <textarea id="edit-description-input" rows="3" maxlength="600"></textarea>
+      </div>
+      <div class="field" id="edit-credit-field">
+        <label for="edit-credit-input">Artista(s) colaborador(es)</label>
+        <input type="text" id="edit-credit-input" maxlength="120">
+      </div>
+      <div id="edit-prices"></div>
+      <p class="panel-hint compact" id="edit-files-note"></p>
+      <button type="button" class="btn-primary" id="edit-save">Guardar cambios</button>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
 
+  <script src="/subidas.js"></script>
+  <script src="/historial.js"></script>
   <script src="/productores/productores.js"></script>
 </body>
 </html>

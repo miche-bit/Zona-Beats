@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Verificar licencia · Zona Beats</title>
+<meta name="theme-color" content="#0c0a12">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/style.css">
 <style>
   .verify-wrap { max-width: 640px; margin: 0 auto; padding: 48px 20px 80px; }
@@ -67,6 +69,8 @@
     color: #0c0a12; font-weight: 700; font-size: 15px; padding: 15px; border-radius: 9px; text-decoration: none;
   }
   .verify-pdf-btn { margin-top: 10px; }
+  .verify-status.warn { color: #ffc13d; }
+  .verify-status + .verify-status { margin-top: 10px; }
 </style>
 </head>
 <body>
@@ -85,11 +89,11 @@
     </div>
 
     <div class="verify-file">
-      <div class="verify-file-title">¿Tienes un archivo de audio y quieres saber si salió de aquí?</div>
-      <p class="verify-sub" style="margin:4px 0 12px;">Elígelo y calculamos su huella digital en tu propio dispositivo. El archivo no se sube a ningún lado: solo comparamos la huella.</p>
+      <div class="verify-file-title">¿Tienes un archivo y quieres saber si salió de aquí?</div>
+      <p class="verify-sub" style="margin:4px 0 12px;">Sirve el audio (MP3 o WAV), los STEMS o el <strong>PDF de la licencia</strong>. La huella se calcula en tu propio dispositivo: el archivo no se sube a ningún lado.</p>
       <label class="verify-file-drop">
-        <span id="file-label">Elegir archivo de audio</span>
-        <input type="file" id="file-input" accept="audio/*,.wav,.mp3,.flac,.m4a,.ogg">
+        <span id="file-label">Elegir archivo</span>
+        <input type="file" id="file-input" accept="audio/*,.wav,.mp3,.flac,.m4a,.ogg,.zip,.rar,.7z,.pdf,application/pdf">
       </label>
     </div>
 
@@ -112,7 +116,7 @@
       return d.toLocaleDateString('es', { day: '2-digit', month: 'long', year: 'numeric' });
     }
 
-    async function verificar(id) {
+    async function verificar(id, hashDelPdf) {
       const clean = (id || '').trim().toUpperCase();
       if (!clean) return;
       card.className = 'verify-card show';
@@ -127,7 +131,16 @@
           return;
         }
         const d = await res.json();
+        let avisoPdf = '';
+        if (hashDelPdf !== undefined) {
+          avisoPdf = !hashDelPdf
+            ? '<div class="verify-status warn"><span class="verify-status-dot"></span>No encontramos el hash impreso en ese PDF: compara a mano los datos de abajo con los del documento.</div>'
+            : hashDelPdf === String(d.certificateHash || '').toLowerCase()
+              ? '<div class="verify-status ok"><span class="verify-status-dot"></span>El PDF es auténtico: su hash coincide con el registro</div>'
+              : '<div class="verify-status bad"><span class="verify-status-dot"></span>Ese PDF fue modificado: el hash impreso no coincide con el registro. Confía solo en los datos de abajo.</div>';
+        }
         card.innerHTML =
+          avisoPdf +
           '<div class="verify-status ok"><span class="verify-status-dot"></span>Licencia válida y registrada</div>' +
           '<div class="verify-row"><span class="verify-key">Número</span><span class="verify-val">' + esc(d.certificateId) + '</span></div>' +
           '<div class="verify-row"><span class="verify-key">Beat</span><span class="verify-val">' + esc(d.trackTitle) + '</span></div>' +
@@ -137,13 +150,14 @@
           '<div class="verify-row"><span class="verify-key">Precio</span><span class="verify-val">' + esc(d.priceLabel) + '</span></div>' +
           '<div class="verify-row"><span class="verify-key">Fecha</span><span class="verify-val">' + esc(fecha(d.createdAt)) + '</span></div>' +
           '<div class="verify-hash"><strong>Hash SHA-256:</strong><br>' + esc(d.certificateHash) + '</div>' +
-
           '<a class="verify-pdf-btn" href="/api/license/' + encodeURIComponent(d.certificateId) + '/pdf">Descargar certificado en PDF</a>' +
           '<p class="verify-note">Este registro acredita qué licencia se otorgó y qué usos autoriza. El hash permite comprobar que el certificado no fue alterado.</p>';
       } catch {
         card.innerHTML = '<div class="verify-status bad"><span class="verify-status-dot"></span>No se pudo consultar. Revisa tu conexión.</div>';
       }
     }
+
+    const TIPOS = { master: 'Audio original', mp3: 'MP3', wav: 'WAV', stems: 'STEMS' };
 
     async function verificarHash(hash, origen) {
       card.className = 'verify-card show';
@@ -162,15 +176,17 @@
         return;
       }
       if (d.type === 'license') { input.value = d.certificateId; verificar(d.certificateId); return; }
+      const lista = Array.isArray(d.licenciasEmitidas) ? d.licenciasEmitidas : [];
       card.innerHTML =
         '<div class="verify-status ok"><span class="verify-status-dot"></span>Archivo original registrado en esta plataforma</div>' +
         '<div class="verify-row"><span class="verify-key">Beat</span><span class="verify-val">' + esc(d.trackTitle) + '</span></div>' +
+        (d.fileKind ? '<div class="verify-row"><span class="verify-key">Archivo</span><span class="verify-val">' + esc(TIPOS[d.fileKind] || d.fileKind) + '</span></div>' : '') +
         '<div class="verify-row"><span class="verify-key">Productor</span><span class="verify-val">' + esc(d.producerName) + '</span></div>' +
         '<div class="verify-row"><span class="verify-key">Subido</span><span class="verify-val">' + esc(fecha(d.uploadedAt)) + '</span></div>' +
         '<div class="verify-hash"><strong>Huella SHA-256:</strong><br>' + esc(hash) + '</div>' +
         '<p class="verify-note" style="margin-top:16px;"><strong>Licencias emitidas para este beat:</strong></p>' +
-        (d.licenciasEmitidas.length
-          ? d.licenciasEmitidas.map(l => '<div class="lic-mini">' + esc(l.licenseLabel) + ' · <a href="/verify/' + encodeURIComponent(l.certificateId) + '">' + esc(l.certificateId) + '</a> · ' + esc(fecha(l.createdAt)) + '</div>').join('')
+        (lista.length
+          ? lista.map(l => '<div class="lic-mini">' + esc(l.licenseLabel) + ' · <a href="/verify/' + encodeURIComponent(l.certificateId) + '">' + esc(l.certificateId) + '</a> · ' + esc(fecha(l.createdAt)) + '</div>').join('')
           : '<p class="verify-note">Ninguna. Nadie compró una licencia de este beat en la plataforma, así que cualquier uso comercial no está autorizado desde aquí.</p>');
     }
 
@@ -183,24 +199,137 @@
     document.getElementById('verify-btn').addEventListener('click', buscar);
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') buscar(); });
 
+    function leerTrozo(blob) {
+      if (blob.arrayBuffer) return blob.arrayBuffer();
+      return new Promise((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(fr.result);
+        fr.onerror = () => reject(fr.error);
+        fr.readAsArrayBuffer(blob);
+      });
+    }
+
+    // SHA-256 por partes: un WAV de 1 GB o unos STEMS no caben enteros en la memoria de un teléfono.
+    function crearSha256() {
+      const K = new Uint32Array([
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+      ]);
+      const H = new Uint32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]);
+      const W = new Uint32Array(64);
+      const resto = new Uint8Array(64);
+      let enResto = 0;
+      let total = 0;
+      function bloque(p, o) {
+        for (let i = 0; i < 16; i++) W[i] = (p[o + 4 * i] << 24) | (p[o + 4 * i + 1] << 16) | (p[o + 4 * i + 2] << 8) | p[o + 4 * i + 3];
+        for (let i = 16; i < 64; i++) {
+          const x = W[i - 15], y = W[i - 2];
+          const s0 = ((x >>> 7) | (x << 25)) ^ ((x >>> 18) | (x << 14)) ^ (x >>> 3);
+          const s1 = ((y >>> 17) | (y << 15)) ^ ((y >>> 19) | (y << 13)) ^ (y >>> 10);
+          W[i] = (W[i - 16] + s0 + W[i - 7] + s1) | 0;
+        }
+        let a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+        for (let i = 0; i < 64; i++) {
+          const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
+          const t1 = (h + S1 + ((e & f) ^ (~e & g)) + K[i] + W[i]) | 0;
+          const S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
+          const t2 = (S0 + ((a & b) ^ (a & c) ^ (b & c))) | 0;
+          h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+        }
+        H[0] += a; H[1] += b; H[2] += c; H[3] += d; H[4] += e; H[5] += f; H[6] += g; H[7] += h;
+      }
+      return {
+        update(datos) {
+          let i = 0;
+          total += datos.length;
+          if (enResto) {
+            while (enResto < 64 && i < datos.length) resto[enResto++] = datos[i++];
+            if (enResto === 64) { bloque(resto, 0); enResto = 0; }
+          }
+          while (i + 64 <= datos.length) { bloque(datos, i); i += 64; }
+          while (i < datos.length) resto[enResto++] = datos[i++];
+        },
+        hex() {
+          const alto = Math.floor(total / 0x20000000);
+          const bajo = (total % 0x20000000) * 8;
+          resto[enResto++] = 0x80;
+          if (enResto > 56) { resto.fill(0, enResto); bloque(resto, 0); enResto = 0; }
+          resto.fill(0, enResto, 56);
+          resto[56] = alto >>> 24; resto[57] = (alto >>> 16) & 255; resto[58] = (alto >>> 8) & 255; resto[59] = alto & 255;
+          resto[60] = bajo >>> 24; resto[61] = (bajo >>> 16) & 255; resto[62] = (bajo >>> 8) & 255; resto[63] = bajo & 255;
+          bloque(resto, 0);
+          return Array.from(H).map(v => v.toString(16).padStart(8, '0')).join('');
+        },
+      };
+    }
+
+    async function huellaArchivo(f, alAvanzar) {
+      if (window.crypto && crypto.subtle && f.size <= 150 * 1024 * 1024) {
+        try {
+          const digest = await crypto.subtle.digest('SHA-256', await leerTrozo(f));
+          return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+        } catch { /* sin memoria: se calcula por partes */ }
+      }
+      const sha = crearSha256();
+      const TROZO = 4 * 1024 * 1024;
+      for (let pos = 0; pos < f.size; pos += TROZO) {
+        sha.update(new Uint8Array(await leerTrozo(f.slice(pos, pos + TROZO))));
+        alAvanzar(Math.min(100, Math.floor((pos + TROZO) / f.size * 100)));
+        await new Promise(r => setTimeout(r, 0));
+      }
+      return sha.hex();
+    }
+
+    // Del PDF de la licencia se leen el número y el hash impreso (el PDF guarda el texto sin comprimir).
+    async function leerLicenciaPdf(f) {
+      const bytes = new Uint8Array(await leerTrozo(f.slice(0, 2 * 1024 * 1024)));
+      let texto = '';
+      for (let i = 0; i < bytes.length; i += 8192) texto += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+      const lic = (texto.match(/LIC-\d{4}-(?:\d{4,}(?:-[0-9A-F]{4})?|[0-9A-F]{8})/) || [])[0] || '';
+      const partes = [];
+      const re = /\(([a-f0-9]{32})\)\s*Tj/g;
+      let m;
+      while ((m = re.exec(texto)) && partes.length < 2) partes.push(m[1]);
+      return { lic, hash: partes.length === 2 ? partes.join('') : '' };
+    }
+
     document.getElementById('file-input').addEventListener('change', async (e) => {
       const f = e.target.files[0];
       if (!f) return;
       const label = document.getElementById('file-label');
-      if (!window.crypto || !window.crypto.subtle) {
-        card.className = 'verify-card show';
-        card.innerHTML = '<div class="verify-status bad"><span class="verify-status-dot"></span>Tu navegador no permite calcular la huella aquí. Prueba con Chrome o Safari actualizados.</div>';
+      card.className = 'verify-card show';
+      if (/\.pdf$/i.test(f.name) || f.type === 'application/pdf') {
+        label.textContent = 'Leyendo ' + f.name + '…';
+        const { lic, hash } = await leerLicenciaPdf(f).catch(() => ({ lic: '', hash: '' }));
+        label.textContent = f.name;
+        if (!lic) {
+          card.innerHTML = '<div class="verify-status bad"><span class="verify-status-dot"></span>Ese PDF no parece una licencia de Zona Beats: no encontramos el número de licencia.</div>';
+          return;
+        }
+        input.value = lic;
+        verificar(lic, hash);
         return;
       }
       label.textContent = 'Calculando huella de ' + f.name + '…';
-      const buf = await f.arrayBuffer();
-      const digest = await crypto.subtle.digest('SHA-256', buf);
-      const hex = Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
-      label.textContent = f.name;
-      verificarHash(hex, 'archivo');
+      card.innerHTML = '<div class="verify-status">Calculando la huella del archivo…</div>';
+      try {
+        const hex = await huellaArchivo(f, (pct) => { label.textContent = 'Calculando huella de ' + f.name + '… ' + pct + '%'; });
+        label.textContent = f.name;
+        verificarHash(hex, 'archivo');
+      } catch {
+        label.textContent = 'Elegir archivo';
+        card.innerHTML = '<div class="verify-status bad"><span class="verify-status-dot"></span>No se pudo leer el archivo en este dispositivo.</div>';
+      }
     });
 
-    const fromUrl = decodeURIComponent(location.pathname.replace(/^\/verify\/?/, ''));
+    let fromUrl = '';
+    try { fromUrl = decodeURIComponent(location.pathname.replace(/^\/verify\/?/, '')); } catch { fromUrl = ''; }
     if (fromUrl) {
       input.value = fromUrl.toUpperCase();
       verificar(fromUrl);

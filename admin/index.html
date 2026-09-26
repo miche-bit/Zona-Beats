@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Panel de administración · Zona Beats</title>
+<meta name="theme-color" content="#0c0a12">
+<meta name="robots" content="noindex">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/admin/admin.css">
 </head>
 <body>
@@ -16,7 +19,10 @@
       <p>Acceso privado para subir contenido.</p>
       <div class="field">
         <label for="password-input">Contraseña</label>
-        <input type="password" id="password-input" placeholder="••••••••">
+        <div class="password-field-wrap">
+          <input type="password" id="password-input" placeholder="••••••••" autocomplete="current-password">
+          <button type="button" class="btn-toggle-password" id="toggle-admin-password">Mostrar</button>
+        </div>
       </div>
       <button class="btn-primary" id="login-btn">Entrar</button>
       <div class="error-msg" id="login-error">Contraseña incorrecta.</div>
@@ -28,18 +34,22 @@
     <div class="admin-topbar">
       <div class="admin-brand"><span class="dot"></span> PANEL DE ADMINISTRACIÓN</div>
       <div class="admin-topbar-actions">
-        <a class="btn-backup" id="backup-btn" href="/api/admin/backup">Descargar backup</a>
-        <label class="btn-restore" id="restore-btn-label">
-          Restaurar backup
-          <input type="file" id="restore-input" accept=".zip" style="display:none;">
-        </label>
+        <a class="btn-backup" href="/" target="_blank" rel="noopener">Ver tienda</a>
         <button class="btn-logout" id="logout-btn">Cerrar sesión</button>
       </div>
     </div>
 
+    <nav class="admin-nav" id="admin-nav" aria-label="Secciones">
+      <button type="button" class="admin-nav-btn active" data-cat="ventas">Ventas <span class="nav-badge" data-for="ventas"></span></button>
+      <button type="button" class="admin-nav-btn" data-cat="productores">Productores <span class="nav-badge" data-for="productores"></span></button>
+      <button type="button" class="admin-nav-btn" data-cat="musica">Mi música</button>
+      <button type="button" class="admin-nav-btn" data-cat="tienda">Tienda y cobros</button>
+      <button type="button" class="admin-nav-btn" data-cat="ajustes">Ajustes</button>
+    </nav>
+
     <main class="admin-main">
 
-      <div class="panel">
+      <div class="panel" data-cat="musica">
         <h2>Subir nueva pista</h2>
         <form id="upload-form">
           <div class="upload-grid">
@@ -53,8 +63,8 @@
                 <input type="text" id="genre-input" placeholder="House, Reggaetón, Techno…">
               </div>
               <div class="field">
-                <label for="description-input">Descripción (opcional)</label>
-                <textarea id="description-input" rows="3" placeholder="Notas sobre el set…"></textarea>
+                <label for="description-input">Descripción</label>
+                <textarea id="description-input" rows="3" maxlength="600" placeholder="BPM, tonalidad, a qué suena… (el público lo ve al tocar «Descripción»)"></textarea>
               </div>
 
               <div class="field checkbox-field">
@@ -80,23 +90,23 @@
                 </div>
 
                 <div id="license-mode-fields">
-                  <p class="panel-hint" style="margin:0 0 10px;">Estas licencias se pueden vender varias veces, a personas distintas. Pon precio a las que quieras ofrecer.</p>
+                  <p class="panel-hint" style="margin:0 0 10px;">Premium y Ilimitada se pueden vender varias veces. Cada licencia con precio exige su archivo: Premium → WAV; Ilimitada → WAV y STEMS.</p>
                   <div class="field">
                     <label for="price-basic-input">Básica (MP3) — CUP</label>
                     <input type="text" id="price-basic-input" placeholder="Ej: 500">
                   </div>
                   <div class="field">
                     <label for="price-premium-input">Premium (MP3 + WAV) — CUP</label>
-                    <input type="text" id="price-premium-input" placeholder="Opcional">
+                    <input type="text" id="price-premium-input" inputmode="decimal" placeholder="Si pones precio, sube el WAV">
                   </div>
                   <div class="field">
                     <label for="price-unlimited-input">Ilimitada (MP3 + WAV + STEMS) — CUP</label>
-                    <input type="text" id="price-unlimited-input" placeholder="Opcional">
+                    <input type="text" id="price-unlimited-input" inputmode="decimal" placeholder="Si pones precio, sube WAV y STEMS">
                   </div>
                 </div>
 
                 <div id="exclusive-mode-fields" style="display:none;">
-                  <p class="panel-hint exclusive-warning" style="margin:0 0 10px;">Al venderse, la pista se retira del catálogo para siempre y pasa a Beats VIP. Por eso no puede ofrecer licencias normales al mismo tiempo.</p>
+                  <p class="panel-hint exclusive-warning" style="margin:0 0 10px;">Al venderse, la pista se retira del catálogo para siempre y pasa a Beats VIP. No puede ofrecer otras licencias al mismo tiempo. Exige WAV y STEMS.</p>
                   <div class="field">
                     <label for="price-exclusive-input">Precio exclusivo — CUP</label>
                     <input type="text" id="price-exclusive-input" placeholder="Ej: 5000">
@@ -106,18 +116,36 @@
             </div>
             <div>
               <div class="field">
-                <label>Archivo de audio</label>
+                <label>Archivo de audio <span class="req-tag">obligatorio</span></label>
                 <label class="file-drop" id="audio-drop">
-                  <span id="audio-drop-label">MP3, WAV, M4A, OGG o FLAC · máx 150MB</span>
+                  <span id="audio-drop-label">MP3, WAV, M4A, OGG o FLAC · máx 250 MB</span>
                   <input type="file" id="audio-input" accept=".mp3,.wav,.m4a,.ogg,.flac" required>
+                </label>
+                <span class="field-hint">Con este archivo se crea el preview (MP3 liviano) y el MP3 que recibe el comprador.</span>
+              </div>
+              <div class="field" id="admin-wav-field">
+                <label>Archivo WAV <span class="req-tag" id="admin-wav-req" style="display:none;">obligatorio</span></label>
+                <label class="file-drop" id="admin-wav-drop">
+                  <span id="admin-wav-label">WAV en alta calidad · máx 1 GB</span>
+                  <input type="file" id="admin-wav-input" accept=".wav">
+                </label>
+                <span class="field-hint" id="admin-wav-note"></span>
+              </div>
+              <div class="field" id="admin-stems-field">
+                <label>STEMS comprimidos <span class="req-tag" id="admin-stems-req" style="display:none;">obligatorio</span></label>
+                <label class="file-drop" id="admin-stems-drop">
+                  <span id="admin-stems-label">ZIP (o RAR/7Z) con las pistas separadas · máx 4 GB</span>
+                  <input type="file" id="admin-stems-input" accept=".zip,.rar,.7z">
                 </label>
               </div>
               <div class="field">
-                <label>Portada (opcional)</label>
-                <label class="file-drop" id="cover-drop">
-                  <span id="cover-drop-label">JPG, PNG o WEBP · máx 8MB</span>
+                <label>Portada <span class="req-tag">obligatoria</span></label>
+                <label class="file-drop cover-drop-wrap" id="cover-drop">
+                  <img class="cover-preview" id="cover-preview" alt="" style="display:none;">
+                  <span id="cover-drop-label">Cuadrada 3000x3000 px · JPG, PNG o WEBP · máx 8 MB</span>
                   <input type="file" id="cover-input" accept=".jpg,.jpeg,.png,.webp">
                 </label>
+                <span class="field-hint warn" id="cover-note"></span>
               </div>
             </div>
           </div>
@@ -125,13 +153,17 @@
             <div class="upload-progress-track">
               <div class="upload-progress-fill" id="upload-progress-fill"></div>
             </div>
-            <div class="upload-progress-label" id="upload-progress-label">Subiendo… 0%</div>
+            <div class="upload-progress-row">
+              <div class="upload-progress-label" id="upload-progress-label">Subiendo… 0%</div>
+              <button type="button" class="btn-link" id="upload-cancel">Pausar</button>
+            </div>
+            <p class="panel-hint upload-note">Si se corta la conexión, la subida sigue sola. Si cierras la página, vuelve a elegir los mismos archivos y pulsa «Publicar»: sigue donde quedó.</p>
           </div>
           <button type="submit" class="btn-primary" id="upload-btn" style="margin-top:8px;">Publicar pista</button>
         </form>
       </div>
 
-      <div class="panel">
+      <div class="panel" data-cat="tienda">
         <h2>Promociones y horario</h2>
         <p class="panel-hint">Se muestran arriba de todo en la página pública.</p>
         <form id="site-config-form">
@@ -148,7 +180,7 @@
           <div class="field">
             <label for="discount-input">Descuento del catálogo (%)</label>
             <input type="text" id="discount-input" placeholder="Ej: 20 (0 = sin descuento)">
-            <p class="panel-hint" style="margin:6px 0 0;">Este es el <strong>único</strong> lugar donde se fija el descuento. Solo se aplica mientras el banner esté activo y baja el precio de <strong>todos</strong> los beats del catálogo. Si escribes un % aquí, el banner lo muestra automáticamente.</p>
+            <p class="panel-hint" style="margin:6px 0 0;">Este es el <strong>único</strong> lugar donde se fija el descuento. Solo se aplica mientras el banner esté activo y baja el precio de <strong>todos</strong> los beats del catálogo (también los de productores: su ganancia se calcula sobre el precio con descuento). Si escribes un % aquí, el banner lo muestra automáticamente.</p>
           </div>
           <div class="field">
             <label for="schedule-text-input">Horario de atención</label>
@@ -158,7 +190,7 @@
         </form>
       </div>
 
-      <div class="panel">
+      <div class="panel" data-cat="tienda">
         <h2>Tasas de cambio</h2>
         <p class="panel-hint">
           El precio de cada pista se define en CUP. Aquí defines cuántos CUP equivalen a 1 unidad de cada moneda, para que el público pueda ver el precio convertido y pagar en la moneda que prefiera. Déjala en 0 para ocultar esa moneda del selector público hasta que tengas la tasa real.
@@ -181,16 +213,25 @@
         </form>
       </div>
 
-      <div class="panel">
+      <div class="panel summary-panel" data-cat="ventas">
+        <div class="panel-header-row">
+          <h2>Resumen</h2>
+          <button type="button" class="btn-link" id="summary-refresh">Actualizar</button>
+        </div>
+        <div class="summary-grid" id="admin-summary"></div>
+        <div class="summary-pending" id="admin-pending"></div>
+      </div>
+
+      <div class="panel" data-cat="ventas">
         <div class="panel-header-row">
           <h2>Comprobantes de compra</h2>
           <span class="badge-count" id="orders-count"></span>
         </div>
-        <p class="panel-hint">Cuando alguien compra una pista, su comprobante aparece aquí con su nombre y teléfono. Aprueba el pedido cuando confirmes el pago (si la pista era exclusiva, se marca vendida y pasa a Beats VIP). Elimina el comprobante cuando ya lo hayas procesado, para no acumular espacio.</p>
+        <p class="panel-hint">Cuando alguien compra, su comprobante aparece aquí. <strong>Aprueba</strong> cuando confirmes que el dinero llegó: el comprador descarga desde «Mis compras» y tú le mandas su link privado por WhatsApp. Si el pago no llegó o no coincide, <strong>recházalo</strong> con el motivo: el comprador lo ve en «Mis compras».</p>
         <div id="orders-list"></div>
       </div>
 
-      <div class="panel">
+      <div class="panel" data-cat="productores">
         <div class="panel-header-row">
           <h2>Beats de productores pendientes</h2>
           <span class="badge-count" id="pending-tracks-count"></span>
@@ -199,7 +240,7 @@
         <div id="pending-tracks-list"></div>
       </div>
 
-      <div class="panel">
+      <div class="panel" data-cat="productores">
         <div class="panel-header-row">
           <h2>Productores</h2>
           <span class="badge-count" id="producers-count"></span>
@@ -216,6 +257,10 @@
             <input type="email" id="producer-email-input" placeholder="correo@ejemplo.com" required>
           </div>
           <div class="field">
+            <label for="producer-phone-input">WhatsApp</label>
+            <input type="tel" id="producer-phone-input" placeholder="Ej: 5355512345" inputmode="tel">
+          </div>
+          <div class="field">
             <label for="producer-password-input">Contraseña</label>
             <div class="password-field-wrap">
               <input type="password" id="producer-password-input" placeholder="Mín. 6 caracteres" required>
@@ -228,65 +273,133 @@
         <div id="producers-list"></div>
       </div>
 
-      <div class="panel">
-        <h2>Planes de productores</h2>
-        <p class="panel-hint">La comisión la define el plan de cada productor (Free 30%, Pro 20%, Studio 10%) y se calcula con el plan que tenga <strong>en el momento en que apruebas la venta</strong>. Aquí fijas lo que cobras por cada plan al mes y tu WhatsApp de contacto.</p>
-        <form id="platform-config-form" class="inline-form">
-          <div class="field">
-            <label for="admin-phone-input">Tu WhatsApp (lo ven los productores)</label>
-            <input type="text" id="admin-phone-input" placeholder="Ej: 5355633280">
+      <div class="panel" data-cat="productores">
+        <h2>Planes, bonos y retiros</h2>
+        <p class="panel-hint">La comisión la define el plan (Free 30%, Pro 20%, Studio 10%) y se calcula con el plan que el productor tenga al aprobar la venta. El precio de los planes se pone en USD y se convierte a CUP con tu tasa del USD (en «Tasas de cambio»).</p>
+        <form id="platform-config-form">
+          <div class="cfg-grid">
+            <div class="field">
+              <label for="admin-phone-input">Tu WhatsApp (lo ven los productores)</label>
+              <input type="text" id="admin-phone-input" placeholder="Ej: 5355633280">
+            </div>
+            <div class="field">
+              <label for="plan-pro-price-input">Plan Pro (USD / mes)</label>
+              <input type="text" id="plan-pro-price-input" inputmode="decimal" placeholder="5">
+              <span class="field-hint" id="plan-pro-cup"></span>
+            </div>
+            <div class="field">
+              <label for="plan-studio-price-input">Plan Studio (USD / mes)</label>
+              <input type="text" id="plan-studio-price-input" inputmode="decimal" placeholder="19">
+              <span class="field-hint" id="plan-studio-cup"></span>
+            </div>
           </div>
-          <div class="field">
-            <label for="plan-pro-price-input">Plan Pro (CUP / mes)</label>
-            <input type="text" id="plan-pro-price-input" placeholder="Ej: 5000">
+
+          <h3 class="subpanel-title">Bonos</h3>
+          <div class="cfg-grid">
+            <div class="field">
+              <label for="likes-per-bonus">Me gusta por canción (Studio, Playlist)</label>
+              <input type="text" id="likes-per-bonus" inputmode="numeric" placeholder="1000">
+            </div>
+            <div class="field">
+              <label for="likes-bonus-cup">Bono por esos me gusta (CUP)</label>
+              <input type="text" id="likes-bonus-cup" inputmode="decimal" placeholder="2000">
+            </div>
+            <div class="field">
+              <label for="referrals-per-bonus">Referidos aprobados por bono</label>
+              <input type="text" id="referrals-per-bonus" inputmode="numeric" placeholder="10">
+            </div>
+            <div class="field">
+              <label for="referral-bonus-cup">Bono por referidos (CUP)</label>
+              <input type="text" id="referral-bonus-cup" inputmode="decimal" placeholder="200">
+            </div>
           </div>
-          <div class="field">
-            <label for="plan-studio-price-input">Plan Studio (CUP / mes)</label>
-            <input type="text" id="plan-studio-price-input" placeholder="Ej: 15000">
-          </div>
-          <button type="submit" class="btn-primary">Guardar</button>
+
+          <h3 class="subpanel-title">Retiros en otras monedas</h3>
+          <p class="panel-hint">Cuando un productor retira en USDT u otra moneda, se usa la <strong>tasa del remesero</strong> (CUP por 1 unidad) y se le descuenta el <strong>fee de red</strong> (en esa moneda, ej. BEP20). Si dejas la tasa vacía se usa la tasa de venta.</p>
+          <div id="payout-rates-list"></div>
+
+          <button type="submit" class="btn-primary" style="margin-top:12px;">Guardar</button>
         </form>
       </div>
 
-      <div class="panel">
+      <div class="panel" data-cat="productores">
         <div class="panel-header-row">
           <h2>Compras de planes</h2>
           <span class="badge-count" id="plan-requests-count"></span>
         </div>
         <p class="panel-hint">Cuando un productor compra o renueva un plan desde su portal, su comprobante aparece aquí. Al aprobarlo, el plan se activa (o se extiende si ya lo tenía) por los meses que pagó.</p>
+        <div class="hist-tools" data-hist="planes">
+          <button type="button" class="hist-btn hist-download">⭳ Descargar</button>
+          <button type="button" class="hist-btn danger hist-clear">Borrar historial</button>
+          <button type="button" class="hist-btn hist-restore" hidden>Restaurar borrados</button>
+        </div>
         <div id="plan-requests-list"></div>
       </div>
 
-      <div class="panel">
+      <div class="panel" data-cat="productores">
         <div class="panel-header-row">
-          <h2>Pagos a productores</h2>
+          <h2>Retiros de productores</h2>
           <span class="badge-count" id="payouts-count"></span>
         </div>
-        <p class="panel-hint">Lo que le debes a cada productor por ventas ya aprobadas (su parte, después de tu comisión). La fecha límite sale del plan: Free 14 días, Pro 3 días, Studio 24 horas desde la venta más antigua sin pagar. Cuando le transfieras, pulsa «Marcar como pagado».</p>
+        <p class="panel-hint">Cuando un productor pulsa «Retirar dinero» aparece aquí con el monto, la moneda, sus datos de pago y la cuenta regresiva de su plan (Free 7-14 días, Pro 3 días, Studio 24 horas). También te avisa por WhatsApp. Cuando le transfieras, pulsa «Marcar como pagado».</p>
         <div id="payouts-list"></div>
-        <h3 class="subpanel-title">Pagos ya hechos</h3>
+        <h3 class="subpanel-title">Saldos que todavía no pidieron retirar</h3>
+        <div id="payouts-unrequested"></div>
+        <h3 class="subpanel-title">Retiros ya resueltos</h3>
+        <div class="hist-tools" data-hist="retiros">
+          <button type="button" class="hist-btn hist-download">⭳ Descargar</button>
+          <button type="button" class="hist-btn danger hist-clear">Borrar historial</button>
+          <button type="button" class="hist-btn hist-restore" hidden>Restaurar borrados</button>
+        </div>
         <div id="payouts-history"></div>
       </div>
 
-      <div class="panel">
+      <div class="panel" data-cat="ventas">
         <div class="panel-header-row">
           <h2>Historial de compras</h2>
           <span class="badge-count" id="history-count"></span>
         </div>
-        <p class="panel-hint">Compras ya aprobadas, con su licencia. Aquí puedes volver a descargar el PDF cuando el comprador lo pida.</p>
+        <p class="panel-hint">Compras aprobadas (con su licencia) y rechazadas, de la más nueva a la más vieja. Aquí puedes volver a mandar el link de descarga o el PDF cuando el comprador lo pida. Borrar una compra del historial solo la quita de esta lista: la licencia, las descargas del comprador y el saldo del productor siguen igual.</p>
+        <input type="search" id="history-search" class="history-search" placeholder="Buscar por nombre, teléfono, beat o número de licencia">
+        <div class="hist-tools" data-hist="compras">
+          <button type="button" class="hist-btn hist-download">⭳ Descargar</button>
+          <button type="button" class="hist-btn danger hist-clear">Borrar historial</button>
+          <button type="button" class="hist-btn hist-restore" hidden>Restaurar borrados</button>
+        </div>
         <div id="history-list"></div>
       </div>
 
-      <div class="panel">
+      <div class="panel" data-cat="ajustes">
+        <h2>Copias de seguridad</h2>
+        <p class="panel-hint">Descarga una copia seguido y guárdala fuera del servidor (en tu PC o en la nube).</p>
+        <div class="backup-actions">
+          <a class="btn-primary btn-inline" href="/api/admin/backup?tipo=datos" download>Backup de datos</a>
+          <a class="btn-secondary btn-inline" href="/api/admin/backup?tipo=completo" download>Backup completo</a>
+        </div>
+        <p class="panel-hint"><strong>Datos:</strong> ventas, licencias, productores, saldos, portadas, fotos y comprobantes. Pesa poco: descárgalo cada semana.<br>
+          <strong>Completo:</strong> además todos los audios, WAV y STEMS. Puede pesar varios GB; con conexión lenta la descarga puede cortarse. Para tener los audios a salvo, activa también los backups del volumen en Railway.</p>
+        <h3 class="subpanel-title">Restaurar un backup</h3>
+        <p class="panel-hint">Reemplaza los datos actuales por los del backup. Un backup de <strong>datos</strong> deja los audios que ya están en el servidor; uno <strong>completo</strong> reemplaza también los audios. El archivo se sube por partes (si se corta, vuelve a elegirlo y sigue).</p>
+        <label class="file-drop" id="restore-drop">
+          <span id="restore-label">Elegir el archivo .zip del backup</span>
+          <input type="file" id="restore-input" accept=".zip,application/zip">
+        </label>
+        <div class="upload-progress-wrap" id="restore-progress" style="display:none;">
+          <div class="upload-progress-track"><div class="upload-progress-fill" id="restore-fill"></div></div>
+          <div class="upload-progress-label" id="restore-status">Subiendo… 0%</div>
+        </div>
+      </div>
+
+      <div class="panel" data-cat="ajustes">
         <div class="panel-header-row">
-          <h2>Protección de audio</h2>
+          <h2>Marca de agua (productores Free)</h2>
           <span class="badge-count" id="watermark-status-badge"></span>
         </div>
         <p class="panel-hint">
-          Sube un audio corto (una frase, tu nombre, o un "tag") y se mezclará automáticamente y en bajo volumen sobre cada pista nueva que subas, repitiéndose cada cierto tiempo. Esto no impide que alguien grabe el audio, pero deja tu marca incrustada en cualquier copia que se comparta — igual que hacen los previews de SoundCloud o los packs de samples.
+          Sube un audio corto (el nombre de la plataforma o un "tag") y se mezclará en bajo volumen sobre los previews de los productores con plan <strong>Free</strong>. Tu música y la de los planes Pro y Studio no llevan marca de agua.
         </p>
         <p class="panel-hint" style="margin-top:-8px;">
-          Solo afecta a las pistas que subas <strong>después</strong> de configurarla — las que ya están publicadas no se reprocesan.
+          Solo afecta a los beats que se suban <strong>después</strong> de configurarla — los que ya están publicados no se reprocesan.
         </p>
 
         <div class="field">
@@ -317,7 +430,7 @@
         <button type="button" class="btn-primary" id="watermark-save-btn" style="margin-top:16px;">Guardar configuración</button>
       </div>
 
-      <div class="panel">
+      <div class="panel" data-cat="musica">
         <div class="panel-header-row">
           <h2>Tu música</h2>
         </div>
@@ -329,7 +442,7 @@
         <div id="track-list"></div>
       </div>
 
-      <div class="panel">
+      <div class="panel" data-cat="tienda">
         <h2>Cobros y ventas</h2>
         <p class="panel-hint">Estos datos se muestran al público cuando alguien quiere comprar una pista.</p>
         <form id="payment-form">
@@ -346,7 +459,7 @@
         </form>
       </div>
 
-      <div class="panel">
+      <div class="panel" data-cat="tienda">
         <h2>Perfil público</h2>
         <form id="profile-form">
           <div class="field">
@@ -368,7 +481,7 @@
         </form>
       </div>
 
-      <div class="panel">
+      <div class="panel" data-cat="tienda">
         <h2>Redes sociales</h2>
         <p class="panel-hint">Se muestran como íconos debajo del nombre en la página pública. Se detecta Spotify, Facebook, YouTube, Instagram, TikTok y SoundCloud automáticamente por el link; cualquier otra red se muestra con un ícono genérico. Se puede agregar cualquier cantidad.</p>
 
@@ -391,6 +504,33 @@
     </div>
   </div>
 
+  <!-- Modal para editar título/género/descripción de una pista -->
+  <div class="receipt-modal-overlay" id="edit-track-overlay">
+    <div class="receipt-modal-box edit-track-box">
+      <button class="modal-close" id="edit-track-close" type="button">&times;</button>
+      <h3 id="edit-track-heading">Editar pista</h3>
+      <div class="field">
+        <label for="edit-track-title">Título</label>
+        <input type="text" id="edit-track-title" maxlength="120">
+      </div>
+      <div class="field">
+        <label for="edit-track-genre">Género / etiqueta</label>
+        <input type="text" id="edit-track-genre" maxlength="60">
+      </div>
+      <div class="field">
+        <label for="edit-track-description">Descripción</label>
+        <textarea id="edit-track-description" rows="4" maxlength="1000"></textarea>
+      </div>
+      <div class="field" id="edit-track-credit-field">
+        <label for="edit-track-credit">Artista(s) colaborador(es)</label>
+        <input type="text" id="edit-track-credit" maxlength="120">
+      </div>
+      <button type="button" class="btn-primary" id="edit-track-save">Guardar cambios</button>
+    </div>
+  </div>
+
+  <script src="/subidas.js"></script>
+  <script src="/historial.js"></script>
   <script src="/admin/admin.js"></script>
 </body>
 </html>

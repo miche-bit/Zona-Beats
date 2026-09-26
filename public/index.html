@@ -4,9 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Zona Beats</title>
+<!--OG-->
+<meta name="theme-color" content="#0c0a12">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/style.css">
 </head>
-<body oncontextmenu="return false;">
+<body>
 
   <div class="top-bar">
     <div class="brand-mark"><span class="dot"></span> ZONA BEATS</div>
@@ -86,7 +89,7 @@
   </div>
 
   <footer class="footer-note">
-    <div>SOLO ESCUCHA · SIN DESCARGA · CONTENIDO ORIGINAL PROTEGIDO</div>
+    <div>PREVIEWS PROTEGIDOS · COMPRA TU LICENCIA · CONTENIDO ORIGINAL</div>
     <div class="footer-verify"><a href="/verify">Verificar una licencia comprada aquí</a></div>
     <div class="dev-credit">
       Desarrollado por <strong>爪丨匚卄乇.studios</strong> · <a href="https://wa.me/5355633280" target="_blank" rel="noopener">+53 55633280</a>
@@ -98,8 +101,18 @@
     <div class="player-top-row">
       <div class="player-track-info">
         <img class="player-cover" id="player-cover" src="" alt="">
-        <div>
+        <div class="player-text">
           <div class="player-track-title" id="player-title">—</div>
+          <div class="player-actions">
+            <button type="button" class="player-link-btn" id="player-desc-btn">
+              <svg viewBox="0 0 24 24"><path d="M11 17h2v-6h-2v6zm1-15C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-11h2V7h-2v2z"/></svg>
+              Descripción
+            </button>
+            <button type="button" class="player-link-btn" id="player-share-btn">
+              <svg viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></svg>
+              <span id="player-share-label">Compartir</span>
+            </button>
+          </div>
         </div>
       </div>
       <button class="player-btn-play" id="player-play-btn" aria-label="Reproducir/Pausar">
@@ -129,6 +142,25 @@
 
   <audio id="audio-el" preload="none"></audio>
 
+  <div class="modal-overlay" id="desc-overlay">
+    <div class="modal-box modal-box-desc">
+      <button class="modal-close" id="desc-close" aria-label="Cerrar">&times;</button>
+      <div class="desc-head">
+        <img class="desc-cover" id="desc-cover" alt="">
+        <div class="desc-head-text">
+          <div class="modal-eyebrow" id="desc-eyebrow">DESCRIPCIÓN</div>
+          <h3 class="desc-title" id="desc-title"></h3>
+          <div class="desc-meta" id="desc-meta"></div>
+        </div>
+      </div>
+      <p class="desc-text" id="desc-text"></p>
+      <div class="desc-actions">
+        <button type="button" class="btn-primary-wide" id="desc-play">Reproducir</button>
+        <button type="button" class="btn-outline-wide" id="desc-share">Compartir</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal de compra -->
   <div class="modal-overlay" id="buy-modal-overlay">
     <div class="modal-box">
@@ -141,7 +173,7 @@
       <div class="modal-price" id="modal-price" style="display:none;">—</div>
 
       <p class="modal-instructions" id="modal-instructions" style="display:none;">
-        Transfiere el monto a una de estas cuentas, luego completa tus datos y adjunta el comprobante. Se revisa y te contactan para enviarte tu pista.
+        Transfiere el monto exacto a una de estas cuentas, completa tus datos y sube la foto del comprobante. Cuando el vendedor confirme el pago, descargas tu beat y tu licencia aquí mismo, en «Mis compras».
       </p>
 
       <button type="button" class="modal-terms-link" id="modal-terms-link">Leer antes de comprar</button>
@@ -155,12 +187,13 @@
 
       <form id="order-form">
         <div class="modal-field">
-          <label for="buyer-name-input">Tu nombre</label>
-          <input type="text" id="buyer-name-input" placeholder="¿Cómo te llamas?" required>
+          <label for="buyer-name-input">Tu nombre (sale en tu licencia)</label>
+          <input type="text" id="buyer-name-input" placeholder="¿Cómo te llamas?" maxlength="100" autocomplete="name" required>
         </div>
         <div class="modal-field">
-          <label for="buyer-phone-input">Tu teléfono (para que te contacten)</label>
-          <input type="text" id="buyer-phone-input" placeholder="Ej: 53512345678" required>
+          <label for="buyer-phone-input">Tu WhatsApp (para que te contacten)</label>
+          <input type="tel" id="buyer-phone-input" placeholder="Ej: 53512345678" maxlength="40" inputmode="tel" autocomplete="tel" required>
+          <span class="modal-field-error" id="buyer-phone-error"></span>
         </div>
 
         <div class="modal-receipt-step">
@@ -170,9 +203,14 @@
           <label class="modal-receipt-drop" id="receipt-drop">
             <span id="receipt-drop-text">Toca para subir la foto del comprobante</span>
             <img id="receipt-preview" style="display:none;" alt="Comprobante subido">
-            <input type="file" id="receipt-input" accept="image/*" required>
+            <input type="file" id="receipt-input" accept="image/*">
           </label>
         </div>
+
+        <label class="modal-terms-check" id="vip-public-wrap" style="display:none;">
+          <input type="checkbox" id="vip-public-input">
+          <span>Autorizo que mi nombre aparezca en <strong>Beats VIP</strong> como dueño de este beat (si no marcas, sale como «Dueño anónimo»).</span>
+        </label>
 
         <label class="modal-terms-check">
           <input type="checkbox" id="terms-accept-input" required>

@@ -1,4 +1,5 @@
 (() => {
+  window.ZB_PANEL = 'admin';
   const loginScreen = document.getElementById('login-screen');
   const adminShell = document.getElementById('admin-shell');
   const passwordInput = document.getElementById('password-input');
@@ -73,21 +74,68 @@
   const scheduleTextInput = document.getElementById('schedule-text-input');
 
   const toast = document.getElementById('toast');
+  let toastTimer = null;
 
   function showToast(msg, isError = false) {
     toast.textContent = msg;
     toast.className = 'toast show' + (isError ? ' error' : '');
-    setTimeout(() => { toast.className = 'toast'; }, 3000);
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toast.className = 'toast'; }, isError ? 5500 : 3500);
   }
 
+  // Si la sesión vence (o se cerró desde otro lado), cualquier llamada 401 vuelve al login
+  // en vez de dejar el panel mudo.
+  const fetchOriginal = window.fetch.bind(window);
+  let avisoSesion = false;
+  window.fetch = async (...args) => {
+    const res = await fetchOriginal(...args);
+    const url = String(args[0] && args[0].url ? args[0].url : args[0]);
+    if (res.status === 401 && url.includes('/api/admin/') && !url.includes('/api/admin/login') && !url.includes('/api/admin/check')) {
+      if (!avisoSesion) {
+        avisoSesion = true;
+        showToast('Tu sesión expiró. Vuelve a entrar.', true);
+        setTimeout(() => { avisoSesion = false; }, 4000);
+      }
+      showLogin();
+    }
+    return res;
+  };
+
+  const toggleAdminPass = document.getElementById('toggle-admin-password');
+  toggleAdminPass.addEventListener('click', () => {
+    const ver = passwordInput.type === 'password';
+    passwordInput.type = ver ? 'text' : 'password';
+    toggleAdminPass.textContent = ver ? 'Ocultar' : 'Mostrar';
+  });
+
   function setUploadProgress(pct, label) {
-    uploadProgressFill.style.width = `${pct}%`;
+    if (pct !== null && pct !== undefined) uploadProgressFill.style.width = `${pct}%`;
     uploadProgressLabel.textContent = label;
+  }
+
+  // ---------- Navegación por categorías ----------
+  function abrirCategoria(cat) {
+    document.querySelectorAll('.admin-nav-btn').forEach(b => b.classList.toggle('active', b.dataset.cat === cat));
+    document.querySelectorAll('.admin-main > .panel').forEach(p => p.classList.toggle('cat-hidden', p.dataset.cat !== cat));
+    try { sessionStorage.setItem('zb_admin_cat', cat); } catch { /* sin almacenamiento */ }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  document.querySelectorAll('.admin-nav-btn').forEach(b => b.addEventListener('click', () => abrirCategoria(b.dataset.cat)));
+  let navCounts = { ventas: 0, productores: {} };
+  function actualizarNav(cat, key, n) {
+    if (cat === 'ventas') navCounts.ventas = n;
+    else navCounts.productores[key] = n;
+    const setB = (c, v) => { const el = document.querySelector('.nav-badge[data-for="' + c + '"]'); if (el) { el.textContent = v ? String(v) : ''; } };
+    setB('ventas', navCounts.ventas);
+    setB('productores', Object.values(navCounts.productores).reduce((a, b) => a + b, 0));
   }
 
   function showApp() {
     loginScreen.style.display = 'none';
     adminShell.style.display = 'block';
+    let cat = 'ventas';
+    try { cat = sessionStorage.getItem('zb_admin_cat') || 'ventas'; } catch { /* nada */ }
+    abrirCategoria(cat);
     loadTracks();
     loadProfile();
     loadPaymentInfo();
@@ -102,6 +150,7 @@
     loadHistory();
     loadPlanRequests();
     loadPayouts();
+    loadSummary();
   }
 
   function showLogin() {
@@ -126,6 +175,8 @@
       passwordInput.value = '';
       showApp();
     } else {
+      const d = await res.json().catch(() => ({}));
+      loginError.textContent = d.error || 'Contraseña incorrecta.';
       void loginError.offsetWidth;
       loginError.classList.add('show');
     }
@@ -141,10 +192,11 @@
   });
 
   // el label ya abre el input solo con tocarlo, no hace falta click() manual
+  const tamanoTxt = (b) => (window.ZBSubidas ? window.ZBSubidas.tamano(b) : Math.round(b / 1024 / 1024) + ' MB');
   function wireFileDrop(dropEl, inputEl, labelEl, defaultLabel) {
     inputEl.addEventListener('change', () => {
       if (inputEl.files.length > 0) {
-        labelEl.textContent = inputEl.files[0].name;
+        labelEl.textContent = inputEl.files[0].name + ' · ' + tamanoTxt(inputEl.files[0].size);
         dropEl.classList.add('has-file');
       } else {
         labelEl.textContent = defaultLabel;
@@ -152,8 +204,53 @@
       }
     });
   }
-  wireFileDrop(audioDrop, audioInput, document.getElementById('audio-drop-label'), 'MP3, WAV, M4A, OGG o FLAC · máx 150MB');
-  wireFileDrop(coverDrop, coverInput, document.getElementById('cover-drop-label'), 'JPG, PNG o WEBP · máx 8MB');
+  const AUDIO_LABEL = 'MP3, WAV, M4A, OGG o FLAC · máx 250 MB';
+  const COVER_LABEL = 'Cuadrada 3000x3000 px · JPG, PNG o WEBP · máx 8 MB';
+  const WAV_LABEL = 'WAV en alta calidad · máx 1 GB';
+  const STEMS_LABEL = 'ZIP (o RAR/7Z) con las pistas separadas · máx 4 GB';
+  wireFileDrop(audioDrop, audioInput, document.getElementById('audio-drop-label'), AUDIO_LABEL);
+  wireFileDrop(coverDrop, coverInput, document.getElementById('cover-drop-label'), COVER_LABEL);
+  const adminWavInput = document.getElementById('admin-wav-input');
+  const adminStemsInput = document.getElementById('admin-stems-input');
+  wireFileDrop(document.getElementById('admin-wav-drop'), adminWavInput, document.getElementById('admin-wav-label'), WAV_LABEL);
+  wireFileDrop(document.getElementById('admin-stems-drop'), adminStemsInput, document.getElementById('admin-stems-label'), STEMS_LABEL);
+
+  // Vista previa de la portada y aviso si no es cuadrada
+  coverInput.addEventListener('change', async () => {
+    const prev = document.getElementById('cover-preview');
+    const aviso = document.getElementById('cover-note');
+    prev.style.display = 'none';
+    aviso.textContent = '';
+    const f = coverInput.files[0];
+    if (!f || !window.ZBSubidas) return;
+    const m = await window.ZBSubidas.medirImagen(f);
+    if (!m) { aviso.textContent = 'No se pudo leer la imagen. Prueba con otro JPG o PNG.'; return; }
+    if (prev.src && prev.src.startsWith('blob:')) URL.revokeObjectURL(prev.src);
+    prev.src = m.url;
+    prev.style.display = 'block';
+    if (Math.abs(m.w - m.h) > Math.max(m.w, m.h) * 0.02) aviso.textContent = 'La portada mide ' + m.w + 'x' + m.h + ' px: no es cuadrada, en la tienda se verá recortada al centro.';
+    else if (m.w < 1000) aviso.textContent = 'La portada mide ' + m.w + 'x' + m.h + ' px: se verá borrosa. Lo ideal es 3000x3000 px.';
+  });
+
+  // Marca «obligatorio» en WAV/STEMS según las licencias con precio
+  const precioDe = (v) => (window.ZBSubidas ? window.ZBSubidas.precio(v) : parseFloat(String(v || '').replace(',', '.')) || 0);
+  const numPos = (v) => precioDe(v) > 0;
+  function actualizarArchivosAdmin() {
+    const pl = isPlaylistInput.checked;
+    const ex = isExclusiveInput.checked;
+    const audioEsWav = audioInput.files.length > 0 && /\.wav$/i.test(audioInput.files[0].name);
+    const wav = !pl && !audioEsWav && (ex ? numPos(priceExclusiveInput.value) : (numPos(pricePremiumInput.value) || numPos(priceUnlimitedInput.value)));
+    const stems = !pl && (ex ? numPos(priceExclusiveInput.value) : numPos(priceUnlimitedInput.value));
+    document.getElementById('admin-wav-field').style.display = pl ? 'none' : '';
+    document.getElementById('admin-stems-field').style.display = pl ? 'none' : '';
+    document.getElementById('admin-wav-req').style.display = wav ? '' : 'none';
+    document.getElementById('admin-wav-note').textContent = audioEsWav && !pl ? 'El audio principal ya es WAV: se entrega ese mismo, no hace falta subirlo otra vez.' : '';
+    document.getElementById('admin-stems-req').style.display = stems ? '' : 'none';
+    document.getElementById('admin-wav-drop').classList.toggle('required', wav && !adminWavInput.files.length);
+    document.getElementById('admin-stems-drop').classList.toggle('required', stems && !adminStemsInput.files.length);
+  }
+  [pricePremiumInput, priceUnlimitedInput, priceExclusiveInput].forEach(el => el.addEventListener('input', actualizarArchivosAdmin));
+  [adminWavInput, adminStemsInput, audioInput].forEach(el => el.addEventListener('change', actualizarArchivosAdmin));
   wireFileDrop(avatarDrop, avatarInput, document.getElementById('avatar-drop-label'), 'JPG, PNG o WEBP · máx 8MB');
 
   isPlaylistInput.addEventListener('change', () => {
@@ -169,6 +266,7 @@
       priceUnlimitedInput.value = '';
       priceExclusiveInput.value = '';
     }
+    actualizarArchivosAdmin();
   });
 
   isExclusiveInput.addEventListener('change', () => {
@@ -182,104 +280,135 @@
     } else {
       priceExclusiveInput.value = '';
     }
+    actualizarArchivosAdmin();
   });
 
-  uploadForm.addEventListener('submit', (e) => {
+  // Subida en trozos (se retoma sola si se corta la conexión) y después se crea la pista.
+  let subiendo = false;
+  let controlSubida = null;
+  const extDe = (f) => (String(f.name || '').toLowerCase().match(/\.[a-z0-9]+$/) || [''])[0];
+
+  function resetUploadForm() {
+    uploadForm.reset();
+    isExclusiveInput.checked = false;
+    isPlaylistInput.checked = false;
+    playlistOnlyFields.style.display = 'none';
+    catalogOnlyFields.style.display = 'block';
+    licenseModeFields.style.display = 'block';
+    exclusiveModeFields.style.display = 'none';
+    document.getElementById('audio-drop-label').textContent = AUDIO_LABEL;
+    document.getElementById('cover-drop-label').textContent = COVER_LABEL;
+    document.getElementById('admin-wav-label').textContent = WAV_LABEL;
+    document.getElementById('admin-stems-label').textContent = STEMS_LABEL;
+    ['admin-wav-drop', 'admin-stems-drop'].forEach(id => document.getElementById(id).classList.remove('has-file'));
+    audioDrop.classList.remove('has-file');
+    coverDrop.classList.remove('has-file');
+    document.getElementById('cover-preview').style.display = 'none';
+    document.getElementById('cover-note').textContent = '';
+    actualizarArchivosAdmin();
+  }
+
+  uploadForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    if (!audioInput.files.length) {
-      showToast('Selecciona un archivo de audio.', true);
-      return;
+    if (subiendo) return;
+    const Z = window.ZBSubidas;
+    if (!Z) { showToast('No se pudo cargar el sistema de subidas. Recarga la página.', true); return; }
+    if (!titleInput.value.trim()) { showToast('Ponle título a la pista.', true); return; }
+    const audio = audioInput.files[0];
+    const cover = coverInput.files[0];
+    if (!audio) { showToast('Selecciona un archivo de audio.', true); return; }
+    if (!cover) { showToast('La portada es obligatoria (cuadrada, 3000x3000 px).', true); return; }
+
+    const esPlaylist = isPlaylistInput.checked;
+    const isExclusiveMode = isExclusiveInput.checked && !esPlaylist;
+    const prices = esPlaylist ? { basic: '', premium: '', unlimited: '', exclusive: '' }
+      : isExclusiveMode
+        ? { basic: '', premium: '', unlimited: '', exclusive: priceExclusiveInput.value }
+        : { basic: priceBasicInput.value, premium: pricePremiumInput.value, unlimited: priceUnlimitedInput.value, exclusive: '' };
+    const wav = esPlaylist ? null : adminWavInput.files[0];
+    const stems = esPlaylist ? null : adminStemsInput.files[0];
+
+    if (!['.mp3', '.wav', '.m4a', '.ogg', '.flac'].includes(extDe(audio))) { showToast('El audio tiene que ser MP3, WAV, M4A, OGG o FLAC.', true); return; }
+    if (!['.jpg', '.jpeg', '.png', '.webp'].includes(extDe(cover))) { showToast('La portada tiene que ser JPG, PNG o WEBP.', true); return; }
+    if (wav && extDe(wav) !== '.wav') { showToast('El archivo WAV tiene que terminar en .wav.', true); return; }
+    if (stems && !['.zip', '.rar', '.7z'].includes(extDe(stems))) { showToast('Los STEMS tienen que ir en ZIP, RAR o 7Z.', true); return; }
+    for (const [kind, f] of [['audio', audio], ['cover', cover], ['wav', wav], ['stems', stems]]) {
+      if (!f) continue;
+      const err = Z.validarTamano(kind, f);
+      if (err) { showToast(err, true); return; }
     }
-
-    const MAX_AUDIO_MB = 150;
-    if (audioInput.files[0].size > MAX_AUDIO_MB * 1024 * 1024) {
-      showToast(`El audio pesa más de ${MAX_AUDIO_MB}MB. Comprime el archivo o usa un formato con compresión (MP3/FLAC).`, true);
-      return;
-    }
-
-    const isExclusiveMode = isExclusiveInput.checked;
-    const prices = isExclusiveMode
-      ? { basic: '', premium: '', unlimited: '', exclusive: priceExclusiveInput.value }
-      : { basic: priceBasicInput.value, premium: pricePremiumInput.value, unlimited: priceUnlimitedInput.value, exclusive: '' };
-
-    if (!isPlaylistInput.checked) {
-      const anyPrice = Object.values(prices).some(v => parseFloat(v) > 0);
-      if (!anyPrice) {
-        showToast(isExclusiveMode
-          ? 'Ponle el precio exclusivo a la pista.'
-          : 'Ponle precio a al menos una licencia (Básica, Premium o Ilimitada).', true);
+    if (!esPlaylist) {
+      if (!Object.values(prices).some(numPos)) {
+        showToast(isExclusiveMode ? 'Ponle el precio exclusivo a la pista.' : 'Ponle precio a al menos una licencia (Básica, Premium o Ilimitada).', true);
+        return;
+      }
+      const hayWav = Boolean(wav) || extDe(audio) === '.wav';
+      if ((numPos(prices.premium) || numPos(prices.unlimited) || numPos(prices.exclusive)) && !hayWav) {
+        showToast('Esa licencia exige el archivo WAV. Súbelo para continuar.', true);
+        return;
+      }
+      if ((numPos(prices.unlimited) || numPos(prices.exclusive)) && !stems) {
+        showToast('Esa licencia exige los STEMS (ZIP). Súbelos para continuar.', true);
         return;
       }
     }
 
-    const formData = new FormData();
-    formData.append('title', titleInput.value);
-    formData.append('genre', genreInput.value);
-    formData.append('description', descriptionInput.value);
-    formData.append('isPlaylist', isPlaylistInput.checked ? '1' : '0');
-    formData.append('artistCredit', artistCreditInput.value);
-    formData.append('priceBasic', prices.basic);
-    formData.append('pricePremium', prices.premium);
-    formData.append('priceUnlimited', prices.unlimited);
-    formData.append('priceExclusive', prices.exclusive);
-    formData.append('audio', audioInput.files[0]);
-    if (coverInput.files.length) formData.append('cover', coverInput.files[0]);
+    const lista = [
+      { kind: 'cover', file: cover, etiqueta: 'la portada' },
+      { kind: 'audio', file: audio, etiqueta: 'el audio' },
+    ];
+    if (wav) lista.push({ kind: 'wav', file: wav, etiqueta: 'el WAV' });
+    if (stems) lista.push({ kind: 'stems', file: stems, etiqueta: 'los STEMS' });
 
+    subiendo = true;
+    controlSubida = new AbortController();
     uploadBtn.disabled = true;
     uploadProgressWrap.style.display = 'block';
-    setUploadProgress(0, 'Subiendo… 0%');
-
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', '/api/admin/tracks');
-
-    xhr.upload.addEventListener('progress', (evt) => {
-      if (!evt.lengthComputable) return;
-      const pct = Math.round((evt.loaded / evt.total) * 100);
-      setUploadProgress(pct, pct < 100 ? `Subiendo… ${pct}%` : 'Procesando en el servidor…');
-    });
-
-    xhr.onload = () => {
-      uploadBtn.disabled = false;
-      uploadProgressWrap.style.display = 'none';
-
-      let response = {};
-      try { response = JSON.parse(xhr.responseText); } catch { /* respuesta no-JSON */ }
-
-      if (xhr.status >= 200 && xhr.status < 300) {
+    document.getElementById('upload-cancel').style.display = '';
+    setUploadProgress(0, 'Preparando…');
+    try {
+      const ids = await Z.subirVarios(lista, {
+        senal: controlSubida.signal,
+        alAvanzar: (p) => setUploadProgress(p.pct, 'Subiendo ' + p.etiqueta + '… ' + p.pct + '% (' + Z.tamano(p.enviado) + ' de ' + Z.tamano(p.total) + ')'),
+        alReintentar: (etiqueta, n) => setUploadProgress(null, 'Se cortó la conexión. Reintentando ' + etiqueta + ' (intento ' + n + ')…'),
+      });
+      document.getElementById('upload-cancel').style.display = 'none';
+      setUploadProgress(100, 'Procesando: creando el preview y el MP3 de entrega…');
+      const res = await fetch('/api/admin/tracks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: titleInput.value, genre: genreInput.value, description: descriptionInput.value,
+          isPlaylist: esPlaylist, artistCredit: esPlaylist ? artistCreditInput.value : '',
+          priceBasic: prices.basic, pricePremium: prices.premium, priceUnlimited: prices.unlimited, priceExclusive: prices.exclusive,
+          audioUploadId: ids.audio, coverUploadId: ids.cover, wavUploadId: ids.wav || '', stemsUploadId: ids.stems || '',
+        }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) {
+        lista.forEach(x => Z.olvidar(x.kind, x.file));
         showToast('Pista publicada correctamente.');
-        uploadForm.reset();
-        isExclusiveInput.checked = false;
-        isPlaylistInput.checked = false;
-        playlistOnlyFields.style.display = 'none';
-        catalogOnlyFields.style.display = 'block';
-        licenseModeFields.style.display = 'block';
-        exclusiveModeFields.style.display = 'none';
-        document.getElementById('audio-drop-label').textContent = 'MP3, WAV, M4A, OGG o FLAC · máx 150MB';
-        document.getElementById('cover-drop-label').textContent = 'JPG, PNG o WEBP · máx 8MB';
-        audioDrop.classList.remove('has-file');
-        coverDrop.classList.remove('has-file');
+        resetUploadForm();
         loadTracks();
-      } else if (xhr.status === 413) {
-        showToast('El archivo es demasiado grande (máx 150MB de audio).', true);
-      } else {
-        showToast(response.error || `Error al subir (código ${xhr.status}).`, true);
+      } else if (res.status !== 401) {
+        showToast(d.error || 'Error al guardar la pista (código ' + res.status + ').', true);
       }
-    };
-
-    xhr.onerror = () => {
+    } catch (err) {
+      if (err && err.status === -1) showToast('Subida pausada. Si eliges los mismos archivos y pulsas «Publicar», sigue donde quedó.');
+      else if (err && err.status === 401) showLogin();
+      else showToast((err && err.message) || 'No se pudo subir. Intenta de nuevo.', true);
+    } finally {
+      subiendo = false;
+      controlSubida = null;
       uploadBtn.disabled = false;
       uploadProgressWrap.style.display = 'none';
-      showToast('Se perdió la conexión durante la subida. Revisa tu internet e intenta de nuevo.', true);
-    };
-
-    xhr.ontimeout = () => {
-      uploadBtn.disabled = false;
-      uploadProgressWrap.style.display = 'none';
-      showToast('La subida tardó demasiado y se agotó el tiempo de espera. Intenta con mejor conexión.', true);
-    };
-
-    xhr.timeout = 10 * 60 * 1000; // 10 minutos, igual que el servidor
-    xhr.send(formData);
+    }
+  });
+  document.getElementById('upload-cancel').addEventListener('click', () => { if (controlSubida) controlSubida.abort(); });
+  window.addEventListener('beforeunload', (e) => {
+    if (!subiendo) return;
+    e.preventDefault();
+    e.returnValue = '';
   });
 
   let currentAdminListSection = 'catalog';
@@ -337,16 +466,25 @@
         priceEditHtml = `<div class="vip-sold-tag">Vendida · ${escapeHtml(track.price_label || '')}</div>`;
       }
 
+      const archivos = track.archivos || {};
+      const archivosTxt = track.is_playlist ? '' : ' · archivos: MP3' + (archivos.wav ? ' + WAV' : '') + (archivos.stems ? ' + STEMS' : '');
+      const estado = track.approval_status && track.approval_status !== 'approved'
+        ? ` <span class="tag-pending">${track.approval_status === 'pending' ? 'en revisión' : 'rechazada'}</span>` : '';
       item.innerHTML = `
-        ${coverSrc ? `<img src="${coverSrc}" alt="">` : `<img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='44' height='44'/%3E" alt="">`}
+        ${coverSrc ? `<img src="${coverSrc}?s=160" alt="" loading="lazy">` : `<img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='44' height='44'/%3E" alt="">`}
         <div class="info">
-          <div class="t">${escapeHtml(track.title)}</div>
-          <div class="m">${escapeHtml(track.genre || 'Sin género')}${metaExtra} · ${track.plays} reproducciones</div>
+          <div class="t">${escapeHtml(track.title)}${estado}</div>
+          <div class="m">${escapeHtml(track.genre || 'Sin género')}${metaExtra} · ${track.plays} repr. · ${track.likes || 0} me gusta${archivosTxt}</div>
+          <div class="m">${track.producer_id ? 'Productor: ' + escapeHtml(track.producer_name || '') : 'Tuya'}</div>
         </div>
         ${priceEditHtml}
-        <button class="btn-delete" data-id="${track.id}">Eliminar</button>
+        <div class="track-row-actions">
+          <button type="button" class="btn-secondary btn-edit-info">Editar</button>
+          <button type="button" class="btn-delete" data-id="${track.id}">Eliminar</button>
+        </div>
       `;
       item.querySelector('.btn-delete').addEventListener('click', () => deleteTrack(track.id, track.title));
+      item.querySelector('.btn-edit-info').addEventListener('click', () => abrirEditorPista(track));
 
       const saveBtn = item.querySelector('.btn-save-price');
       if (saveBtn) {
@@ -366,6 +504,45 @@
       trackList.appendChild(item);
     });
   }
+
+  // ---------- Editar título / género / descripción ----------
+  const editOverlay = document.getElementById('edit-track-overlay');
+  let pistaEditando = null;
+  function abrirEditorPista(track) {
+    pistaEditando = track;
+    document.getElementById('edit-track-heading').textContent = 'Editar «' + track.title + '»';
+    document.getElementById('edit-track-title').value = track.title || '';
+    document.getElementById('edit-track-genre').value = track.genre || '';
+    document.getElementById('edit-track-description').value = track.description || '';
+    document.getElementById('edit-track-credit').value = track.artist_credit || '';
+    document.getElementById('edit-track-credit-field').style.display = track.is_playlist ? '' : 'none';
+    editOverlay.classList.add('active');
+  }
+  document.getElementById('edit-track-close').addEventListener('click', () => editOverlay.classList.remove('active'));
+  editOverlay.addEventListener('click', (e) => { if (e.target === editOverlay) editOverlay.classList.remove('active'); });
+  document.getElementById('edit-track-save').addEventListener('click', async () => {
+    if (!pistaEditando) return;
+    const btn = document.getElementById('edit-track-save');
+    btn.disabled = true;
+    try {
+      const res = await fetch('/api/admin/tracks/' + pistaEditando.id + '/info', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: document.getElementById('edit-track-title').value,
+          genre: document.getElementById('edit-track-genre').value,
+          description: document.getElementById('edit-track-description').value,
+          artistCredit: document.getElementById('edit-track-credit').value,
+        }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) { editOverlay.classList.remove('active'); showToast('Cambios guardados.'); loadTracks(); loadPendingTracks(); }
+      else if (res.status !== 401) showToast(d.error || 'No se pudieron guardar los cambios.', true);
+    } catch {
+      showToast('Se perdió la conexión. Intenta de nuevo.', true);
+    } finally {
+      btn.disabled = false;
+    }
+  });
 
   async function savePrice(id, prices) {
     const res = await fetch(`/api/admin/tracks/${id}/price`, {
@@ -388,7 +565,7 @@
   }
 
   async function deleteTrack(id, title) {
-    if (!confirm(`¿Eliminar "${title}"? Esta acción no se puede deshacer.`)) return;
+    if (!confirm(`¿Eliminar "${title}"? Se borran el audio, la portada, el WAV y los STEMS. Esta acción no se puede deshacer.`)) return;
     let res = await fetch(`/api/admin/tracks/${id}`, { method: 'DELETE' });
     if (res.status === 409) {
       const err = await res.json().catch(() => ({}));
@@ -397,9 +574,10 @@
     }
     if (res.ok) {
       showToast('Pista eliminada.');
-      loadTracks();
-    } else {
-      showToast('No se pudo eliminar.', true);
+      loadTracks(); loadSummary();
+    } else if (res.status !== 401) {
+      const err = await res.json().catch(() => ({}));
+      showToast(err.error || 'No se pudo eliminar.', true);
     }
   }
 
@@ -485,17 +663,70 @@
     }
   });
 
+  // ---------- Resumen del negocio ----------
+  async function loadSummary(fresco) {
+    const res = await fetch('/api/admin/summary' + (fresco ? '?fresco=1' : ''));
+    if (!res.ok) return;
+    const d = await res.json();
+    const cup = (n) => Number(n || 0).toLocaleString('es', { maximumFractionDigits: 0 }) + ' CUP';
+    const gb = (b) => b >= 1024 * 1024 * 1024 ? (b / 1024 / 1024 / 1024).toLocaleString('es', { maximumFractionDigits: 1 }) + ' GB'
+      : b >= 1024 * 1024 ? Math.round(b / 1024 / 1024) + ' MB' : 'menos de 1 MB';
+    const tarjeta = (titulo, grande, sub, clase) => '<div class="summary-card ' + (clase || '') + '"><span>' + titulo + '</span><strong>' + grande + '</strong><em>' + sub + '</em></div>';
+    document.getElementById('admin-summary').innerHTML =
+      tarjeta('Este mes', cup(d.mes.total), d.mes.ventas + ' venta' + (d.mes.ventas === 1 ? '' : 's') + ' · para ti ' + cup(d.mes.tuyo), 'highlight') +
+      tarjeta('Desde el inicio', cup(d.siempre.total), d.siempre.ventas + ' ventas · para ti ' + cup(d.siempre.tuyo)) +
+      tarjeta('Debes a productores', cup(d.deudaProductores), 'ventas y bonos sin pagar', d.deudaProductores > 0 ? 'warn' : '') +
+      tarjeta('Espacio usado', gb(d.discoBytes || 0), 'audios, portadas y base de datos');
+    const p = d.pendientes;
+    const chips = [
+      ['ventas', p.pedidos, 'comprobante', 'comprobantes'],
+      ['productores', p.beats, 'beat por revisar', 'beats por revisar'],
+      ['productores', p.productores, 'productor por aprobar', 'productores por aprobar'],
+      ['productores', p.planes, 'compra de plan', 'compras de plan'],
+      ['productores', p.retiros, 'retiro por pagar', 'retiros por pagar'],
+    ].filter(c => c[1] > 0);
+    const cont = document.getElementById('admin-pending');
+    cont.innerHTML = chips.length
+      ? chips.map(c => '<button type="button" class="pending-chip" data-cat="' + c[0] + '">' + c[1] + ' ' + (c[1] === 1 ? c[2] : c[3]) + '</button>').join('')
+      : '<span class="all-done">Todo al día: no hay nada pendiente.</span>';
+    cont.querySelectorAll('.pending-chip').forEach(b => b.addEventListener('click', () => abrirCategoria(b.dataset.cat)));
+  }
+  document.getElementById('summary-refresh').addEventListener('click', () => { loadSummary(true); loadOrders(); showToast('Actualizado.'); });
+
   async function loadOrders() {
     const res = await fetch('/api/admin/orders');
     if (!res.ok) return;
     const { orders } = await res.json();
+    actualizarNav('ventas', null, orders.length);
     renderOrders(orders);
   }
 
   function formatOrderDate(isoLike) {
-    const d = new Date(isoLike.replace(' ', 'T') + 'Z');
-    if (isNaN(d.getTime())) return isoLike;
+    const txt = String(isoLike || '');
+    const d = new Date(txt.includes('T') ? txt : txt.replace(' ', 'T') + 'Z');
+    if (isNaN(d.getTime())) return txt;
     return d.toLocaleString('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+  }
+
+  const LIC_NOMBRES = { basic: 'Básica', premium: 'Premium', unlimited: 'Ilimitada', exclusive: 'Exclusiva' };
+  const soloDigitos = (t) => String(t || '').replace(/[^0-9]/g, '');
+  const etiquetaDe = (code) => { const c = configuredCurrencies.find(x => x.code === code); return (c && c.label) || code || 'CUP'; };
+  const unidades = (n, code) => Number(n || 0).toLocaleString('es', { minimumFractionDigits: ['CUP', 'SALDO_MOVIL'].includes(code) ? 0 : 2, maximumFractionDigits: ['CUP', 'SALDO_MOVIL'].includes(code) ? 0 : 2 }) + ' ' + etiquetaDe(code);
+  // Lo que irá a la billetera del productor (en la moneda en que pagó el comprador, menos la comisión)
+  function paraProductor(o) {
+    if (!o.producer_id) return '';
+    const moneda = o.wallet_currency || 'CUP';
+    const pagado = o.wallet_currency ? o.paid_units : o.price_cup_at_sale;
+    const pct = Number(o.commission_percent_at_sale || 0);
+    const neto = o.status === 'approved' ? o.producer_earning_units : pagado * (1 - pct / 100);
+    return ' · al productor ' + unidades(neto, moneda) + ' (−' + pct + '%)';
+  }
+
+  function mensajeLinkCompra(o, linkCompra, certificado) {
+    return 'Hola ' + o.buyer_name + ' \u{1F44B} Tu compra de "' + o.track_title + '" (licencia ' + (LIC_NOMBRES[o.license_type] || o.license_type) + ') está aprobada.\n\n' +
+      (linkCompra ? 'Descarga tu beat y tu licencia aquí (este link es solo tuyo, no lo compartas):\n' + linkCompra + '\n\n' : '') +
+      (certificado ? 'Número de licencia: ' + certificado + '\nCualquiera puede verificarla en: ' + location.origin + '/verify/' + certificado + '\n\n' : '') +
+      '¡Gracias por tu compra!';
   }
 
   function renderOrders(orders) {
@@ -514,32 +745,28 @@
       const item = document.createElement('div');
       item.className = 'order-item';
 
-      const verifyUrl = order.certificate_id ? location.origin + '/verify/' + order.certificate_id : '';
-      const message = encodeURIComponent(
-        order.certificate_id
-          ? 'Hola ' + order.buyer_name + ' \u{1F44B} Tu compra de "' + order.track_title + '"'
-            + (order.price_label ? ' (' + order.price_label + ')' : '') + ' quedo aprobada.\n\n'
-            + 'Tu licencia: ' + order.certificate_id + '\n'
-            + 'Descarga tu certificado y compruebalo aqui: ' + verifyUrl + '\n\n'
-            + 'Guarda ese enlace, es tu comprobante oficial. Gracias por tu compra!'
-          : 'Hola ' + order.buyer_name + ' \u{1F44B} Recibi tu comprobante por "' + order.track_title + '"'
-            + (order.price_label ? ' (' + order.price_label + ')' : '') + '. Ya lo estoy revisando, en breve te envio tu pista. Gracias por tu compra!'
-      );
-      const phoneDigits = (order.buyer_phone || '').replace(/[^0-9]/g, '');
-      const whatsappHref = phoneDigits ? `https://wa.me/${phoneDigits}?text=${message}` : null;
+      const lic = LIC_NOMBRES[order.license_type] || order.license_type || '';
+      const avisoVendida = order.track_sold
+        ? '<div class="order-warning">' + (order.track_exclusive ? 'Este beat ya se vendió en Exclusiva.' : 'Este beat ya se cerró con una licencia Ilimitada.') +
+          (['unlimited', 'exclusive'].includes(order.license_type) ? ' No se puede aprobar: rechaza y devuelve el dinero.' : ' Revisa antes de aprobar.') + '</div>'
+        : '';
+      const waRecibido = soloDigitos(order.buyer_phone)
+        ? 'https://wa.me/' + soloDigitos(order.buyer_phone) + '?text=' + encodeURIComponent('Hola ' + order.buyer_name + ' \u{1F44B} Recibí tu comprobante por "' + order.track_title + '" (licencia ' + lic + '). Ya lo estoy revisando y en breve te confirmo.')
+        : '';
 
       item.innerHTML = `
-        <img class="receipt-thumb" src="/api/admin/orders/${order.id}/receipt" alt="Comprobante de ${escapeHtml(order.buyer_name)}">
+        <img class="receipt-thumb" src="/api/admin/orders/${order.id}/receipt" alt="Comprobante de ${escapeHtml(order.buyer_name)}" loading="lazy">
         <div class="info">
           <div class="buyer">${escapeHtml(order.buyer_name)}</div>
-          <div class="track">${escapeHtml(order.track_title)}${order.price_label ? ` · ${escapeHtml(order.price_label)}` : ''}</div>
-          <div class="meta">${escapeHtml(order.buyer_phone)} · ${formatOrderDate(order.created_at)}${order.status === 'approved' ? ' · <span class=\"order-approved-tag\">Aprobado</span>' : ''}</div>
-          ${order.certificate_id ? `<div class="cert-line">Licencia <strong>${escapeHtml(order.certificate_id)}</strong> · <a href="/api/license/${encodeURIComponent(order.certificate_id)}/pdf" target="_blank" rel="noopener">ver PDF</a></div>` : ''}
+          <div class="track">${escapeHtml(order.track_title)} · <strong>${escapeHtml(lic)}</strong>${order.price_label ? ` · ${escapeHtml(order.price_label)}` : ''}</div>
+          <div class="meta">${escapeHtml(order.buyer_phone)} · ${formatOrderDate(order.created_at)} · pagó ${escapeHtml(unidades(order.wallet_currency ? order.paid_units : order.price_cup_at_sale, order.wallet_currency || 'CUP'))}${order.producer_name ? ' · productor: ' + escapeHtml(order.producer_name) + escapeHtml(paraProductor(order)) : ''}${order.license_type === 'exclusive' ? (order.vip_public ? ' · acepta salir en Beats VIP' : ' · no quiere salir en Beats VIP') : ''}</div>
+          ${avisoVendida}
         </div>
         <div class="actions">
-          ${whatsappHref ? `<a class="btn-whatsapp-order" href="${whatsappHref}" target="_blank" rel="noopener">${order.certificate_id ? 'Enviar licencia' : 'WhatsApp'}</a>` : ''}
-          ${order.status !== 'approved' ? `<button class="btn-approve-order" type="button">Aprobar</button>` : ''}
-          <button class="btn-delete" type="button">Eliminar</button>
+          <button class="btn-approve-order" type="button">Aprobar</button>
+          <button class="btn-reject-track btn-reject-order" type="button">Rechazar</button>
+          ${waRecibido ? `<a class="btn-toggle-producer" href="${waRecibido}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
+          <button class="btn-delete" type="button" title="Borrar sin avisar (spam)">Borrar</button>
         </div>
       `;
 
@@ -547,54 +774,85 @@
         receiptModalImg.src = `/api/admin/orders/${order.id}/receipt`;
         receiptModalOverlay.classList.add('active');
       });
-
-      const approveBtn = item.querySelector('.btn-approve-order');
-      if (approveBtn) {
-        approveBtn.addEventListener('click', () => approveOrder(order.id));
-      }
-
+      item.querySelector('.btn-approve-order').addEventListener('click', (ev) => approveOrder(order, item, ev.target));
+      item.querySelector('.btn-reject-order').addEventListener('click', () => rejectOrder(order));
       item.querySelector('.btn-delete').addEventListener('click', () => deleteOrder(order.id, order.buyer_name, order.certificate_id));
 
       ordersList.appendChild(item);
     });
   }
 
-  async function approveOrder(id) {
-    const res = await fetch(`/api/admin/orders/${id}/approve`, { method: 'POST' });
+  async function approveOrder(order, item, btn) {
+    btn.disabled = true;
+    const res = await fetch(`/api/admin/orders/${order.id}/approve`, { method: 'POST' });
     if (res.ok) {
       const result = await res.json();
       let msg = 'Pedido aprobado.';
-      if (result.wentToVip) {
-        msg = 'Aprobado — la pista exclusiva se retiró del catálogo y pasó a Beats VIP.';
-      } else if (result.trackMarkedSold) {
-        msg = 'Aprobado — licencia Ilimitada: la pista se retiró del catálogo (no va a Beats VIP).';
-      }
-      showToast(msg + ' El comprador ya puede descargar desde «Mis compras».');
+      if (result.wentToVip) msg = 'Aprobado — la pista exclusiva se retiró del catálogo y pasó a Beats VIP.';
+      else if (result.trackMarkedSold) msg = 'Aprobado — licencia Ilimitada: la pista se retiró del catálogo.';
+      if (result.billetera) msg += ' Se sumaron ' + unidades(result.billetera.unidades, result.billetera.moneda) + ' a la billetera del productor.';
+      showToast(msg + ' Ahora mándale su link de descarga.');
       if (result.warning) alert(result.warning);
-      loadOrders();
-      loadTracks();
-      loadProducers();
-      loadHistory();
-    } else {
+      // El link se manda con un toque (así el navegador no bloquea WhatsApp).
+      const tel = soloDigitos(order.buyer_phone);
+      const texto = mensajeLinkCompra(order, result.purchaseUrl, result.certificateId);
+      item.classList.add('order-done');
+      item.querySelector('.actions').innerHTML =
+        (tel ? '<a class="btn-whatsapp-order" href="https://wa.me/' + tel + '?text=' + encodeURIComponent(texto) + '" target="_blank" rel="noopener">Enviar link por WhatsApp</a>' : '') +
+        '<button type="button" class="btn-toggle-producer btn-copy-now">Copiar link</button>' +
+        '<button type="button" class="btn-toggle-producer btn-done-now">Listo</button>';
+      const listo = () => { loadOrders(); };
+      const wa = item.querySelector('.btn-whatsapp-order');
+      if (wa) wa.addEventListener('click', () => setTimeout(listo, 800));
+      item.querySelector('.btn-done-now').addEventListener('click', listo);
+      item.querySelector('.btn-copy-now').addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText(result.purchaseUrl); showToast('Link copiado. Es privado: solo mándaselo al comprador.'); }
+        catch { prompt('Copia este link y mándaselo al comprador:', result.purchaseUrl); }
+      });
+      loadTracks(); loadProducers(); loadHistory(); loadSummary(); loadPayouts();
+    } else if (res.status !== 401) {
       const err = await res.json().catch(() => ({}));
       showToast(err.error || 'No se pudo aprobar el pedido.', true);
+      btn.disabled = false;
       loadOrders();
     }
   }
 
-  async function deleteOrder(id, buyerName, certificateId) {
+  async function rejectOrder(order) {
+    const reason = prompt('¿Por qué rechazas la compra de ' + order.buyer_name + '? Lo verá en «Mis compras».\n\nEj: el pago no llegó, el monto no coincide, la foto no se ve.', 'El pago no llegó a la cuenta.');
+    if (reason === null) return;
+    const res = await fetch('/api/admin/orders/' + order.id + '/reject', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }),
+    });
+    if (res.ok) {
+      showToast('Compra rechazada. El comprador ve el motivo en «Mis compras».');
+      const tel = soloDigitos(order.buyer_phone);
+      if (tel && confirm('¿Avisarle también por WhatsApp?')) {
+        window.open('https://wa.me/' + tel + '?text=' + encodeURIComponent('Hola ' + order.buyer_name + ', no pude aprobar tu compra de "' + order.track_title + '"' + (reason ? ': ' + reason : '.') + ' Escríbeme si tienes dudas.'), '_blank', 'noopener');
+      }
+      loadOrders(); loadHistory(); loadSummary();
+    } else if (res.status !== 401) {
+      const err = await res.json().catch(() => ({}));
+      showToast(err.error || 'No se pudo rechazar.', true);
+      loadOrders();
+    }
+  }
+
+  async function deleteOrder(id, buyerName, certificateId, rechazado) {
     const aviso = certificateId
-      ? '¿Eliminar la foto del comprobante de "' + buyerName + '"?\n\nLa licencia ' + certificateId + ' se conserva: el comprador va a poder seguir verificándola y descargando su PDF. Solo se borra la imagen para liberar espacio.'
-      : '¿Eliminar el comprobante de "' + buyerName + '"? Este pedido no tiene licencia emitida, así que se borra por completo.';
+      ? '¿Borrar la foto del comprobante de "' + buyerName + '"?\n\nLa licencia ' + certificateId + ' se conserva: el comprador sigue pudiendo verificarla y descargar. Solo se borra la imagen para liberar espacio.'
+      : rechazado
+        ? '¿Borrar la foto del comprobante rechazado de "' + buyerName + '"? El pedido sigue apareciendo como rechazado.'
+        : '¿Borrar el pedido de "' + buyerName + '" sin avisarle? Úsalo solo para spam. Si el pago no llegó, mejor usa «Rechazar» para que vea el motivo.';
     if (!confirm(aviso)) return;
     const res = await fetch('/api/admin/orders/' + id, { method: 'DELETE' });
     if (res.ok) {
       const r = await res.json().catch(() => ({}));
       showToast(r.keptLicense
         ? 'Foto eliminada. La licencia ' + r.certificateId + ' sigue activa.'
-        : 'Comprobante eliminado.');
-      loadOrders();
-    } else {
+        : (r.keptRejected ? 'Foto eliminada.' : 'Pedido borrado.'));
+      loadOrders(); loadHistory();
+    } else if (res.status !== 401) {
       showToast('No se pudo eliminar el comprobante.', true);
     }
   }
@@ -769,6 +1027,7 @@
   const CURRENCY_LABELS = {
     CUP: 'CUP',
     MLC: 'MLC',
+    USD: 'USD',
     USDT_BEP20: 'USDT (BEP20)',
     USDT_TRC20: 'USDT (TRC20)',
     USDT_POLYGON: 'USDT (Polygon)',
@@ -818,6 +1077,7 @@
     configuredCurrencies = fullList.map(r => ({ code: r.code, label: r.label }));
     renderExchangeRates(fullList);
     refreshAccountCurrencySelects();
+    if (typeof loadCommission === 'function') loadCommission();
   }
 
   function refreshAccountCurrencySelects() {
@@ -903,44 +1163,63 @@
     }
   });
 
+  // ---------- Restaurar backup (se sube por partes y el servidor lo extrae sin cargarlo en memoria) ----------
   const restoreInput = document.getElementById('restore-input');
+  const restoreLabel = document.getElementById('restore-label');
+  const restoreProgress = document.getElementById('restore-progress');
+  const restoreFill = document.getElementById('restore-fill');
+  const restoreStatus = document.getElementById('restore-status');
+  function estadoRestauracion(pct, texto) {
+    if (pct !== null) restoreFill.style.width = pct + '%';
+    restoreStatus.textContent = texto;
+  }
+  async function esperarReinicio() {
+    for (let i = 0; i < 60; i++) {
+      await new Promise(r => setTimeout(r, 3000));
+      try {
+        const r = await fetch('/api/admin/check', { cache: 'no-store' });
+        if (r.ok) { window.location.reload(); return; }
+      } catch { /* todavía reiniciando */ }
+    }
+    estadoRestauracion(100, 'El servidor tarda en volver. Recarga la página en un minuto.');
+  }
   restoreInput.addEventListener('change', async () => {
     const file = restoreInput.files[0];
     if (!file) return;
-
-    const firstConfirm = confirm(
-      `¿Restaurar el backup "${file.name}"?\n\nEsto va a BORRAR todas las pistas, imágenes y comprobantes que estén guardados ahora mismo, y los va a reemplazar por los del backup.`
-    );
-    if (!firstConfirm) {
+    const Z = window.ZBSubidas;
+    if (!Z) { showToast('No se pudo cargar el sistema de subidas. Recarga la página.', true); return; }
+    if (!/\.zip$/i.test(file.name)) { showToast('El backup es un archivo .zip.', true); restoreInput.value = ''; return; }
+    if (!confirm(`¿Restaurar el backup "${file.name}" (${Z.tamano(file.size)})?\n\nSe REEMPLAZAN las ventas, licencias, productores, saldos, portadas y comprobantes actuales por los del backup. Todo lo que pasó después de esa copia se pierde.`)) {
       restoreInput.value = '';
       return;
     }
-    const secondConfirm = confirm('Esta acción no se puede deshacer. ¿Confirmas que quieres continuar?');
-    if (!secondConfirm) {
-      restoreInput.value = '';
-      return;
-    }
+    if (!confirm('Esta acción no se puede deshacer. ¿Confirmas?')) { restoreInput.value = ''; return; }
 
-    showToast('Restaurando backup, esto puede tardar unos segundos…');
-
+    restoreLabel.textContent = file.name + ' · ' + Z.tamano(file.size);
+    restoreProgress.style.display = 'block';
+    subiendo = true;
     try {
-      const arrayBuffer = await file.arrayBuffer();
-      const res = await fetch('/api/admin/restore', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/zip' },
-        body: arrayBuffer,
+      const uploadId = await Z.subirArchivo('backup', file, {
+        alAvanzar: (n, total) => { const pct = Math.floor(n / total * 100); estadoRestauracion(pct, 'Subiendo el backup… ' + pct + '% (' + Z.tamano(n) + ' de ' + Z.tamano(total) + ')'); },
+        alReintentar: (n) => estadoRestauracion(null, 'Se cortó la conexión. Reintentando (intento ' + n + ')…'),
       });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'No se pudo restaurar el backup');
-      }
-
-      const result = await res.json();
-      showToast(`Backup restaurado (${result.restoredCount} archivos). El servidor se está reiniciando…`);
-      setTimeout(() => window.location.reload(), 4000);
+      estadoRestauracion(100, 'Comprobando y restaurando… (no cierres esta página)');
+      const res = await fetch('/api/admin/restore', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ uploadId }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || 'No se pudo restaurar el backup');
+      Z.olvidar('backup', file);
+      subiendo = false;
+      estadoRestauracion(100, 'Backup restaurado (' + d.restoredCount + ' archivos). El servidor se está reiniciando…');
+      showToast('Backup restaurado. Esperando a que el servidor vuelva…');
+      esperarReinicio();
     } catch (err) {
-      showToast(err.message, true);
+      subiendo = false;
+      estadoRestauracion(0, '');
+      restoreProgress.style.display = 'none';
+      restoreLabel.textContent = 'Elegir el archivo .zip del backup';
+      if (!err || err.status !== 401) showToast((err && err.message) || 'No se pudo restaurar el backup', true);
     } finally {
       restoreInput.value = '';
     }
@@ -974,6 +1253,7 @@
   function renderProducers(producers) {
     producersList.innerHTML = '';
     const pendientes = producers.filter(p => !p.approved).length;
+    actualizarNav('productores', 'aprobar', pendientes);
     producersCount.textContent = pendientes ? pendientes + ' por aprobar' : (producers.length || '');
     producersCount.classList.toggle('show', producers.length > 0);
 
@@ -998,7 +1278,8 @@
           '<div class="stats">Plan <strong>' + plan.label + '</strong> · ' + plan.com + '% comisión · ' + plan.beats +
             (p.plan_paid_until ? ' · paga hasta ' + escapeHtml(p.plan_paid_until) : '') +
             (vencido ? ' <span class="tag-vencido">VENCIDO</span>' : '') + '</div>' +
-          '<div class="stats">' + p.trackCount + ' beats · ' + p.totalSalesCup + ' CUP vendidos · ' + Number(p.pendingPayoutCup || 0).toLocaleString('es', { maximumFractionDigits: 2 }) + ' CUP pendientes de pagarle</div>' +
+          '<div class="stats">' + p.trackCount + ' beats · ' + Number(p.totalSalesCup || 0).toLocaleString('es') + ' CUP vendidos · ' + Number(p.pendingPayoutCup || 0).toLocaleString('es', { maximumFractionDigits: 2 }) + ' CUP pendientes de pagarle · ' + (p.referidos || 0) + ' referidos aprobados' +
+            (p.pendingOrders ? ' · <strong>' + p.pendingOrders + ' compra(s) por aprobar</strong>' : '') + '</div>' +
           '<div class="plan-edit">' +
             '<select class="plan-select">' +
               ['free','pro','studio'].map(k => '<option value="' + k + '"' + (p.plan === k ? ' selected' : '') + '>' + PLAN_INFO[k].label + '</option>').join('') +
@@ -1011,14 +1292,59 @@
           (p.approved ? '' : '<button type="button" class="btn-approve-order btn-approve-prod">Aprobar</button>') +
           '<button type="button" class="btn-toggle-exclusive ' + (p.exclusive_enabled ? 'is-on' : '') + '">' + (p.exclusive_enabled ? 'Quitar Exclusiva' : 'Habilitar Exclusiva') + '</button>' +
           '<button type="button" class="btn-toggle-producer ' + (p.active ? 'is-active' : '') + '">' + (p.active ? 'Desactivar' : 'Activar') + '</button>' +
+          '<button type="button" class="btn-toggle-producer btn-movs-prod">Movimientos</button>' +
+          '<button type="button" class="btn-toggle-producer btn-pass-prod">Nueva contraseña</button>' +
           '<button type="button" class="btn-delete">Eliminar</button>' +
-        '</div>';
+        '</div>' +
+        '<div class="prod-movs" hidden></div>';
 
+      item.querySelector('.btn-movs-prod').addEventListener('click', async (ev) => {
+        const box = item.querySelector('.prod-movs');
+        if (!box.hidden) { box.hidden = true; ev.target.textContent = 'Movimientos'; return; }
+        ev.target.disabled = true;
+        const listo = await pintarMovsProductor(box, p);
+        ev.target.disabled = false;
+        if (!listo) return;
+        box.hidden = false;
+        ev.target.textContent = 'Ocultar movimientos';
+      });
+
+      const telProd = soloDigitos(p.contact_phone);
       const apr = item.querySelector('.btn-approve-prod');
       if (apr) apr.addEventListener('click', async () => {
+        apr.disabled = true;
         const r = await fetch('/api/admin/producers/' + p.id + '/approve', { method: 'POST' });
-        showToast(r.ok ? 'Productor aprobado. Ya puede entrar y subir beats.' : 'No se pudo aprobar.', !r.ok);
-        loadProducers();
+        if (!r.ok) { if (r.status !== 401) showToast('No se pudo aprobar.', true); apr.disabled = false; return; }
+        showToast('Productor aprobado. Ya puede entrar y subir beats.');
+        if (telProd) {
+          // se avisa con un toque para que el navegador no bloquee WhatsApp
+          apr.outerHTML = '<a class="btn-whatsapp-order btn-wa-aprobado" href="https://wa.me/' + telProd + '?text=' +
+            encodeURIComponent('Hola ' + p.name + ' \u{1F44B} Tu cuenta de productor en Zona Beats ya está aprobada. Entra en ' + location.origin + '/productores con tu correo y contraseña para subir tus beats.') +
+            '" target="_blank" rel="noopener">Avisarle por WhatsApp</a>';
+          const wa = item.querySelector('.btn-wa-aprobado');
+          wa.addEventListener('click', () => setTimeout(loadProducers, 800));
+        } else {
+          loadProducers();
+        }
+        loadSummary();
+      });
+
+      item.querySelector('.btn-pass-prod').addEventListener('click', async () => {
+        const nueva = prompt('Nueva contraseña para ' + p.name + ' (mínimo 6 caracteres).\n\nSe cierra su sesión en todos lados. Mándasela por WhatsApp y pídele que la cambie en su Perfil.', '');
+        if (nueva === null) return;
+        if (nueva.length < 6) { showToast('La contraseña debe tener al menos 6 caracteres.', true); return; }
+        const r = await fetch('/api/admin/producers/' + p.id + '/password', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: nueva }),
+        });
+        if (r.ok) {
+          showToast('Contraseña cambiada.');
+          if (telProd && confirm('¿Mandársela por WhatsApp ahora?')) {
+            window.open('https://wa.me/' + telProd + '?text=' + encodeURIComponent('Hola ' + p.name + ', tu nueva contraseña del portal de productores de Zona Beats es: ' + nueva + '\nEntra en ' + location.origin + '/productores y cámbiala en tu Perfil.'), '_blank', 'noopener');
+          }
+        } else if (r.status !== 401) {
+          const e2 = await r.json().catch(() => ({}));
+          showToast(e2.error || 'No se pudo cambiar la contraseña.', true);
+        }
       });
 
       item.querySelector('.btn-save-plan').addEventListener('click', async () => {
@@ -1050,14 +1376,17 @@
 
       item.querySelector('.btn-delete').addEventListener('click', async () => {
         const deuda = Number(p.pendingPayoutCup || 0);
+        const pend = Number(p.pendingOrders || 0);
         if (!confirm('¿Eliminar a ' + p.name + '?\n\nSe borran TODOS sus beats y archivos de la app. Las ventas ya aprobadas y sus licencias se conservan. Esto no se puede deshacer.' +
-          (deuda > 0 ? '\n\nATENCIÓN: todavía le debes ' + deuda.toLocaleString('es') + ' CUP por ventas. Si lo eliminas, esa deuda desaparece del panel «Pagos a productores».' : ''))) return;
+          (pend > 0 ? '\n\nOJO: tiene ' + pend + ' compra(s) esperando aprobación. Se rechazan solas y tendrás que devolverles el dinero a esos compradores.' : '') +
+          (deuda > 0 ? '\n\nATENCIÓN: todavía le debes ' + deuda.toLocaleString('es') + ' CUP. Si lo eliminas, esa deuda desaparece del panel de retiros.' : ''))) return;
         const r = await fetch('/api/admin/producers/' + p.id, { method: 'DELETE' });
         if (r.ok) {
           const d = await r.json();
           showToast('Productor eliminado (' + d.tracksEliminados + ' beats borrados, ' + d.ventasConservadas + ' ventas conservadas).' +
+            (d.comprasPendientes > 0 ? ' Se rechazaron ' + d.comprasPendientes + ' compra(s) pendientes.' : '') +
             (d.deudaPendienteCup > 0 ? ' Ojo: le quedaban ' + d.deudaPendienteCup + ' CUP sin pagar.' : ''));
-          loadProducers(); loadTracks(); loadPayouts(); loadPlanRequests();
+          loadProducers(); loadTracks(); loadPayouts(); loadPlanRequests(); loadOrders(); loadHistory(); loadSummary();
         } else {
           const e = await r.json().catch(() => ({}));
           showToast(e.error || 'No se pudo eliminar.', true);
@@ -1073,11 +1402,12 @@
     const name = document.getElementById('producer-name-input').value.trim();
     const email = document.getElementById('producer-email-input').value.trim();
     const password = document.getElementById('producer-password-input').value;
+    const phone = document.getElementById('producer-phone-input').value.trim();
 
     const res = await fetch('/api/admin/producers', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, email, password }),
+      body: JSON.stringify({ name, email, password, phone }),
     });
 
     if (res.ok) {
@@ -1103,6 +1433,7 @@
   function renderPendingTracks(tracks) {
     pendingTracksList.innerHTML = '';
     pendingTracksCount.textContent = tracks.length || '';
+    actualizarNav('productores', 'beats', tracks.length);
     pendingTracksCount.classList.toggle('show', tracks.length > 0);
 
     if (!tracks.length) {
@@ -1113,13 +1444,21 @@
     tracks.forEach((t) => {
       const item = document.createElement('div');
       item.className = 'pending-track-item';
-      const coverSrc = t.cover_filename ? `/api/cover/${t.id}` : '';
+      const coverSrc = t.cover_filename ? `/api/cover/${t.id}?s=160` : '';
+      const a = t.archivos || {};
+      const fileLink = (f, txt) => `<a class="file-badge" href="/api/admin/tracks/${t.id}/file?f=${f}" target="_blank" rel="noopener">${txt} ↓</a>`;
+      const archivos = t.is_playlist ? '' :
+        '<div class="file-badges">' + fileLink('mp3', 'MP3') + (a.wav ? fileLink('wav', 'WAV') : '<span class="file-badge missing">sin WAV</span>') +
+        (a.stems ? fileLink('stems', 'STEMS') : '<span class="file-badge missing">sin STEMS</span>') + '</div>';
+      const licencias = (t.licenses || []).map(l => (LIC_NOMBRES[l.license_type] || l.license_type) + ' ' + Number(l.price_cup).toLocaleString('es') + ' CUP').join(' · ');
       item.innerHTML = `
-        ${coverSrc ? `<img src="${coverSrc}" alt="">` : `<img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'/%3E" alt="">`}
+        ${coverSrc ? `<img src="${coverSrc}" alt="" loading="lazy">` : `<img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'/%3E" alt="">`}
         <div class="info">
-          <div class="t">${escapeHtml(t.title)}</div>
-          <div class="m">${escapeHtml(t.genre || 'Sin género')} · ${escapeHtml(t.price_label || '')}</div>
-          <div class="producer">${escapeHtml(t.producer_name || 'Sin productor')} · ${escapeHtml(t.producer_email || '')}</div>
+          <div class="t">${escapeHtml(t.title)}${t.is_playlist ? ' <span class="tag-pending">Playlist</span>' : ''}</div>
+          <div class="m">${escapeHtml(t.genre || 'Sin género')}${licencias ? ' · ' + escapeHtml(licencias) : ''}</div>
+          <div class="producer">${escapeHtml(t.producer_name || 'Sin productor')} · plan ${escapeHtml(PLAN_INFO[t.producer_plan] ? PLAN_INFO[t.producer_plan].label : (t.producer_plan || 'Free'))} · ${escapeHtml(t.producer_email || '')}</div>
+          ${t.description ? `<div class="m desc">${escapeHtml(t.description)}</div>` : ''}
+          ${archivos}
         </div>
         <audio controls preload="none" src="/api/admin/preview-audio/${t.id}"></audio>
         <div class="actions">
@@ -1127,18 +1466,21 @@
           <button type="button" class="btn-reject-track">Rechazar</button>
         </div>
       `;
-      item.querySelector('.btn-approve-order').addEventListener('click', async () => {
+      item.querySelector('.btn-approve-order').addEventListener('click', async (ev) => {
+        ev.target.disabled = true;
         const res = await fetch(`/api/admin/tracks/${t.id}/approve`, { method: 'POST' });
         if (res.ok) {
           showToast('Beat aprobado, ya está visible en la tienda.');
-          loadPendingTracks();
-        } else {
-          showToast('No se pudo aprobar.', true);
+          loadPendingTracks(); loadTracks(); loadSummary();
+        } else if (res.status !== 401) {
+          const e2 = await res.json().catch(() => ({}));
+          showToast(e2.error || 'No se pudo aprobar.', true);
+          ev.target.disabled = false;
         }
       });
       item.querySelector('.btn-reject-track').addEventListener('click', async () => {
-        if (!confirm(`¿Rechazar "${t.title}"? No aparecerá en la tienda.`)) return;
-        const reason = prompt('¿Por qué lo rechazas? (opcional, se lo va a mostrar al productor)') || '';
+        const reason = prompt(`¿Por qué rechazas "${t.title}"? El productor lo verá en su portal y puede corregirlo.`, '');
+        if (reason === null) return;
         const res = await fetch(`/api/admin/tracks/${t.id}/reject`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1146,8 +1488,8 @@
         });
         if (res.ok) {
           showToast('Beat rechazado.');
-          loadPendingTracks();
-        } else {
+          loadPendingTracks(); loadSummary();
+        } else if (res.status !== 401) {
           showToast('No se pudo rechazar.', true);
         }
       });
@@ -1159,74 +1501,263 @@
   const adminPhoneInput = document.getElementById('admin-phone-input');
   const planProPriceInput = document.getElementById('plan-pro-price-input');
   const planStudioPriceInput = document.getElementById('plan-studio-price-input');
+  let usdRateAdmin = 0;
+
+  function pintarCupPlanes() {
+    const n = (v) => parseFloat(String(v || '').replace(',', '.')) || 0;
+    const txt = (usd) => usdRateAdmin
+      ? '≈ ' + Math.round(usd * usdRateAdmin).toLocaleString('es') + ' CUP/mes con tu tasa (1 USD = ' + usdRateAdmin.toLocaleString('es') + ' CUP)'
+      : 'Pon la tasa del USD en «Tasas de cambio» para calcular el precio en CUP.';
+    document.getElementById('plan-pro-cup').textContent = txt(n(planProPriceInput.value));
+    document.getElementById('plan-studio-cup').textContent = txt(n(planStudioPriceInput.value));
+  }
+  [planProPriceInput, planStudioPriceInput].forEach(el => el.addEventListener('input', pintarCupPlanes));
+
+  let payoutRatesCfg = {};
+  function pintarTasasRetiro() {
+    const cont = document.getElementById('payout-rates-list');
+    const monedas = configuredCurrencies.filter(c => c.code !== 'CUP');
+    cont.innerHTML = monedas.map(c => {
+      const v = payoutRatesCfg[c.code] || {};
+      return '<div class="payout-rate-row" data-code="' + escapeHtml(c.code) + '">' +
+        '<div class="rate-row-label">' + escapeHtml(c.label) + '</div>' +
+        '<label class="mini-field"><span>Tasa del remesero (CUP)</span><input type="text" class="pr-rate" inputmode="decimal" placeholder="= venta" value="' + (v.rate || '') + '"></label>' +
+        '<label class="mini-field"><span>Fee de red</span><input type="text" class="pr-fee" inputmode="decimal" placeholder="0" value="' + (v.fee || '') + '"></label>' +
+      '</div>';
+    }).join('') || '<div class="empty-hint">Configura primero tus monedas en «Tasas de cambio».</div>';
+  }
 
   async function loadCommission() {
     const res = await fetch('/api/admin/platform-config');
     if (!res.ok) return;
     const d = await res.json();
     adminPhoneInput.value = d.adminPhone || '';
-    planProPriceInput.value = d.planPriceProCup || '';
-    planStudioPriceInput.value = d.planPriceStudioCup || '';
+    planProPriceInput.value = d.planPriceProUsd || '';
+    planStudioPriceInput.value = d.planPriceStudioUsd || '';
+    usdRateAdmin = d.usdRate || 0;
+    document.getElementById('likes-per-bonus').value = d.likesPerBonus;
+    document.getElementById('likes-bonus-cup').value = d.likesBonusCup;
+    document.getElementById('referrals-per-bonus').value = d.referralsPerBonus;
+    document.getElementById('referral-bonus-cup').value = d.referralBonusCup;
+    payoutRatesCfg = d.payoutRates || {};
+    pintarCupPlanes();
+    pintarTasasRetiro();
   }
 
   platformForm.addEventListener('submit', async (e) => {
     e.preventDefault();
+    const payoutRates = {};
+    document.querySelectorAll('.payout-rate-row').forEach(r => {
+      payoutRates[r.dataset.code] = { rate: r.querySelector('.pr-rate').value.trim(), fee: r.querySelector('.pr-fee').value.trim() };
+    });
     const res = await fetch('/api/admin/platform-config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         adminPhone: adminPhoneInput.value,
-        planPriceProCup: planProPriceInput.value,
-        planPriceStudioCup: planStudioPriceInput.value,
+        planPriceProUsd: planProPriceInput.value,
+        planPriceStudioUsd: planStudioPriceInput.value,
+        likesPerBonus: document.getElementById('likes-per-bonus').value,
+        likesBonusCup: document.getElementById('likes-bonus-cup').value,
+        referralsPerBonus: document.getElementById('referrals-per-bonus').value,
+        referralBonusCup: document.getElementById('referral-bonus-cup').value,
+        payoutRates,
       }),
     });
-    if (res.ok) showToast('Precios de los planes guardados.');
+    if (res.ok) { showToast('Configuración de planes, bonos y retiros guardada.'); loadCommission(); }
     else { const e2 = await res.json().catch(() => ({})); showToast(e2.error || 'No se pudo guardar.', true); }
   });
+
+  // ---------- Movimientos de un productor (desde Productores) ----------
+  const MOV_TIPOS_ADMIN = { venta: 'Venta', bono: 'Bono', plan: 'Plan', retiro: 'Retiro' };
+  async function pintarMovsProductor(box, p) {
+    const r = await fetch('/api/admin/producers/' + p.id + '/movimientos');
+    if (!r.ok) { showToast('No se pudieron cargar los movimientos.', true); return false; }
+    const d = await r.json();
+    box._movs = d.movimientos;
+    const saldo = (d.billeteras || []).length ? d.billeteras.map(b => escapeHtml(unidades(b.unidades, b.code))).join(' · ') : '0 CUP';
+    box.innerHTML = '<div class="prod-movs-head">Saldo actual: <strong>' + saldo + '</strong></div>' +
+      '<div class="hist-tools">' +
+        '<button type="button" class="hist-btn hist-download"' + (d.movimientos.length ? '' : ' disabled') + '>⭳ Descargar</button>' +
+        '<button type="button" class="hist-btn danger hist-clear"' + (d.movimientos.some(m => m.borrable) ? '' : ' disabled') + '>Borrar historial</button>' +
+        (d.ocultos ? '<button type="button" class="hist-btn hist-restore">Restaurar borrados (' + d.ocultos + ')</button>' : '') +
+      '</div>' +
+      (d.movimientos.length ? '<ul>' + d.movimientos.slice(0, 200).map(m =>
+        '<li class="hist-item"><span class="muted">' + fechaHora(m.fecha) + '</span> · ' + escapeHtml(m.titulo) +
+        (m.estado ? ' <span class="muted">(' + escapeHtml(m.estado) + ')</span>' : '') +
+        (m.unidades ? ' = <strong class="' + (m.unidades > 0 ? 'mv-in' : 'mv-out') + '">' + (m.unidades > 0 ? '+' : '−') + escapeHtml(unidades(Math.abs(m.unidades), m.moneda)) + '</strong>' : '') +
+        (m.detalle ? '<div class="muted small">' + escapeHtml(m.detalle) + '</div>' : '') +
+        (m.borrable ? botonBorrarHist(m.clave) : '') + '</li>').join('') + '</ul>'
+        : '<div class="empty-hint">Sin movimientos' + (d.ocultos ? ' a la vista.' : ' todavía.') + '</div>');
+    if (!box._conectado) {
+      box._conectado = true;
+      const qs = '?productor=' + p.id;
+      box.addEventListener('click', async (e) => {
+        const del = e.target.closest('.hist-del');
+        if (del) {
+          del.disabled = true;
+          const r2 = await cambiarHistorialAdmin('movs', { accion: 'ocultar', claves: [del.dataset.clave] }, qs);
+          if (r2) { showToast('Se borró del historial. El saldo no cambia.'); pintarMovsProductor(box, p); } else del.disabled = false;
+          return;
+        }
+        if (e.target.closest('.hist-clear')) {
+          const claves = (box._movs || []).filter(m => m.borrable).map(m => m.clave);
+          if (!claves.length || !confirm('¿Borrar ' + claves.length + ' movimientos de ' + p.name + ' de este historial?\n\nSolo se quitan de tu vista: su saldo no cambia y él sigue viendo los suyos. Lo que está en curso no se borra.')) return;
+          const r2 = await cambiarHistorialAdmin('movs', { accion: 'ocultar', claves }, qs);
+          if (r2) { showToast('Se borraron ' + r2.borrados + ' movimientos.'); pintarMovsProductor(box, p); }
+          return;
+        }
+        if (e.target.closest('.hist-restore')) {
+          const r2 = await cambiarHistorialAdmin('movs', { accion: 'restaurar' }, qs);
+          if (r2) { showToast('Se restauraron ' + r2.restaurados + '.'); pintarMovsProductor(box, p); }
+          return;
+        }
+        if (e.target.closest('.hist-download')) {
+          const filas = box._movs || [];
+          if (!filas.length) return;
+          H.descargarCSV('movimientos-' + String(p.name || 'productor').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''), [
+            { titulo: 'Fecha y hora', valor: m => H.fechaHoraArchivo(m.fecha) },
+            { titulo: 'Tipo', valor: m => MOV_TIPOS_ADMIN[m.tipo] || m.tipo },
+            { titulo: 'Concepto', valor: m => m.titulo },
+            { titulo: 'Detalle', valor: m => m.detalle },
+            { titulo: 'Monto', valor: m => H.numero(m.unidades || 0, ['CUP', 'SALDO_MOVIL'].includes(m.moneda) ? 0 : 2) },
+            { titulo: 'Moneda', valor: m => m.label || m.moneda },
+            { titulo: 'Estado', valor: m => m.estado || 'hecho' },
+          ], filas);
+          showToast('Historial descargado (se abre con Excel).');
+        }
+      });
+    }
+    return true;
+  }
+
+  // ---------- Historiales: borrar, restaurar y descargar ----------
+  const H = window.ZBHistorial;
+  const fechaHora = (f) => H.fechaHora(f);
+  const botonBorrarHist = (clave) => '<button type="button" class="hist-del" data-clave="' + escapeHtml(clave) + '" title="Borrar del historial" aria-label="Borrar del historial">×</button>';
+  const toolsHist = (k) => document.querySelector('.hist-tools[data-hist="' + k + '"]');
+  function pintarToolsHist(k, ocultos, borrables, filas) {
+    const t = toolsHist(k);
+    if (!t) return;
+    const r = t.querySelector('.hist-restore');
+    r.hidden = !ocultos;
+    r.textContent = 'Restaurar borrados (' + ocultos + ')';
+    t.querySelector('.hist-clear').disabled = !borrables;
+    t.querySelector('.hist-download').disabled = !filas;
+  }
+  async function cambiarHistorialAdmin(lista, cuerpo, qs) {
+    const res = await fetch('/api/admin/historial/' + lista + (qs || ''), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo) });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { if (res.status !== 401) showToast(d.error || 'No se pudo cambiar el historial.', true); return null; }
+    return d;
+  }
+  // Conecta la barra (Descargar / Borrar historial / Restaurar) y los botones × de una lista
+  function conectarHistorial(k, cont, opciones) {
+    const t = toolsHist(k);
+    const recargar = opciones.recargar;
+    cont.addEventListener('click', async (e) => {
+      const b = e.target.closest('.hist-del');
+      if (!b || !cont.contains(b)) return;
+      b.disabled = true;
+      const d = await cambiarHistorialAdmin(k, { accion: 'ocultar', claves: [b.dataset.clave] }, opciones.qs && opciones.qs());
+      if (d) { showToast('Se borró del historial.'); recargar(); } else b.disabled = false;
+    });
+    t.querySelector('.hist-clear').addEventListener('click', async () => {
+      const claves = opciones.borrables();
+      if (!claves.length) return;
+      if (!confirm('¿Borrar ' + claves.length + ' ' + opciones.nombre + ' del historial?\n\n' + opciones.aviso + '\nLo que está en curso no se borra. Puedes restaurarlos después.')) return;
+      const d = await cambiarHistorialAdmin(k, { accion: 'ocultar', claves }, opciones.qs && opciones.qs());
+      if (d) { showToast('Se borraron ' + d.borrados + ' del historial.'); recargar(); }
+    });
+    t.querySelector('.hist-restore').addEventListener('click', async () => {
+      const d = await cambiarHistorialAdmin(k, { accion: 'restaurar' }, opciones.qs && opciones.qs());
+      if (d) { showToast('Se restauraron ' + d.restaurados + '.'); recargar(); }
+    });
+    t.querySelector('.hist-download').addEventListener('click', () => {
+      const filas = opciones.filas();
+      if (!filas.length) return;
+      H.descargarCSV(opciones.archivo, opciones.columnas, filas);
+      showToast('Historial descargado (se abre con Excel).');
+    });
+  }
+  const textoPlano = (html) => String(html || '').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
 
   const historyList = document.getElementById('history-list');
   const historyCount = document.getElementById('history-count');
 
+  let historial = [];
+  let historialVisible = [];
+  let comprasOcultas = 0;
+  const historySearch = document.getElementById('history-search');
+  historySearch.addEventListener('input', () => renderHistory());
+
   async function loadHistory() {
     const res = await fetch('/api/admin/orders-history');
     if (!res.ok) return;
-    const { orders } = await res.json();
-    historyCount.textContent = orders.length || '';
-    historyCount.classList.toggle('show', orders.length > 0);
+    const { orders, ocultos } = await res.json();
+    historial = orders;
+    comprasOcultas = ocultos || 0;
+    const aprobadas = orders.filter(o => o.status === 'approved').length;
+    historyCount.textContent = aprobadas || '';
+    historyCount.classList.toggle('show', aprobadas > 0);
+    renderHistory();
+  }
+
+  function renderHistory() {
+    const q = historySearch.value.trim().toLowerCase();
+    const lista = q ? historial.filter(o => [o.buyer_name, o.buyer_phone, o.track_title, o.certificate_id, o.producer_name]
+      .some(v => String(v || '').toLowerCase().includes(q))) : historial;
+    historialVisible = lista;
+    pintarToolsHist('compras', comprasOcultas, lista.length, lista.length);
     historyList.innerHTML = '';
-    if (!orders.length) {
-      historyList.innerHTML = '<div class="empty-hint">Todavía no hay compras aprobadas.</div>';
+    if (!historial.length) {
+      historyList.innerHTML = '<div class="empty-hint">Todavía no hay compras aprobadas ni rechazadas.</div>';
       return;
     }
-    orders.forEach((o) => {
+    if (!lista.length) {
+      historyList.innerHTML = '<div class="empty-hint">Nada coincide con «' + escapeHtml(q) + '».</div>';
+      return;
+    }
+    lista.slice(0, 300).forEach((o) => {
       const item = document.createElement('div');
-      item.className = 'order-item';
+      const rechazada = o.status === 'rejected';
+      item.className = 'order-item' + (rechazada ? ' order-rejected' : '');
       const vendedor = o.producer_name ? ('Productor: ' + escapeHtml(o.producer_name)) : 'Tuyo';
-      const wa = (o.buyer_phone || '').replace(/[^0-9]/g, '');
-      const linkCompra = o.buyer_token ? location.origin + '/?compra=' + o.buyer_token : '';
-      const waText = encodeURIComponent('Hola ' + o.buyer_name + ' \u{1F44B} Tu compra de "' + o.track_title + '" está aprobada.\n\n' +
-        (linkCompra ? 'Descarga tu beat y tu licencia aquí (este link es solo tuyo, no lo compartas):\n' + linkCompra + '\n\n' : '') +
-        'Número de licencia: ' + (o.certificate_id || '') + '\nCualquiera puede verificarla en: ' + location.origin + '/verify/' + (o.certificate_id || '') + '\n\n¡Gracias por tu compra!');
+      const wa = soloDigitos(o.buyer_phone);
+      const linkCompra = !rechazada && o.buyer_token ? location.origin + '/?compra=' + o.buyer_token : '';
+      const waText = encodeURIComponent(mensajeLinkCompra(o, linkCompra, o.certificate_id));
+      const lic = LIC_NOMBRES[o.license_type] || o.license_type || '';
       item.innerHTML =
         (o.receipt_filename
-          ? '<img class="receipt-thumb" src="/api/admin/orders/' + o.id + '/receipt" alt="">'
+          ? '<img class="receipt-thumb" src="/api/admin/orders/' + o.id + '/receipt" alt="" loading="lazy">'
           : '<div class="receipt-thumb receipt-gone">sin foto</div>') +
         '<div class="info">' +
-          '<div class="buyer">' + escapeHtml(o.buyer_name) + '</div>' +
-          '<div class="track">' + escapeHtml(o.track_title) + ' · ' + escapeHtml(o.price_label || '') + '</div>' +
-          '<div class="meta">' + escapeHtml(o.buyer_phone) + ' · ' + formatOrderDate(o.created_at) + ' · ' + vendedor + '</div>' +
+          '<div class="buyer">' + escapeHtml(o.buyer_name) + (rechazada ? ' <span class="tag-vencido">rechazada</span>' : '') + '</div>' +
+          '<div class="track">' + escapeHtml(o.track_title) + ' · <strong>' + escapeHtml(lic) + '</strong> · ' + escapeHtml(o.price_label || '') + '</div>' +
+          '<div class="meta">' + escapeHtml(o.buyer_phone) + ' · ' + fechaHora(o.approved_at || o.rejected_at || o.created_at) + ' · ' + vendedor + escapeHtml(rechazada ? '' : paraProductor(o)) + '</div>' +
+          (rechazada && o.reject_reason ? '<div class="meta">Motivo: ' + escapeHtml(o.reject_reason) + '</div>' : '') +
           (o.certificate_id ? '<div class="cert-line">Licencia <strong>' + escapeHtml(o.certificate_id) + '</strong></div>' : '') +
         '</div>' +
         '<div class="actions">' +
-          (o.certificate_id ? '<a class="btn-whatsapp-order" href="/api/license/' + encodeURIComponent(o.certificate_id) + '/pdf" target="_blank" rel="noopener">Descargar PDF</a>' : '') +
-          (wa ? '<a class="btn-toggle-producer" href="https://wa.me/' + wa + '?text=' + waText + '" target="_blank" rel="noopener">Enviar link por WhatsApp</a>' : '') +
-          (linkCompra ? '<button type="button" class="btn-toggle-producer btn-copy-link">Copiar link de descarga</button>' : '') +
-        '</div>';
+          (o.certificate_id ? '<a class="btn-whatsapp-order" href="/api/license/' + encodeURIComponent(o.certificate_id) + '/pdf" target="_blank" rel="noopener">PDF</a>' : '') +
+          (wa && !rechazada ? '<a class="btn-toggle-producer" href="https://wa.me/' + wa + '?text=' + waText + '" target="_blank" rel="noopener">Enviar link por WhatsApp</a>' : '') +
+          (linkCompra ? '<button type="button" class="btn-toggle-producer btn-copy-link">Copiar link</button>' : '') +
+          (rechazada ? '<button type="button" class="btn-approve-order btn-approve-late">Aprobar igual</button>' : '') +
+          (o.receipt_filename ? '<button type="button" class="btn-delete btn-del-photo">Borrar foto</button>' : '') +
+        '</div>' + botonBorrarHist('orden:' + o.id);
+      item.classList.add('hist-item');
       const cp = item.querySelector('.btn-copy-link');
       if (cp) cp.addEventListener('click', async () => {
         try { await navigator.clipboard.writeText(linkCompra); showToast('Link copiado. Es privado: solo mándaselo al comprador.'); }
         catch { prompt('Copia este link y mándaselo al comprador:', linkCompra); }
       });
+      const late = item.querySelector('.btn-approve-late');
+      if (late) late.addEventListener('click', (ev) => {
+        if (!confirm('¿Aprobar la compra de ' + o.buyer_name + ' aunque la rechazaste? Hazlo solo si el pago sí llegó.')) return;
+        approveOrder(o, item, ev.target);
+      });
+      const delFoto = item.querySelector('.btn-del-photo');
+      if (delFoto) delFoto.addEventListener('click', () => deleteOrder(o.id, o.buyer_name, o.certificate_id, rechazada));
       if (o.receipt_filename) {
         item.querySelector('.receipt-thumb').addEventListener('click', () => {
           receiptModalImg.src = '/api/admin/orders/' + o.id + '/receipt';
@@ -1235,19 +1766,53 @@
       }
       historyList.appendChild(item);
     });
+    if (lista.length > 300) {
+      const mas = document.createElement('div');
+      mas.className = 'empty-hint';
+      mas.textContent = 'Se muestran 300 de ' + lista.length + '. Usa el buscador para encontrar una compra.';
+      historyList.appendChild(mas);
+    }
   }
+
+  conectarHistorial('compras', historyList, {
+    recargar: () => loadHistory(),
+    nombre: 'compras',
+    aviso: 'Solo se quitan de esta lista: las licencias, las descargas de los compradores y los saldos de los productores siguen igual.',
+    borrables: () => historialVisible.map(o => 'orden:' + o.id),
+    filas: () => historialVisible,
+    archivo: 'historial-compras',
+    columnas: [
+      { titulo: 'Fecha y hora', valor: o => H.fechaHoraArchivo(o.approved_at || o.rejected_at || o.created_at) },
+      { titulo: 'Estado', valor: o => o.status === 'approved' ? 'aprobada' : 'rechazada' },
+      { titulo: 'Comprador', valor: o => o.buyer_name },
+      { titulo: 'Teléfono', valor: o => o.buyer_phone },
+      { titulo: 'Beat', valor: o => o.track_title },
+      { titulo: 'Licencia', valor: o => LIC_NOMBRES[o.license_type] || o.license_type },
+      { titulo: 'Precio', valor: o => o.price_label || '' },
+      { titulo: 'Pagó', valor: o => o.paid_units != null ? H.numero(o.paid_units, ['CUP', 'SALDO_MOVIL'].includes(o.wallet_currency || 'CUP') ? 0 : 2) + ' ' + etiquetaDe(o.wallet_currency || 'CUP') : '' },
+      { titulo: 'Vendedor', valor: o => o.producer_name || 'Tuyo' },
+      { titulo: 'Al productor', valor: o => o.producer_id && o.status === 'approved' ? textoPlano(paraProductor(o)).replace(/^\s*·\s*/, '') : '' },
+      { titulo: 'N° de licencia', valor: o => o.certificate_id || '' },
+      { titulo: 'Motivo del rechazo', valor: o => o.reject_reason || '' },
+    ],
+  });
 
   // ---------- Compras de planes (productores) ----------
   const planRequestsList = document.getElementById('plan-requests-list');
   const planRequestsCount = document.getElementById('plan-requests-count');
   const PLAN_NAMES = { pro: 'Pro', studio: 'Studio', free: 'Free' };
+  let planesLista = [];
+  const ESTADO_PLAN = { pending: 'por revisar', approved: 'aprobado', rejected: 'rechazado' };
 
   async function loadPlanRequests() {
     const res = await fetch('/api/admin/plan-requests');
     if (!res.ok) return;
-    const { requests } = await res.json();
+    const { requests, ocultos } = await res.json();
+    planesLista = requests;
+    pintarToolsHist('planes', ocultos || 0, requests.some(r => r.status !== 'pending'), requests.length);
     const pend = requests.filter(r => r.status === 'pending');
     planRequestsCount.textContent = pend.length || '';
+    actualizarNav('productores', 'planes', pend.length);
     planRequestsCount.classList.toggle('show', pend.length > 0);
     planRequestsList.innerHTML = '';
     if (!requests.length) {
@@ -1270,7 +1835,7 @@
           '<div class="track">Plan <strong>' + (PLAN_NAMES[r.plan] || r.plan) + '</strong> · ' + r.months + (r.months === 1 ? ' mes' : ' meses') +
             ' · ' + Number(r.amount_cup).toLocaleString('es') + ' CUP' + (r.currency && r.currency !== 'CUP' ? ' (pagó en ' + escapeHtml(r.currency) + ')' : '') + '</div>' +
           '<div class="meta">' + escapeHtml(r.producer_email || '') + (r.producer_phone ? ' · ' + escapeHtml(r.producer_phone) : '') +
-            ' · ' + formatOrderDate(r.created_at) + ' · plan actual: ' + (PLAN_NAMES[r.current_plan] || r.current_plan || '—') + '</div>' +
+            ' · ' + fechaHora(r.created_at) + ' · plan actual: ' + (PLAN_NAMES[r.current_plan] || r.current_plan || '—') + '</div>' +
           '<div class="meta">' + estado + '</div>' +
         '</div>' +
         '<div class="actions">' +
@@ -1279,7 +1844,8 @@
               '<button type="button" class="btn-reject-track btn-reject-plan">Rechazar</button>'
             : '') +
           (wa ? '<a class="btn-toggle-producer" href="https://wa.me/' + wa + '" target="_blank" rel="noopener">WhatsApp</a>' : '') +
-        '</div>';
+        '</div>' + (r.status !== 'pending' ? botonBorrarHist('plan:' + r.id) : '');
+      item.classList.add('hist-item');
       const thumb = item.querySelector('img.receipt-thumb');
       if (thumb) thumb.addEventListener('click', () => {
         receiptModalImg.src = '/api/admin/plan-requests/' + r.id + '/receipt';
@@ -1314,68 +1880,149 @@
     });
   }
 
-  // ---------- Pagos a productores ----------
+  // ---------- Retiros de productores ----------
   const payoutsList = document.getElementById('payouts-list');
   const payoutsCount = document.getElementById('payouts-count');
   const payoutsHistory = document.getElementById('payouts-history');
   const fmtCup = (n) => Number(n || 0).toLocaleString('es', { maximumFractionDigits: 2 }) + ' CUP';
+  const fmtN = (n, d) => Number(n || 0).toLocaleString('es', { minimumFractionDigits: d, maximumFractionDigits: d });
+  const LIC = { basic: 'Básica', premium: 'Premium', unlimited: 'Ilimitada', exclusive: 'Exclusiva' };
+  let retirosTimer = null;
+
+  conectarHistorial('planes', planRequestsList, {
+    recargar: () => loadPlanRequests(),
+    nombre: 'compras de planes',
+    aviso: 'Solo se quitan de esta lista: los planes activos siguen igual.',
+    borrables: () => planesLista.filter(r => r.status !== 'pending').map(r => 'plan:' + r.id),
+    filas: () => planesLista,
+    archivo: 'historial-planes',
+    columnas: [
+      { titulo: 'Fecha y hora', valor: r => H.fechaHoraArchivo(r.created_at) },
+      { titulo: 'Productor', valor: r => r.producer_name || 'Productor eliminado' },
+      { titulo: 'Correo', valor: r => r.producer_email || '' },
+      { titulo: 'Plan', valor: r => PLAN_NAMES[r.plan] || r.plan },
+      { titulo: 'Meses', valor: r => r.months },
+      { titulo: 'Monto CUP', valor: r => H.numero(r.amount_cup, 0) },
+      { titulo: 'Pagó con', valor: r => r.currency || 'CUP' },
+      { titulo: 'Estado', valor: r => ESTADO_PLAN[r.status] || r.status },
+      { titulo: 'Activo hasta', valor: r => r.paid_until_result || '' },
+      { titulo: 'Motivo del rechazo', valor: r => r.reject_reason || '' },
+    ],
+  });
+
+  function montoW(w) {
+    return w.currency === 'CUP' ? fmtCup(w.net_units) : fmtN(w.net_units, w.currency === 'SALDO_MOVIL' ? 0 : 2) + ' ' + escapeHtml(w.currency_label || w.currency);
+  }
+  function cuentaRegresiva(dueIso) {
+    const falta = new Date(dueIso).getTime() - Date.now();
+    if (falta <= 0) return { txt: 'ATRASADO — el plazo venció el ' + new Date(dueIso).toLocaleString('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }), late: true };
+    const d = Math.floor(falta / 86400000), h = Math.floor((falta % 86400000) / 3600000), m = Math.floor((falta % 3600000) / 60000);
+    return { txt: 'Págale en ' + (d ? d + ' d ' : '') + h + ' h ' + (d ? '' : m + ' min'), late: false };
+  }
+
+  let retirosFilas = [];
+  conectarHistorial('retiros', payoutsHistory, {
+    recargar: () => loadPayouts(),
+    nombre: 'retiros resueltos',
+    aviso: 'Solo se quitan de esta lista: los saldos de los productores siguen igual.',
+    borrables: () => retirosFilas.map(h => h.clave),
+    filas: () => retirosFilas,
+    archivo: 'historial-retiros',
+    columnas: [
+      { titulo: 'Fecha y hora', valor: h => H.fechaHoraArchivo(h.fecha) },
+      { titulo: 'Pedido el', valor: h => H.fechaHoraArchivo(h.pedido) },
+      { titulo: 'Productor', valor: h => h.productor || '' },
+      { titulo: 'Sale de su saldo', valor: h => h.saleDe },
+      { titulo: 'Recibe', valor: h => H.numero(h.neto, h.dec) },
+      { titulo: 'Moneda', valor: h => h.moneda },
+      { titulo: 'Estado', valor: h => h.estado },
+      { titulo: 'Cuenta', valor: h => h.cuenta },
+      { titulo: 'Nota', valor: h => h.nota },
+    ],
+  });
 
   async function loadPayouts() {
-    const res = await fetch('/api/admin/payouts');
+    const res = await fetch('/api/admin/withdrawals');
     if (!res.ok) return;
-    const { pendientes, historial } = await res.json();
-    const vencidos = pendientes.filter(p => p.vencido).length;
-    payoutsCount.textContent = pendientes.length ? (vencidos ? vencidos + ' atrasado' + (vencidos > 1 ? 's' : '') : pendientes.length) : '';
+    const { pendientes, historial, antiguos, sinSolicitar, ocultos } = await res.json();
+    const atrasados = pendientes.filter(w => new Date(w.due_at) < new Date()).length;
+    payoutsCount.textContent = pendientes.length ? (atrasados ? atrasados + ' atrasado' + (atrasados > 1 ? 's' : '') : pendientes.length) : '';
     payoutsCount.classList.toggle('show', pendientes.length > 0);
+    actualizarNav('productores', 'retiros', pendientes.length);
     payoutsList.innerHTML = '';
-    if (!pendientes.length) {
-      payoutsList.innerHTML = '<div class="empty-hint">No le debes nada a ningún productor ahora mismo.</div>';
-    }
-    pendientes.forEach((p) => {
+    if (!pendientes.length) payoutsList.innerHTML = '<div class="empty-hint">No hay retiros pendientes.</div>';
+
+    pendientes.forEach((w) => {
       const item = document.createElement('div');
-      item.className = 'payout-item' + (p.vencido ? ' is-late' : '');
-      const wa = String(p.phone || '').replace(/[^0-9]/g, '');
-      const vence = p.venceEl ? new Date(p.venceEl) : null;
-      const cuentas = p.cuentas.length
-        ? p.cuentas.map(c => '<div class="payout-account"><strong>' + escapeHtml(c.currency) + '</strong> · ' + escapeHtml(c.bank || '') + ' · <code>' + escapeHtml(c.number || '') + '</code></div>').join('')
-        : '<div class="payout-account muted">No ha puesto cuentas de cobro todavía — pídeselas por WhatsApp.</div>';
-      const detalle = p.ordenes.map(o =>
-        '<li>' + escapeHtml(o.track_title) + ' · ' + escapeHtml(o.license_type || '') + ' · vendido en ' + fmtCup(o.price_cup_at_sale) +
-        ' − ' + Number(o.commission_percent_at_sale || 0) + '% = <strong>' + fmtCup(o.producer_earning_cup) + '</strong></li>').join('');
+      const cr = cuentaRegresiva(w.due_at);
+      item.className = 'payout-item' + (cr.late ? ' is-late' : '');
+      const wa = String(w.producer_phone || '').replace(/[^0-9]/g, '');
+      const movs = (w.movimientos || []).map(m =>
+        '<li>' + formatOrderDate(m.fecha) + ' · ' + escapeHtml(m.titulo) + (m.estado ? ' <span class="muted">(' + escapeHtml(m.estado) + ')</span>' : '') + ' = <strong>' +
+        (m.unidades ? (m.unidades > 0 ? '+' : '−') + escapeHtml(unidades(Math.abs(m.unidades), m.moneda)) : '<s>' + escapeHtml(unidades(Math.abs(m.montoOriginal || 0), m.moneda)) + '</s>') + '</strong></li>').join('');
+      const detalle = (movs || '<li>Sin movimientos.</li>') +
+        '<li class="payout-rest">Después de este retiro le quedan <strong>' + escapeHtml(unidades(w.saldoRestante || 0, w.wallet || 'CUP')) + '</strong> en su saldo.</li>';
+      const conversion = w.currency === 'CUP' ? '' : (w.wallet && w.wallet !== 'CUP')
+        ? '<div class="payout-conv">Saldo en ' + escapeHtml(w.wallet_label || w.wallet) + ' (lo que pagaron los compradores, menos la comisión): ' + fmtN(w.amount_units, 2) + ' − ' + fmtN(w.fee_units, 2) + ' (fee) = <strong>' + montoW(w) + '</strong></div>' :
+        '<div class="payout-conv">' + fmtCup(w.amount_cup) + ' ÷ ' + fmtN(w.rate_cup_per_unit, 2) + ' (tasa) = ' + fmtN(w.amount_units, 2) + ' − ' + fmtN(w.fee_units, 2) + ' (fee) = <strong>' + montoW(w) + '</strong></div>';
       item.innerHTML =
         '<div class="payout-head">' +
           '<div>' +
-            '<div class="buyer">' + escapeHtml(p.name) + ' <span class="muted">· plan ' + escapeHtml(p.plan) + ' (paga en ' + escapeHtml(p.plazo) + ')</span></div>' +
-            '<div class="meta">' + escapeHtml(p.email) + (p.phone ? ' · ' + escapeHtml(p.phone) : '') + '</div>' +
+            '<div class="buyer">' + escapeHtml(w.producer_name) + ' <span class="muted">· plan ' + escapeHtml(w.producer_plan || '') + '</span></div>' +
+            '<div class="meta">' + escapeHtml(w.producer_email || '') + (w.producer_phone ? ' · ' + escapeHtml(w.producer_phone) : '') + ' · pedido ' + formatOrderDate(w.created_at) + '</div>' +
           '</div>' +
-          '<div class="payout-amount">' + fmtCup(p.totalCup) + '<span>' + p.ventas + ' venta' + (p.ventas > 1 ? 's' : '') + '</span></div>' +
+          '<div class="payout-amount">' + montoW(w) + '<span>' + (w.wallet && w.wallet !== 'CUP' ? 'saldo en ' + escapeHtml(w.wallet_label || w.wallet) + ' · ≈ ' + fmtCup(w.amount_cup) : fmtCup(w.amount_cup) + ' de saldo') + '</span></div>' +
         '</div>' +
-        '<div class="payout-due ' + (p.vencido ? 'late' : '') + '">' +
-          (vence ? (p.vencido ? 'ATRASADO — debías pagarle antes del ' : 'Págale antes del ') + vence.toLocaleString('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '') +
-        '</div>' +
-        '<div class="payout-accounts">' + cuentas + '</div>' +
-        '<details class="payout-detail"><summary>Ver ventas</summary><ul>' + detalle + '</ul></details>' +
+        '<div class="payout-due ' + (cr.late ? 'late' : '') + '">' + cr.txt + '</div>' +
+        conversion +
+        '<div class="payout-accounts"><div class="payout-account"><strong>' + escapeHtml(w.currency_label || w.currency) + '</strong> · <code>' + escapeHtml(w.account_text) + '</code></div></div>' +
+        '<details class="payout-detail"><summary>Ver movimientos de su saldo en ' + escapeHtml(w.wallet_label || w.wallet || 'CUP') + '</summary><ul>' + detalle + '</ul></details>' +
         '<div class="actions">' +
           '<button type="button" class="btn-approve-order btn-mark-paid">Marcar como pagado</button>' +
-          (wa ? '<a class="btn-toggle-producer" href="https://wa.me/' + wa + '?text=' + encodeURIComponent('Hola ' + p.name + ', te acabo de transferir ' + fmtCup(p.totalCup) + ' por tus ventas en Zona Beats.') + '" target="_blank" rel="noopener">Avisar por WhatsApp</a>' : '') +
+          '<button type="button" class="btn-reject-track btn-cancel-w">Cancelar</button>' +
+          (wa ? '<a class="btn-toggle-producer" href="https://wa.me/' + wa + '?text=' + encodeURIComponent('Hola ' + w.producer_name + ', ya te transferí ' + montoW(w).replace(/<[^>]+>/g, '') + ' de tu retiro en Zona Beats.') + '" target="_blank" rel="noopener">Avisar por WhatsApp</a>' : '') +
         '</div>';
       item.querySelector('.btn-mark-paid').addEventListener('click', async (ev) => {
-        const note = prompt('¿Ya le transferiste ' + fmtCup(p.totalCup) + ' a ' + p.name + '?\n\nNota opcional (ej: número de transferencia):', '');
+        const note = prompt('¿Ya le transferiste ' + montoW(w).replace(/<[^>]+>/g, '') + ' a ' + w.producer_name + '?\n\nNota opcional (ej: número de transferencia):', '');
         if (note === null) return;
         ev.target.disabled = true;
-        const r2 = await fetch('/api/admin/payouts/' + p.producerId, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ note, orderIds: p.ordenes.map(o => o.id) }),
-        });
-        if (r2.ok) { showToast('Pago registrado. ' + p.name + ' lo verá como cobrado en su portal.'); loadPayouts(); loadProducers(); }
-        else { const e2 = await r2.json().catch(() => ({})); showToast(e2.error || 'No se pudo registrar el pago.', true); ev.target.disabled = false; }
+        const r2 = await fetch('/api/admin/withdrawals/' + w.id + '/paid', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note }) });
+        if (r2.ok) { showToast('Retiro marcado como pagado. El productor lo verá en su portal.'); loadPayouts(); loadProducers(); }
+        else { const e2 = await r2.json().catch(() => ({})); showToast(e2.error || 'No se pudo marcar.', true); ev.target.disabled = false; }
+      });
+      item.querySelector('.btn-cancel-w').addEventListener('click', async () => {
+        const note = prompt('¿Por qué cancelas este retiro? El saldo vuelve a estar disponible para el productor.', '');
+        if (note === null) return;
+        const r2 = await fetch('/api/admin/withdrawals/' + w.id + '/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note }) });
+        showToast(r2.ok ? 'Retiro cancelado.' : 'No se pudo cancelar.', !r2.ok);
+        loadPayouts();
       });
       payoutsList.appendChild(item);
     });
 
-    payoutsHistory.innerHTML = historial.length
-      ? historial.map(h => '<div class="payout-history-row"><span>' + formatOrderDate(h.created_at) + '</span><span>' + escapeHtml(h.producer_name) + '</span><strong>' + fmtCup(h.amount_cup) + '</strong><span class="muted">' + h.orders_count + ' venta(s)' + (h.note ? ' · ' + escapeHtml(h.note) : '') + '</span></div>').join('')
-      : '<div class="empty-hint">Todavía no has registrado pagos.</div>';
+    document.getElementById('payouts-unrequested').innerHTML = sinSolicitar.length
+      ? sinSolicitar.map(x => '<div class="payout-history-row"><span>Saldo</span><span>' + escapeHtml(x.name) + '</span><strong>' +
+          ((x.billeteras || []).length ? x.billeteras.map(b => escapeHtml(unidades(b.unidades, b.code))).join(' · ') : fmtCup(x.totalCup)) + '</strong></div>').join('')
+      : '<div class="empty-hint">Nadie tiene saldo esperando.</div>';
+
+    retirosFilas = historial.map(h => ({
+      clave: 'retiro:' + h.id, fecha: h.resolved_at || h.created_at, pedido: h.created_at, productor: h.producer_name,
+      montoHtml: montoW(h), moneda: h.currency_label || h.currency, neto: h.net_units, dec: ['CUP', 'SALDO_MOVIL'].includes(h.currency) ? 0 : 2,
+      saleDe: unidades(h.debit_units != null ? h.debit_units : h.amount_cup, h.wallet || 'CUP'),
+      estado: h.status === 'paid' ? 'pagado' : 'cancelado', cuenta: h.account_text || '', nota: h.note || '',
+    })).concat(antiguos.map(h => ({
+      clave: 'pago:' + h.id, fecha: h.created_at, pedido: h.created_at, productor: h.producer_name,
+      montoHtml: fmtCup(h.amount_cup), moneda: 'CUP', neto: h.amount_cup, dec: 0, saleDe: fmtCup(h.amount_cup),
+      estado: 'pagado (sistema anterior)', cuenta: '', nota: h.note || '',
+    }))).sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
+    pintarToolsHist('retiros', ocultos || 0, retirosFilas.length, retirosFilas.length);
+    payoutsHistory.innerHTML = retirosFilas.length ? retirosFilas.map(h =>
+      '<div class="payout-history-row hist-item"><span>' + fechaHora(h.fecha) + '</span><span>' + escapeHtml(h.productor || '') + '</span><strong>' + h.montoHtml + '</strong>' +
+      '<span class="muted">' + escapeHtml(h.estado) + (h.nota ? ' · ' + escapeHtml(h.nota) : '') + '</span>' + botonBorrarHist(h.clave) + '</div>').join('')
+      : '<div class="empty-hint">Todavía no hay retiros resueltos.</div>';
+
+    clearTimeout(retirosTimer);
+    if (pendientes.length) retirosTimer = setTimeout(loadPayouts, 60000);
   }
 
   checkAuth();

@@ -47,8 +47,15 @@
   let activeModalTrack = null;
   let searchQuery = '';
 
+  // Se bloquea el menú de «guardar imagen/audio» sobre portadas y el reproductor,
+  // pero no en campos de texto ni enlaces (hay que poder pegar el teléfono o copiar un link).
+  document.addEventListener('contextmenu', (e) => {
+    if (e.target.closest && e.target.closest('input, textarea, select, a, [contenteditable="true"]')) return;
+    e.preventDefault();
+  });
+
   document.addEventListener('keydown', (e) => {
-    const k = e.key.toLowerCase();
+    const k = String(e.key || '').toLowerCase();
     if (
       (e.ctrlKey || e.metaKey) && ['s', 'u'].includes(k) ||
       e.key === 'F12' ||
@@ -79,7 +86,7 @@
     document.title = profile.artist_name ? `${profile.artist_name} · Zona Beats` : 'Zona Beats';
     if (profile.avatar_filename) {
       const avatarImg = document.getElementById('avatar');
-      avatarImg.src = '/api/avatar?_=' + Date.now();
+      avatarImg.src = '/api/avatar?s=300&_=' + Date.now();
       avatarImg.style.display = 'block';
     }
   }
@@ -187,7 +194,7 @@
   function formatPriceInCurrency(priceCup, currencyCode) {
     const rate = exchangeRates.find(r => r.code === currencyCode);
     const converted = convertFromCup(priceCup, currencyCode);
-    if (converted == null) return `${priceCup} CUP`;
+    if (converted == null) return `${Number(priceCup || 0).toLocaleString('es')} CUP`;
     const wholeNumberCurrencies = ['CUP', 'SALDO_MOVIL'];
     const decimals = wholeNumberCurrencies.includes(currencyCode) ? 0 : 2;
     const formatted = converted.toLocaleString('es', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
@@ -198,11 +205,24 @@
     selectedCurrency = currencySelect.value;
     renderPaymentMethodsRail();
     renderCurrentSection();
+    if (currentTrack) actualizarBotonCompra(currentTrack);
   });
 
+  // Los botones verdes de métodos de pago hacen lo mismo que «Ver precios en»
   function renderPaymentMethodsRail() {
     const usable = exchangeRates.filter(r => r.code === 'CUP' || r.cupPerUnit > 0);
-    paymentMethodsList.innerHTML = usable.map(r => `<div class="payment-method-chip">${escapeHtml(r.label)}</div>`).join('');
+    paymentMethodsList.innerHTML = usable.map(r =>
+      `<button type="button" class="payment-method-chip${r.code === selectedCurrency ? ' active' : ''}" data-code="${escapeHtml(r.code)}" aria-pressed="${r.code === selectedCurrency}">${escapeHtml(r.label)}</button>`
+    ).join('');
+    paymentMethodsList.querySelectorAll('.payment-method-chip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        selectedCurrency = chip.dataset.code;
+        currencySelect.value = selectedCurrency;
+        renderPaymentMethodsRail();
+        renderCurrentSection();
+        if (currentTrack) actualizarBotonCompra(currentTrack);
+      });
+    });
   }
 
   async function loadPaymentInfo() {
@@ -240,6 +260,9 @@
         : 'Buscar por nombre, género o precio…';
 
       if (isProducers) {
+        // el aviso «Aún no hay…» es de las otras secciones: en Productores no se muestra
+        emptyState.style.display = 'none';
+        noResultsState.style.display = 'none';
         loadProducersList();
         return;
       }
@@ -255,7 +278,7 @@
     const favs = getFavProducers();
     const i = favs.indexOf(id);
     if (i === -1) favs.push(id); else favs.splice(i, 1);
-    localStorage.setItem('zonabeats_fav_producers', JSON.stringify(favs));
+    try { localStorage.setItem('zonabeats_fav_producers', JSON.stringify(favs)); } catch { /* modo privado */ }
     return favs.includes(id);
   }
 
@@ -276,7 +299,7 @@
         <button type="button" class="fav-btn ${favs.includes(p.id) ? 'active' : ''}" data-fav="${p.id}" aria-label="Favorito">
           <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
         </button>
-        ${p.avatar ? `<img class="producer-avatar" src="/api/producer/avatar/${p.id}" alt="">` : `<div class="producer-avatar producer-avatar-fallback">${escapeHtml((p.name||'?').charAt(0).toUpperCase())}</div>`}
+        ${p.avatar ? `<img class="producer-avatar" src="/api/producer/avatar/${p.id}?s=300" alt="" loading="lazy">` : `<div class="producer-avatar producer-avatar-fallback">${escapeHtml((p.name||'?').charAt(0).toUpperCase())}</div>`}
         <div class="producer-card-name">${escapeHtml(p.name)}</div>
         <div class="producer-card-bio">${escapeHtml(p.bio || '')}</div>
         <div class="producer-card-count">${p.beats} beat${p.beats === 1 ? '' : 's'}</div>
@@ -313,7 +336,7 @@
     producerDetail.innerHTML = `
       <button type="button" class="back-to-producers">&larr; Todos los productores</button>
       <div class="producer-detail-head">
-        ${producer.avatar ? `<img class="producer-avatar-lg" src="/api/producer/avatar/${producer.id}" alt="">` : `<div class="producer-avatar-lg producer-avatar-fallback">${escapeHtml((producer.name||'?').charAt(0).toUpperCase())}</div>`}
+        ${producer.avatar ? `<img class="producer-avatar-lg" src="/api/producer/avatar/${producer.id}?s=300" alt="">` : `<div class="producer-avatar-lg producer-avatar-fallback">${escapeHtml((producer.name||'?').charAt(0).toUpperCase())}</div>`}
         <div>
           <h2>${escapeHtml(producer.name)}</h2>
           <p>${escapeHtml(producer.bio || '')}</p>
@@ -374,8 +397,9 @@
     trackCount.textContent = tracks.length ? `${tracks.length} PISTA${tracks.length === 1 ? '' : 'S'}` : '';
 
     const hasSearch = Boolean(searchQuery);
-    emptyState.style.display = (!totalBeforeFilter && !hasSearch) ? 'block' : 'none';
-    noResultsState.style.display = (totalBeforeFilter > 0 && tracks.length === 0) ? 'block' : 'none';
+    const enDetalleProductor = Boolean(targetGrid);
+    emptyState.style.display = (!enDetalleProductor && !totalBeforeFilter && !hasSearch) ? 'block' : 'none';
+    noResultsState.style.display = (!enDetalleProductor && totalBeforeFilter > 0 && tracks.length === 0) ? 'block' : 'none';
 
     if (currentSection === 'vip') {
       emptyStateTitle.textContent = 'Aún no hay Beats VIP';
@@ -389,13 +413,14 @@
     }
 
     tracks.forEach((track) => {
+      track._section = track._section || currentSection;
       const card = document.createElement('button');
       card.className = 'track-card';
       card.dataset.id = track.id;
       card.setAttribute('aria-label', `Reproducir ${track.title}`);
 
       const coverHtml = track.cover_filename
-        ? `<img src="/api/cover/${track.id}" alt="" oncontextmenu="return false;">`
+        ? `<img src="/api/cover/${track.id}?s=600" alt="" loading="lazy" decoding="async" draggable="false">`
         : `<div class="track-cover-fallback">${(track.title || '?').charAt(0).toUpperCase()}</div>`;
 
       const genreBadge = track.genre
@@ -408,6 +433,9 @@
 
       const exclusiveBadge = track.is_exclusive
         ? `<div class="track-exclusive-badge">★ Exclusiva</div>`
+        : '';
+      const vipOwner = currentSection === 'vip'
+        ? `<div class="track-vip-owner">${track.vip_owner ? 'Dueño: ' + escapeHtml(track.vip_owner) : 'Dueño anónimo'}</div>`
         : '';
 
       let priceChip = '';
@@ -466,6 +494,7 @@
           <div class="track-title">${escapeHtml(track.title)}</div>
           ${priceChip}
         </div>
+        ${vipOwner}
         ${playlistStats}
       `;
       card.addEventListener('click', () => playTrack(track));
@@ -480,6 +509,17 @@
 
       grid.appendChild(card);
     });
+  }
+
+  // Identificador anónimo de este dispositivo para que cada persona cuente un solo «me gusta» por pista
+  function idVotante() {
+    let id = null;
+    try { id = localStorage.getItem('zonabeats_voter'); } catch { /* sin almacenamiento */ }
+    if (!id || !/^[a-zA-Z0-9-]{16,80}$/.test(id)) {
+      id = (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2));
+      try { localStorage.setItem('zonabeats_voter', id); } catch { /* nada */ }
+    }
+    return id;
   }
 
   function getLikedTracks() {
@@ -499,7 +539,7 @@
     const next = liked
       ? [...new Set([...current, trackId])]
       : current.filter(id => id !== trackId);
-    localStorage.setItem('zonabeats_liked', JSON.stringify(next));
+    try { localStorage.setItem('zonabeats_liked', JSON.stringify(next)); } catch { /* sin almacenamiento */ }
   }
 
   async function toggleLike(trackId, btn) {
@@ -508,7 +548,9 @@
 
     btn.disabled = true;
     try {
-      const res = await fetch(`/api/tracks/${trackId}/${endpoint}`, { method: 'POST' });
+      const res = await fetch(`/api/tracks/${trackId}/${endpoint}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voterId: idVotante() }),
+      });
       if (!res.ok) throw new Error();
       const { likes } = await res.json();
 
@@ -538,40 +580,118 @@
       const { token } = await res.json();
 
       currentTrackId = track.id;
+      currentTrack = track;
       audioEl.src = `/api/stream/${track.id}?t=${token}`;
       audioEl.play().catch(() => {});
 
       playerTitle.textContent = track.title;
-      playerCover.src = track.cover_filename ? `/api/cover/${track.id}` : '';
+      playerCover.src = track.cover_filename ? `/api/cover/${track.id}?s=160` : '';
       playerBar.classList.add('active');
       markPlayingCard(track.id);
 
-      const canBuy = currentSection === 'catalog' && track.for_sale && track.price_cup > 0;
-
-      if (currentSection === 'playlist') {
-        buyBtn.style.display = 'none';
-        buyBtn.onclick = null;
-        downloadBtn.style.display = 'inline-flex';
-        downloadBtn.onclick = () => { window.location.href = `/api/download/${track.id}`; };
-      } else if (canBuy) {
-        const priceText = formatPriceInCurrency(track.price_cup, selectedCurrency);
-        const multipleLicenses = (track.licenses || []).length > 1;
-        buyPriceLabel.textContent = multipleLicenses ? `Desde ${priceText}` : priceText;
-        buyPriceLabel.title = buyPriceLabel.textContent;
-        buyBtn.style.display = 'inline-flex';
-        buyBtn.onclick = () => openBuyModal(track);
-        downloadBtn.style.display = 'none';
-        downloadBtn.onclick = null;
-      } else {
-        buyBtn.style.display = 'none';
-        buyBtn.onclick = null;
-        downloadBtn.style.display = 'none';
-        downloadBtn.onclick = null;
-      }
+      actualizarBotonCompra(track);
     } catch (err) {
       console.error(err);
       alert('No se pudo reproducir esta pista. Intenta de nuevo.');
     }
+  }
+
+  let currentTrack = null;
+
+  // Decide si el reproductor muestra Comprar o Descargar según la pista (sirve en Catálogo, Playlist y Productores)
+  function actualizarBotonCompra(track) {
+    const esPlaylist = track._section === 'playlist';
+    const canBuy = !esPlaylist && track.for_sale && track.price_cup > 0 && !track.sold && (track.licenses || []).length > 0;
+    if (esPlaylist) {
+      buyBtn.style.display = 'none';
+      buyBtn.onclick = null;
+      downloadBtn.style.display = 'inline-flex';
+      downloadBtn.onclick = () => { window.location.href = `/api/download/${track.id}`; };
+    } else if (canBuy) {
+      const priceText = formatPriceInCurrency(track.price_cup, selectedCurrency);
+      const multipleLicenses = (track.licenses || []).length > 1;
+      buyPriceLabel.textContent = multipleLicenses ? `Desde ${priceText}` : priceText;
+      buyPriceLabel.title = buyPriceLabel.textContent;
+      buyBtn.style.display = 'inline-flex';
+      buyBtn.onclick = () => openBuyModal(track);
+      downloadBtn.style.display = 'none';
+      downloadBtn.onclick = null;
+    } else {
+      buyBtn.style.display = 'none';
+      buyBtn.onclick = null;
+      downloadBtn.style.display = 'none';
+      downloadBtn.onclick = null;
+    }
+  }
+
+  // ---------- Descripción y Compartir ----------
+  const descOverlay = document.getElementById('desc-overlay');
+  let descTrack = null;
+  function enlacePista(track) { return location.origin + '/?pista=' + track.id; }
+  function abrirDescripcion(track, conReproducir) {
+    descTrack = track;
+    const cover = document.getElementById('desc-cover');
+    if (track.cover_filename) { cover.src = '/api/cover/' + track.id + '?s=300'; cover.style.display = ''; } else { cover.style.display = 'none'; }
+    document.getElementById('desc-title').textContent = track.title || '';
+    const meta = [];
+    if (track.genre) meta.push(track.genre);
+    if (track.producer_name) meta.push('prod. ' + track.producer_name);
+    if (track.artist_credit) meta.push(track.artist_credit);
+    if (track._section === 'playlist') meta.push('Playlist · descarga gratis');
+    else if (track.for_sale && track.price_cup > 0 && !track.sold) meta.push((track.licenses || []).length > 1 ? 'Desde ' + formatPriceInCurrency(track.price_cup, selectedCurrency) : formatPriceInCurrency(track.price_cup, selectedCurrency));
+    document.getElementById('desc-meta').textContent = meta.join(' · ');
+    const txt = String(track.description || '').trim();
+    const p = document.getElementById('desc-text');
+    p.textContent = txt || 'Esta pista todavía no tiene descripción.';
+    p.classList.toggle('empty', !txt);
+    document.getElementById('desc-play').style.display = conReproducir ? '' : 'none';
+    descOverlay.classList.add('active');
+  }
+  async function compartirPista(track, labelEl) {
+    const url = enlacePista(track);
+    const data = { title: track.title, text: 'Escucha "' + track.title + '" en Zona Beats', url };
+    try {
+      if (navigator.share) { await navigator.share(data); return; }
+    } catch (e) { if (e && e.name === 'AbortError') return; }
+    try {
+      await navigator.clipboard.writeText(url);
+      if (labelEl) { const prev = labelEl.textContent; labelEl.textContent = '¡Enlace copiado!'; setTimeout(() => { labelEl.textContent = prev; }, 1800); }
+    } catch {
+      prompt('Copia este enlace para compartir:', url);
+    }
+  }
+  document.getElementById('player-desc-btn').addEventListener('click', () => { if (currentTrack) abrirDescripcion(currentTrack, false); });
+  document.getElementById('player-share-btn').addEventListener('click', () => { if (currentTrack) compartirPista(currentTrack, document.getElementById('player-share-label')); });
+  document.getElementById('desc-close').addEventListener('click', () => descOverlay.classList.remove('active'));
+  descOverlay.addEventListener('click', (e) => { if (e.target === descOverlay) descOverlay.classList.remove('active'); });
+  document.getElementById('desc-play').addEventListener('click', () => { if (descTrack) { descOverlay.classList.remove('active'); playTrack(descTrack); } });
+  document.getElementById('desc-share').addEventListener('click', (e) => { if (descTrack) compartirPista(descTrack, e.currentTarget); });
+
+  // Enlace compartido: /?pista=ID abre esa pista
+  async function abrirPistaCompartida() {
+    const id = Number(new URLSearchParams(location.search).get('pista'));
+    if (!id) return;
+    history.replaceState(null, '', location.pathname);
+    let track = (tracksBySection.catalog || []).find(t => t.id === id);
+    let seccion = 'catalog';
+    if (!track) {
+      try {
+        const r = await fetch('/api/tracks?type=playlist');
+        const d = await r.json();
+        tracksBySection.playlist = d.tracks;
+        track = d.tracks.find(t => t.id === id);
+        seccion = 'playlist';
+      } catch { /* sin conexión */ }
+    }
+    if (!track) return;
+    const tab = document.querySelector('.section-tab[data-section="' + seccion + '"]');
+    if (tab && seccion !== currentSection) tab.click();
+    track._section = seccion;
+    setTimeout(() => {
+      const card = document.querySelector('.track-card[data-id="' + id + '"]');
+      if (card) { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); card.classList.add('shared-highlight'); setTimeout(() => card.classList.remove('shared-highlight'), 3000); }
+      abrirDescripcion(track, true);
+    }, 400);
   }
 
   playBtn.addEventListener('click', () => {
@@ -618,8 +738,7 @@
   let ultimoReintento = { id: null, at: 0 };
   audioEl.addEventListener('error', async () => {
     if (currentTrackId == null) return;
-    const list = tracksBySection[currentSection] || [];
-    const track = list.find(t => t.id === currentTrackId);
+    const track = currentTrack;
     if (!track) return;
     if (ultimoReintento.id === track.id && Date.now() - ultimoReintento.at < 60000) {
       markPlayingCard(null);
@@ -642,25 +761,28 @@
   const modalSuccess = document.getElementById('modal-success');
   const termsAcceptInput = document.getElementById('terms-accept-input');
   const termsModalOverlay = document.getElementById('terms-modal-overlay');
+  const vipPublicWrap = document.getElementById('vip-public-wrap');
+  const vipPublicInput = document.getElementById('vip-public-input');
+  const buyerPhoneError = document.getElementById('buyer-phone-error');
 
   let receiptFile = null;
 
   const LICENSE_INFO = {
     basic: {
       label: 'Básica',
-      description: 'Nivel 1. Puedes crear y distribuir tu canción, pero NO monetizarla en ningún medio. No exclusiva: el beat sigue a la venta.',
+      description: 'Nivel 1 · Recibes el MP3. Puedes crear y distribuir tu canción, pero NO monetizarla en ningún medio. No exclusiva: el beat sigue a la venta.',
     },
     premium: {
       label: 'Premium',
-      description: 'Nivel 2. Mismos derechos que la Básica con mejor calidad de archivo. Tampoco permite monetizar. No exclusiva.',
+      description: 'Nivel 2 · Recibes MP3 + WAV. Mismos derechos que la Básica (tampoco permite monetizar), con mejor calidad de archivo. No exclusiva.',
     },
     unlimited: {
       label: 'Ilimitada',
-      description: 'Nivel 3. Permite distribuir y MONETIZAR sin límite. Incluye WAV y STEMS si el productor los subió. Compra única: el beat se retira del catálogo. No es exclusiva ni va a Beats VIP.',
+      description: 'Nivel 3 · Recibes MP3 + WAV + STEMS. Permite distribuir y MONETIZAR sin límite. Compra única: el beat se retira del catálogo. No es exclusiva ni va a Beats VIP.',
     },
     exclusive: {
       label: 'Exclusiva',
-      description: 'Nivel 4. Todos los derechos comerciales y exclusividad. Incluye WAV y STEMS si el productor los subió. El beat se retira para siempre y aparece en Beats VIP a tu nombre.',
+      description: 'Nivel 4 · Recibes MP3 + WAV + STEMS. Todos los derechos comerciales y exclusividad. El beat se retira para siempre y pasa a Beats VIP (con tu nombre solo si lo autorizas).',
     },
   };
   const LICENSE_ORDER = ['basic', 'premium', 'unlimited', 'exclusive'];
@@ -718,6 +840,8 @@
     receiptPreview.src = '';
     termsAcceptInput.checked = false;
     orderForm.reset();
+    vipPublicWrap.style.display = 'none';
+    buyerPhoneError.textContent = '';
     orderSubmitBtn.classList.add('disabled');
 
     modalOverlay.classList.add('active');
@@ -774,11 +898,14 @@
     }
 
     orderForm.style.display = accountsForCurrency.length ? 'block' : 'none';
+    vipPublicWrap.style.display = type === 'exclusive' ? 'flex' : 'none';
+    if (type !== 'exclusive') vipPublicInput.checked = false;
     updateSubmitButtonState();
   }
 
+  const telefonoValido = (v) => String(v || '').replace(/[^0-9]/g, '').length >= 8;
   function updateSubmitButtonState() {
-    const ready = selectedLicenseType && buyerNameInput.value.trim() && buyerPhoneInput.value.trim() && receiptFile && termsAcceptInput.checked;
+    const ready = selectedLicenseType && buyerNameInput.value.trim() && telefonoValido(buyerPhoneInput.value) && receiptFile && termsAcceptInput.checked;
     orderSubmitBtn.disabled = !ready;
     orderSubmitBtn.classList.toggle('disabled', !ready);
     if (!termsAcceptInput.checked && selectedLicenseType && buyerNameInput.value.trim() && buyerPhoneInput.value.trim() && receiptFile) {
@@ -791,7 +918,14 @@
   }
 
   buyerNameInput.addEventListener('input', updateSubmitButtonState);
-  buyerPhoneInput.addEventListener('input', updateSubmitButtonState);
+  buyerPhoneInput.addEventListener('input', () => {
+    buyerPhoneError.textContent = '';
+    updateSubmitButtonState();
+  });
+  buyerPhoneInput.addEventListener('blur', () => {
+    const v = buyerPhoneInput.value.trim();
+    buyerPhoneError.textContent = v && !telefonoValido(v) ? 'Escribe tu número completo, con el código del país (ej: 53512345678).' : '';
+  });
   termsAcceptInput.addEventListener('change', updateSubmitButtonState);
 
   function openTermsModal() {
@@ -810,21 +944,55 @@
     if (e.target === termsModalOverlay) closeTermsModal();
   });
 
-  receiptInput.addEventListener('change', () => {
-    const file = receiptInput.files[0];
-    if (!file) return;
+  // La foto del comprobante se achica (~1600 px, JPG) antes de subirla: con datos móviles
+  // pasa de varios MB a unos cientos de KB y sigue siendo legible. Si no se puede, va la original.
+  function comprimirFoto(file) {
+    return new Promise((resolve) => {
+      const tipoAceptado = /^image\/(jpeg|png|webp)$/i.test(file.type || '');
+      const esImagen = /^image\//i.test(file.type || '') || /\.(heic|heif)$/i.test(file.name || '');
+      if (!esImagen || (tipoAceptado && file.size < 300 * 1024)) { resolve(file); return; }
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const escala = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+          const w = Math.max(1, Math.round(img.naturalWidth * escala));
+          const h = Math.max(1, Math.round(img.naturalHeight * escala));
+          const canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, w, h);
+          ctx.drawImage(img, 0, 0, w, h);
+          canvas.toBlob((blob) => {
+            URL.revokeObjectURL(url);
+            if (!blob || (tipoAceptado && blob.size >= file.size)) { resolve(file); return; }
+            const nombre = String(file.name || 'comprobante').replace(/\.[^.]+$/, '') + '.jpg';
+            try { resolve(new File([blob], nombre, { type: 'image/jpeg' })); } catch { blob.name = nombre; resolve(blob); }
+          }, 'image/jpeg', 0.82);
+        } catch {
+          URL.revokeObjectURL(url);
+          resolve(file);
+        }
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+      img.src = url;
+    });
+  }
 
+  receiptInput.addEventListener('change', async () => {
+    const original = receiptInput.files[0];
+    if (!original) return;
+    receiptDropText.style.display = 'block';
+    receiptDropText.textContent = 'Preparando la foto…';
+    const file = await comprimirFoto(original);
     receiptFile = file;
     receiptDrop.classList.add('has-receipt');
     receiptDropText.style.display = 'none';
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      receiptPreview.src = e.target.result;
-      receiptPreview.style.display = 'block';
-    };
-    reader.readAsDataURL(file);
-
+    receiptDropText.textContent = 'Toca para subir la foto del comprobante';
+    if (receiptPreview.src && receiptPreview.src.startsWith('blob:')) URL.revokeObjectURL(receiptPreview.src);
+    receiptPreview.src = URL.createObjectURL(file);
+    receiptPreview.style.display = 'block';
     updateSubmitButtonState();
   });
 
@@ -834,6 +1002,11 @@
 
     const buyerName = buyerNameInput.value.trim();
     const buyerPhone = buyerPhoneInput.value.trim();
+    if (!telefonoValido(buyerPhone)) {
+      buyerPhoneError.textContent = 'Escribe tu número completo, con el código del país (ej: 53512345678).';
+      buyerPhoneInput.focus();
+      return;
+    }
     const lic = (activeModalTrack.licenses || []).find(l => l.license_type === selectedLicenseType);
     const displayedPrice = formatPriceInCurrency(lic ? lic.price_cup : 0, selectedCurrency);
     const licenseLabel = (LICENSE_INFO[selectedLicenseType] || {}).label || selectedLicenseType;
@@ -849,7 +1022,8 @@
       formData.append('currency', selectedCurrency);
       formData.append('displayedPrice', displayedPrice);
       formData.append('licenseType', selectedLicenseType);
-      formData.append('receipt', receiptFile);
+      formData.append('vipPublic', selectedLicenseType === 'exclusive' && vipPublicInput.checked ? '1' : '0');
+      formData.append('receipt', receiptFile, receiptFile.name || 'comprobante.jpg');
 
       const res = await fetch('/api/orders', { method: 'POST', body: formData });
       if (!res.ok) {
@@ -873,6 +1047,7 @@
         );
         const phoneDigits = paymentInfo.contactPhone.replace(/[^0-9]/g, '');
         modalWhatsappBtn.href = `https://wa.me/${phoneDigits}?text=${message}`;
+        modalWhatsappBtn.style.display = '';
       } else {
         modalWhatsappBtn.style.display = 'none';
       }
@@ -895,6 +1070,7 @@
     if (e.key !== 'Escape') return;
     if (termsModalOverlay.classList.contains('active')) closeTermsModal();
     else if (purchasesOverlay.classList.contains('active')) purchasesOverlay.classList.remove('active');
+    else if (descOverlay.classList.contains('active')) descOverlay.classList.remove('active');
     else closeBuyModal();
   });
 
@@ -958,6 +1134,7 @@
           descargarAhora(d.downloadUrl);
           if (antes === 'pending') abrirCompras();
         }
+        if (d.status === 'rejected' && antes === 'pending') abrirCompras();
       } catch { hayPendientes = true; }
     }
     if (cambio) escribirCompras(lista);
@@ -973,6 +1150,12 @@
       purchasesList.innerHTML = '<p class="purchases-hint">Todavía no has comprado nada desde este dispositivo.</p>';
       return;
     }
+    const pesoTxt = (b) => {
+      const n = Number(b) || 0;
+      if (!n) return '';
+      if (n >= 1024 * 1024 * 1024) return ' · ' + (n / 1024 / 1024 / 1024).toLocaleString('es', { maximumFractionDigits: 1 }) + ' GB';
+      return ' · ' + Math.max(1, Math.round(n / 1024 / 1024)) + ' MB';
+    };
     purchasesList.innerHTML = lista.map((c) => {
       const d = comprasEstado[c.token] || {};
       const fecha = new Date(c.createdAt || d.createdAt || Date.now()).toLocaleDateString('es', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -980,15 +1163,22 @@
       let acciones = '';
       if (d.status === 'pending') estado = '<span class="purchase-status pending">Esperando que el vendedor apruebe tu pago</span>';
       if (d.status === 'missing') estado = '<span class="purchase-status missing">No encontramos esta compra. Escríbele al vendedor por WhatsApp.</span>';
+      if (d.status === 'rejected') {
+        estado = '<span class="purchase-status missing">Pago no aprobado</span>' +
+          '<span class="purchase-meta">' + (d.rejectReason ? 'Motivo: ' + escapeHtml(d.rejectReason) : 'El vendedor no pudo confirmar tu pago.') + ' Escríbele por WhatsApp si crees que es un error.</span>';
+      }
       if (d.status === 'approved') {
         estado = '<span class="purchase-status approved">Aprobada · Licencia ' + escapeHtml(d.certificateId || '') + '</span>';
+        const archivos = Array.isArray(d.files) ? d.files : [];
         acciones = '<div class="purchase-actions">' +
-          (d.downloadUrl ? '<a class="purchase-dl" href="' + d.downloadUrl + '" download>' + (d.fileKind === 'zip' ? 'Descargar WAV + STEMS (.zip)' : 'Descargar beat') + '</a>'
-                         : '<span class="purchase-meta">El vendedor te enviará el archivo por WhatsApp.</span>') +
-          (d.pdfUrl ? '<a class="purchase-pdf" href="' + d.pdfUrl + '" target="_blank" rel="noopener">Licencia en PDF</a>' : '') +
-          '</div>';
+          (archivos.length
+            ? archivos.map((f, i) => '<a class="' + (i === 0 ? 'purchase-dl' : 'purchase-pdf') + '" href="' + escapeHtml(f.url) + '" download>Descargar ' + escapeHtml(f.label || f.f) + pesoTxt(f.size) + '</a>').join('')
+            : '<span class="purchase-meta">El vendedor te enviará el archivo por WhatsApp.</span>') +
+          (d.pdfUrl ? '<a class="purchase-pdf" href="' + escapeHtml(d.pdfUrl) + '" target="_blank" rel="noopener">Licencia en PDF</a>' : '') +
+          '</div>' +
+          (archivos.length > 1 ? '<span class="purchase-meta">Los archivos grandes (WAV, STEMS) descárgalos con wifi o buenos datos: si se corta, vuelve a tocar el botón.</span>' : '');
       }
-      return '<div class="purchase-card' + (d.status === 'approved' ? ' is-approved' : '') + '">' +
+      return '<div class="purchase-card' + (d.status === 'approved' ? ' is-approved' : (d.status === 'rejected' ? ' is-rejected' : '')) + '">' +
         '<div class="purchase-title">' + escapeHtml(c.title || d.trackTitle || 'Beat') + '</div>' +
         '<div class="purchase-meta">Licencia ' + escapeHtml(c.license || d.licenseLabel || '') + ' · ' + fecha + '</div>' +
         estado + acciones +
@@ -1035,6 +1225,7 @@
     actualizarBotonCompras();
     revisarCompras();
     await loadTracksForSection('catalog');
+    abrirPistaCompartida();
   }
 
   init();

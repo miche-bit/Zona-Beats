@@ -1601,3 +1601,50 @@ button.modal-whatsapp-btn.disabled {
 @media (max-width: 640px) {
   .top-bar-right { width: 100%; justify-content: space-between; }
 }
+
+/* ---- Métodos de pago: ahora son botones que cambian la moneda ---- */
+button.payment-method-chip { cursor: pointer; width: 100%; transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.15s; }
+.payment-methods-list button.payment-method-chip { width: auto; }
+@media (min-width: 641px) { .payment-methods-list button.payment-method-chip { width: 100%; } }
+button.payment-method-chip:hover { border-color: rgba(61, 255, 224, 0.55); transform: translateY(-1px); }
+button.payment-method-chip.active { background: var(--live); color: #0c0a12; border-color: var(--live); }
+
+/* ---- Reproductor: Descripción y Compartir ---- */
+.player-text { min-width: 0; flex: 1; }
+.player-actions { display: flex; gap: 10px; margin-top: 3px; flex-wrap: nowrap; overflow: hidden; }
+.player-link-btn {
+  display: inline-flex; align-items: center; gap: 4px; background: none; border: none; padding: 0;
+  color: var(--live); font-size: 11.5px; font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.player-link-btn svg { width: 13px; height: 13px; fill: currentColor; flex-shrink: 0; }
+.player-link-btn:hover { text-decoration: underline; }
+@media (max-width: 380px) { .player-actions { gap: 8px; } .player-link-btn { font-size: 11px; } }
+
+.modal-box-desc { max-width: 440px; }
+.desc-head { display: flex; gap: 14px; align-items: center; margin-bottom: 14px; }
+.desc-cover { width: 84px; height: 84px; border-radius: 10px; object-fit: cover; flex-shrink: 0; background: var(--bg-elevated); }
+.desc-head-text { min-width: 0; }
+.desc-title { font-size: 20px; margin: 2px 0 4px; overflow-wrap: anywhere; line-height: 1.2; padding-right: 26px; }
+.desc-meta { font-size: 12.5px; color: var(--text-dim); overflow-wrap: anywhere; }
+.desc-text { font-size: 14px; line-height: 1.6; color: var(--text); white-space: pre-line; overflow-wrap: anywhere; margin: 0 0 18px; max-height: 40vh; overflow-y: auto; }
+.desc-text.empty { color: var(--text-faint); font-style: italic; }
+.desc-actions { display: flex; flex-direction: column; gap: 0; }
+.track-card.shared-highlight { outline: 2px solid var(--live); outline-offset: 3px; }
+
+/* ---- Textos largos que no rompan el diseño ---- */
+.track-title, .producer-card, .hero-bio, .modal-track-title { overflow-wrap: anywhere; }
+textarea { resize: vertical; max-height: 240px; }
+
+/* ---------- auditoría: VIP, compras y validaciones ---------- */
+.track-vip-owner {
+  padding-top: 6px; font-size: 11.5px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left;
+}
+.track-exclusive-badge ~ .track-genre-badge { top: 40px; }
+.track-exclusive-badge ~ .track-producer-badge { top: 40px; }
+.track-exclusive-badge ~ .track-producer-badge.below-genre { top: 66px; }
+.purchase-card.is-rejected { border-color: rgba(255, 93, 93, 0.4); }
+.purchase-status + .purchase-meta { line-height: 1.45; }
+.modal-field-error { display: block; min-height: 0; font-size: 12px; color: #ff5d5d; margin-top: 5px; }
+.modal-field-error:empty { display: none; }
+#vip-public-wrap strong { color: var(--text); }
