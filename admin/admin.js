@@ -1066,7 +1066,9 @@
   async function loadExchangeRates() {
     const res = await fetch('/api/admin/exchange-rates');
     if (!res.ok) return;
-    const { rates } = await res.json();
+    const { rates, planUsdRate } = await res.json();
+    const planIn = document.getElementById('plan-usd-rate');
+    if (document.activeElement !== planIn) planIn.value = planUsdRate ? String(planUsdRate) : '';
     const byCode = Object.fromEntries(rates.map(r => [r.code, r]));
     const fullList = Object.entries(CURRENCY_LABELS).map(([code, label]) => ({
       code,
@@ -1114,14 +1116,15 @@
       rates.push({
         code: input.dataset.code,
         label: input.dataset.label,
-        cupPerUnit: parseFloat(input.value) || 0,
+        // se manda como está escrito («280.000»): el servidor entiende miles y decimales
+        cupPerUnit: input.value.trim() || '0',
       });
     });
 
     const res = await fetch('/api/admin/exchange-rates', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rates }),
+      body: JSON.stringify({ rates, planUsdRate: document.getElementById('plan-usd-rate').value.trim() || '0' }),
     });
 
     if (res.ok) {
@@ -1514,7 +1517,7 @@
     const n = (v) => parseFloat(String(v || '').replace(',', '.')) || 0;
     const txt = (usd) => usdRateAdmin
       ? '≈ ' + Math.round(usd * usdRateAdmin).toLocaleString('es') + ' CUP/mes con tu tasa (1 USD = ' + usdRateAdmin.toLocaleString('es') + ' CUP)'
-      : 'Pon la tasa del USD en «Tasas de cambio» para calcular el precio en CUP.';
+      : 'Pon la «Tasa del USD para los planes» en Tienda → Tasas de cambio para calcular el precio en CUP.';
     document.getElementById('plan-pro-cup').textContent = txt(n(planProPriceInput.value));
     document.getElementById('plan-studio-cup').textContent = txt(n(planStudioPriceInput.value));
   }

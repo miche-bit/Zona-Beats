@@ -1173,3 +1173,25 @@ input, textarea, select { max-width: 100%; min-width: 0; }
   .hot-row > span:first-child { grid-column: 1 / -1; color: var(--text-faint); }
 }
 .hot-row .hot-quitar { justify-self: start; }
+
+/* ===== Tarjetas con muchos botones: el texto nunca se aplasta =====
+   El bloque de información pide al menos 220px; si no caben junto a los botones,
+   los botones (o el editor de precios) bajan a su propia línea. */
+.order-item > .info,
+.track-list-item > .info,
+.producer-item > .info { flex: 1 1 220px; min-width: 0; }
+.order-item > .actions,
+.track-list-item > .track-row-actions { flex: 0 1 auto; max-width: 100%; flex-wrap: wrap; }
+.track-list-item > .price-edit { flex: 1 1 100%; }
+/* en cada productor los botones van siempre debajo de sus datos */
+.producer-item { align-items: flex-start; }
+.producer-item > .status-dot { margin-top: 6px; }
+.producer-item > .actions { flex: 1 1 100%; justify-content: flex-start; }
+.producer-item .plan-edit { display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: center; }
+.producer-item .plan-edit .plan-select { flex: 1 1 110px; min-width: 110px; }
+.producer-item .plan-edit .plan-until { flex: 1 1 150px; min-width: 150px; }
+.producer-item .plan-edit .btn-save-plan { flex: 0 0 auto; white-space: nowrap; }
+.receipt-thumb.receipt-gone { display: grid; place-items: center; text-align: center; font-size: 9.5px; line-height: 1.1; padding: 2px; }
+/* Tasa del USD solo para planes */
+.plan-usd-box { background: var(--bg-elevated); border: 1px dashed var(--line-strong); border-radius: var(--r-md); padding: var(--s-3) var(--s-3) 2px; margin-bottom: var(--s-4); }
+.plan-usd-box .field { margin-bottom: var(--s-2); }

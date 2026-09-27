@@ -197,6 +197,13 @@
           El precio de cada pista se define en CUP. Aquí defines cuántos CUP equivalen a 1 unidad de cada moneda, para que el público pueda ver el precio convertido y pagar en la moneda que prefiera. Déjala en 0 para ocultar esa moneda del selector público hasta que tengas la tasa real.
         </p>
         <form id="exchange-rates-form">
+          <div class="plan-usd-box">
+            <div class="field">
+              <label for="plan-usd-rate">Tasa del USD para los planes de productores (CUP por 1 USD)</label>
+              <input type="text" id="plan-usd-rate" inputmode="decimal" placeholder="Ej: 400">
+            </div>
+            <p class="panel-hint compact" id="plan-usd-hint">Solo sirve para pasar a CUP el precio de los planes Pro/Studio y de los Hots. <strong>No aparece como forma de pago en la tienda.</strong> Si la dejas vacía se usa la tasa del USD o USDT de la lista de abajo.</p>
+          </div>
           <div id="exchange-rates-list"><div class="skel-wrap skel-filas-chicas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row sm"></div><div class="skel skel-row sm"></div><div class="skel skel-row sm"></div></div></div>
           <div class="add-currency-row">
             <div class="field">

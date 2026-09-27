@@ -289,6 +289,8 @@ addPlat('referral_bonus_cup', 'REAL DEFAULT 200');
 
 // ---- Hots: beats destacados en la portada (los productores pagan por semana) ----
 addPlat('hot_price_usd', 'REAL DEFAULT 2');
+// Tasa del USD solo para calcular planes y Hots en CUP (no es forma de pago en la tienda)
+addPlat('plan_usd_rate', 'REAL DEFAULT 0');
 addPlat('hot_slots', 'INTEGER DEFAULT 8');
 db.exec(`CREATE TABLE IF NOT EXISTS hot_requests (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -2300,7 +2300,10 @@ function licenciasPermitidas(full) {
   return lista;
 }
 
+// Tasa del USD para los planes y Hots: primero la exclusiva de planes; si no hay, la de venta del USD/USDT
 function tasaUsd() {
+  const propia = db.prepare('SELECT plan_usd_rate FROM platform_config WHERE id = 1').get();
+  if (propia && Number(propia.plan_usd_rate) > 0) return { code: 'PLANES', rate: Number(propia.plan_usd_rate) };
   const row = db.prepare('SELECT rates_json FROM exchange_rates WHERE id = 1').get();
   let rates = [];
   try { rates = JSON.parse(row.rates_json || '[]'); } catch { rates = []; }
@@ -2770,15 +2773,20 @@ route('GET', '/api/admin/exchange-rates', (req, res) => {
   const row = db.prepare('SELECT rates_json FROM exchange_rates WHERE id = 1').get();
   let rates = [];
   try { rates = JSON.parse(row.rates_json || '[]'); } catch { rates = []; }
-  sendJSON(res, 200, { rates });
+  // tasa del USD solo para planes y Hots (no es forma de pago)
+  const cfg = db.prepare('SELECT plan_usd_rate FROM platform_config WHERE id = 1').get();
+  sendJSON(res, 200, { rates, planUsdRate: Number(cfg && cfg.plan_usd_rate) || 0 });
 });
 
 route('POST', '/api/admin/exchange-rates', async (req, res) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   try {
     const body = await readBody(req, 1024 * 10);
-    const { rates } = JSON.parse(body.toString('utf8'));
+    const { rates, planUsdRate } = JSON.parse(body.toString('utf8'));
     if (!Array.isArray(rates)) return sendJSON(res, 400, { error: 'Formato de tasas inválido' });
+    if (planUsdRate !== undefined) {
+      db.prepare('UPDATE platform_config SET plan_usd_rate = ? WHERE id = 1').run(Math.max(0, parsePrecio(planUsdRate, 4) || 0));
+    }
 
     const vistos = new Set();
     const cleanRates = rates.map(r => {

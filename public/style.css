@@ -1663,3 +1663,11 @@ textarea { resize: vertical; max-height: 240px; }
   font-size: 11px; color: var(--text-dim); font-family: var(--font-mono);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px;
 }
+
+/* Pestañas de la tienda: en el teléfono caben las cuatro en una línea (y si no, se deslizan) */
+.section-tab { white-space: nowrap; flex-shrink: 0; }
+@media (max-width: 640px) {
+  .section-tabs { gap: 2px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .section-tabs::-webkit-scrollbar { display: none; }
+  .section-tab { margin-right: 10px; letter-spacing: 0.2px; font-size: 11.5px; }
+}
