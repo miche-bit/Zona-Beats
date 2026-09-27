@@ -287,6 +287,26 @@ addPlat('likes_bonus_cup', 'REAL DEFAULT 2000');
 addPlat('referrals_per_bonus', 'INTEGER DEFAULT 10');
 addPlat('referral_bonus_cup', 'REAL DEFAULT 200');
 
+// ---- Hots: beats destacados en la portada (los productores pagan por semana) ----
+addPlat('hot_price_usd', 'REAL DEFAULT 2');
+addPlat('hot_slots', 'INTEGER DEFAULT 8');
+db.exec(`CREATE TABLE IF NOT EXISTS hot_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  producer_id INTEGER,
+  track_id INTEGER NOT NULL,
+  weeks INTEGER NOT NULL DEFAULT 1,
+  amount_cup REAL NOT NULL DEFAULT 0,
+  currency TEXT DEFAULT 'CUP',
+  receipt_filename TEXT DEFAULT '',
+  status TEXT DEFAULT 'pending',
+  reject_reason TEXT DEFAULT '',
+  starts_at TEXT DEFAULT '',
+  ends_at TEXT DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  resolved_at TEXT DEFAULT ''
+)`);
+db.exec('CREATE INDEX IF NOT EXISTS idx_hot_track ON hot_requests(track_id, status)');
+
 const producerCols2 = db.prepare("PRAGMA table_info(producers)").all().map(c => c.name);
 if (!producerCols2.includes('referral_code')) db.exec("ALTER TABLE producers ADD COLUMN referral_code TEXT DEFAULT ''");
 if (!producerCols2.includes('referred_by')) db.exec('ALTER TABLE producers ADD COLUMN referred_by INTEGER');
@@ -474,7 +494,7 @@ if (!ratesExist) {
     { code: 'CUP', label: 'CUP', cupPerUnit: 1 },
     { code: 'MLC', label: 'MLC', cupPerUnit: 0 },
     { code: 'USD', label: 'USD', cupPerUnit: 0 },
-    { code: 'USDT_BEP20', label: 'USDT (BEP20)', cupPerUnit: 0 },
+    { code: 'BNB_BEP20', label: 'BNB (BEP20)', cupPerUnit: 0 },
     { code: 'USDT_TRC20', label: 'USDT (TRC20)', cupPerUnit: 0 },
     { code: 'USDT_POLYGON', label: 'USDT (Polygon)', cupPerUnit: 0 },
     { code: 'SALDO_MOVIL', label: 'Saldo Móvil', cupPerUnit: 0 },

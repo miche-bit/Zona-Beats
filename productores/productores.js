@@ -581,9 +581,10 @@
   };
 
   async function loadTracks() {
-    const res = await fetch('/api/producer/tracks');
+    const [res, hres] = await Promise.all([fetch('/api/producer/tracks'), fetch('/api/producer/hots')]);
     if (!res.ok) return;
     const { tracks } = await res.json();
+    hotsInfo = hres.ok ? await hres.json() : null;
     const list = $('track-list');
     list.innerHTML = '';
     $('beats-count').textContent = tracks.length ? tracks.length + ' beat' + (tracks.length > 1 ? 's' : '') : '';
@@ -599,21 +600,29 @@
         : (STATUS_LABELS[t.approval_status] || STATUS_LABELS.pending);
       const archivos = t.archivos || {};
       const entregables = t.is_playlist ? '' : '<div class="m files-line">Archivos: MP3' + (archivos.wav ? ' · WAV' : '') + (archivos.stems ? ' · STEMS' : '') + (t.ventas ? ' · ' + t.ventas + ' venta' + (t.ventas > 1 ? 's' : '') : '') + '</div>';
+      const puedeHot = hotsInfo && hotsInfo.precioSemanaCup > 0 && !t.sold && !t.is_playlist && t.approval_status === 'approved';
+      const hotHasta = hotsInfo && hotsInfo.activos[t.id];
+      const hotRevision = hotsInfo && hotsInfo.enRevision.includes(t.id);
+      const hotLinea = hotHasta ? '<div class="m hot-line"><span aria-hidden="true">🔥</span> En Hots hasta el ' + ZBHistorial.fechaHora(hotHasta) + '</div>'
+        : hotRevision ? '<div class="m hot-line pending"><span aria-hidden="true">🔥</span> Hot en revisión: sale en la portada cuando el administrador apruebe el pago</div>' : '';
       item.innerHTML =
         (t.cover_filename ? '<img src="/api/cover/' + t.id + '?s=160" alt="" loading="lazy">' : '<div class="cover-empty"></div>') +
         '<div class="info">' +
           '<div class="t">' + escapeHtml(t.title) + (t.is_playlist ? ' <span class="mini-tag">Playlist</span>' : '') + '</div>' +
           '<div class="m">' + escapeHtml(t.genre || 'Sin género') + (t.price_label ? ' · ' + escapeHtml(t.price_label) : '') + ' · ' + (t.plays || 0) + ' repr. · ' + (t.likes || 0) + ' me gusta</div>' +
-          entregables +
+          entregables + hotLinea +
           (t.approval_status === 'rejected' && t.rejection_reason ? '<div class="m reject">Motivo: ' + escapeHtml(t.rejection_reason) + '. Corrígelo con «Editar» y vuelve a revisión.</div>' : '') +
         '</div>' +
         '<div class="track-actions">' +
           '<span class="status-badge ' + statusInfo.className + '">' + statusInfo.text + '</span>' +
+          (puedeHot && !hotRevision ? '<button type="button" class="btn-hot-track">' + (hotHasta ? 'Extender Hot' : '<span aria-hidden="true">🔥</span> Poner en Hots') + '</button>' : '') +
           (!t.sold ? '<button type="button" class="btn-edit-track">Editar</button>' : '') +
           (!t.sold ? '<button type="button" class="btn-delete-track">Eliminar</button>' : '') +
         '</div>';
       const del = item.querySelector('.btn-delete-track');
       if (del) del.addEventListener('click', () => deleteTrack(t.id, t.title));
+      const hb = item.querySelector('.btn-hot-track');
+      if (hb) hb.addEventListener('click', () => abrirModalHot(t));
       const ed = item.querySelector('.btn-edit-track');
       if (ed) ed.addEventListener('click', () => abrirEditor(t));
       list.appendChild(item);
@@ -702,18 +711,20 @@
     $('stat-sales').textContent = fmt(summary.totalSales);
     $('stat-total').textContent = formatCup(summary.totalSalesCup) + ' en ventas';
     const bills = summary.billeteras || [];
-    const cupB = bills.find(b => b.code === 'CUP');
-    const otras = bills.filter(b => b.code !== 'CUP');
-    $('stat-available').textContent = fmt(cupB ? cupB.unidades : 0, 0);
-    $('stat-available-other').textContent = otras.length ? 'CUP · y ' + otras.map(b => montoUnidades(b.unidades, b.code, b.label)).join(' · ') : 'CUP';
+    $('stat-available').innerHTML = chipsSaldo(bills);
     $('stat-withdrawing').textContent = fmt(summary.inWithdrawalCup, 0);
     $('stat-paid').textContent = fmt(summary.paidCup, 0);
 
   }
 
   // Montos en la moneda en que pagó el comprador
-  const decimalesDe = (code) => (['CUP', 'SALDO_MOVIL'].includes(code) ? 0 : 2);
+  const decimalesDe = (code) => ZBUI.decimales(code);
   function montoUnidades(n, code, label) { return fmt(n, decimalesDe(code)) + ' ' + escapeHtml(label || code); }
+  // Plaquitas: una por cada moneda en que le pagaron los compradores
+  function chipsSaldo(bills) {
+    const lista = bills.length ? bills : [{ code: 'CUP', label: 'CUP', unidades: 0 }];
+    return lista.map(b => '<span class="wallet-chip"><strong>' + fmt(b.unidades, decimalesDe(b.code)) + '</strong> ' + escapeHtml(b.label || b.code) + '</span>').join('');
+  }
 
 
   // ---------- Retiros ----------
@@ -725,11 +736,7 @@
     if (!res.ok) return;
     retiros = await res.json();
     const bills = retiros.billeteras || [];
-    $('w-available').innerHTML = bills.length
-      ? bills.map(b => '<div class="wallet-line"><strong>' + montoUnidades(b.unidades, b.code, b.label) + '</strong>' +
-          (b.code !== 'CUP' ? '<span>≈ ' + formatCup(b.cupEquivalente) + '</span>' : '') + '</div>').join('')
-      : '0 CUP';
-    $('w-breakdown').textContent = bills.length > 1 ? 'Cada venta queda en la moneda en que te pagó el comprador (ya descontada la comisión de tu plan).' : '';
+    $('w-available').innerHTML = chipsSaldo(bills);
     $('w-term').textContent = 'Con tu plan te pagamos en ' + retiros.plazo + ' desde que pulsas «Retirar dinero».';
     const btn = $('withdraw-btn');
     btn.disabled = Boolean(retiros.pendiente) || !bills.length;
@@ -763,7 +770,7 @@
   }
 
   function montoRetiro(w) {
-    return w.currency === 'CUP' ? formatCup(w.net_units) : fmt(w.net_units, w.currency === 'SALDO_MOVIL' ? 0 : 2) + ' ' + escapeHtml(w.currency_label || w.currency);
+    return w.currency === 'CUP' ? formatCup(w.net_units) : fmt(w.net_units, decimalesDe(w.currency)) + ' ' + escapeHtml(w.currency_label || w.currency);
   }
 
   function avisoRetiroHtml(w) {
@@ -786,15 +793,8 @@
     const code = $('withdraw-wallet').value;
     return (retiros.billeteras || []).find(b => b.code === code);
   }
-  function llenarMonedasRetiro() {
-    const b = billeteraElegida();
-    const sel = $('withdraw-currency');
-    const ops = b ? b.opciones : [];
-    sel.innerHTML = ops.length
-      ? ops.map(o => '<option value="' + escapeHtml(o.code) + '">' + escapeHtml(o.label || o.code) + '</option>').join('')
-      : '<option value="">Agrega en tu Perfil una cuenta en ' + escapeHtml(b ? b.label : '') + '</option>';
-    sel.disabled = !ops.length;
-  }
+  // cada saldo se cobra en su misma moneda, a la cuenta que el productor tenga en esa moneda
+  const opcionDe = (b) => (b && b.opciones && b.opciones[0]) || null;
   $('withdraw-btn').addEventListener('click', () => {
     if (!retiros) return;
     const bills = retiros.billeteras || [];
@@ -807,26 +807,18 @@
     wsel.innerHTML = bills.map(b => '<option value="' + escapeHtml(b.code) + '">' + montoUnidades(b.unidades, b.code, b.label) + '</option>').join('');
     const conCuenta = bills.find(b => b.opciones.length);
     if (conCuenta) wsel.value = conCuenta.code;
-    $('withdraw-wallet-field').style.display = bills.length > 1 ? '' : 'none';
-    llenarMonedasRetiro();
     ponerMontoTodo();
     $('withdraw-foot').textContent = 'Te pagamos en ' + retiros.plazo + '. Al confirmar se abre WhatsApp para avisar al administrador.';
     wModal.classList.add('active');
   });
-  $('withdraw-currency').addEventListener('change', pintarResumenRetiro);
-  $('withdraw-wallet').addEventListener('change', () => { llenarMonedasRetiro(); ponerMontoTodo(); });
+  $('withdraw-wallet').addEventListener('change', ponerMontoTodo);
   $('withdraw-amount').addEventListener('input', pintarResumenRetiro);
   $('withdraw-all').addEventListener('click', ponerMontoTodo);
 
   // Monto que escribe el productor (acepta 1.500,50 / 1500.5 / 1500)
   function leerMonto(txt) {
-    let t = String(txt || '').replace(/\s/g, '');
-    if (!t) return NaN;
-    if (t.includes(',') && t.includes('.')) t = t.lastIndexOf(',') > t.lastIndexOf('.') ? t.replace(/\./g, '').replace(',', '.') : t.replace(/,/g, '');
-    else if (t.includes(',')) t = /,\d{1,2}$/.test(t) ? t.replace(',', '.') : t.replace(/,/g, '');
-    else if (/^\d{1,3}(\.\d{3})+$/.test(t)) t = t.replace(/\./g, '');
-    const n = Number(t);
-    return Number.isFinite(n) ? n : NaN;
+    const bw = billeteraElegida();
+    return ZBUI.leerMonto(txt, bw ? decimalesDe(bw.code) : 2);
   }
   function ponerMontoTodo() {
     const b = billeteraElegida();
@@ -840,8 +832,7 @@
 
   function pintarResumenRetiro() {
     const b = billeteraElegida();
-    const code = $('withdraw-currency').value;
-    const o = b ? b.opciones.find(x => x.code === code) : null;
+    const o = opcionDe(b);
     const dec = o && o.decimals != null ? o.decimals : 2;
     const monto = leerMonto($('withdraw-amount').value);
     $('withdraw-amount-label').textContent = '¿Cuánto quieres retirar?' + (b ? ' (en ' + b.label + ')' : '');
@@ -852,29 +843,17 @@
     else if (!(monto > 0)) error = 'Escribe cuánto quieres retirar.';
     else if (monto > b.unidades + 1e-9) error = 'No puedes retirar más de lo que tienes (' + fmt(b.unidades, decimalesDe(b.code)) + ' ' + b.label + ').';
     let html = '<div class="w-row"><span>Sale de tu saldo</span><strong>' + (b && monto > 0 ? montoUnidades(monto, b.code, b.label) : '—') + '</strong></div>';
-    let neto = 0, bruto = 0;
+    let neto = 0;
     if (!error) {
-      if (o.directo) { bruto = bajar(monto, dec); neto = bajar(monto - o.fee, dec); }
-      else if (code === 'CUP') { bruto = neto = bajar(monto, 0); }
-      else { bruto = bajar(monto / o.rate, dec); neto = bajar(monto / o.rate - o.fee, dec); }
+      neto = bajar(monto - (o.fee || 0), dec);
       if (neto <= 0) error = 'Ese monto no alcanza para cubrir el fee de red de ' + o.label + '.';
     }
     if (error) {
       html += '<div class="w-row error">' + escapeHtml(error) + '</div>';
       $('withdraw-confirm').disabled = true;
     } else {
-      if (o.directo) {
-        html += '<div class="w-row"><span>Fee de red</span><strong>− ' + fmt(o.fee, dec) + ' ' + escapeHtml(o.label) + '</strong></div>';
-        html += '<div class="w-row total"><span>Recibirás</span><strong>' + fmt(neto, dec) + ' ' + escapeHtml(o.label) + '</strong></div>';
-      } else if (code !== 'CUP') {
-        html += '<div class="w-row"><span>Tasa aplicada (remesero)</span><strong>1 ' + escapeHtml(o.label) + ' = ' + fmt(o.rate, 2) + ' CUP</strong></div>';
-        html += '<div class="w-row"><span>Equivale a</span><strong>' + fmt(bruto, dec) + ' ' + escapeHtml(o.label) + '</strong></div>';
-        html += '<div class="w-row"><span>Fee de red</span><strong>− ' + fmt(o.fee, dec) + ' ' + escapeHtml(o.label) + '</strong></div>';
-        html += '<div class="w-row total"><span>Recibirás</span><strong>' + fmt(neto, dec) + ' ' + escapeHtml(o.label) + '</strong></div>';
-        html += '<div class="w-row"><span>Total en CUP que recibirás</span><strong>≈ ' + formatCup(Math.round(neto * o.rate)) + '</strong></div>';
-      } else {
-        html += '<div class="w-row total"><span>Total en CUP que recibirás</span><strong>' + formatCup(neto) + '</strong></div>';
-      }
+      if (o.fee > 0) html += '<div class="w-row"><span>Fee de red</span><strong>− ' + fmt(o.fee, dec) + ' ' + escapeHtml(o.label) + '</strong></div>';
+      html += '<div class="w-row total"><span>Recibirás</span><strong>' + fmt(neto, dec) + ' ' + escapeHtml(o.label) + '</strong></div>';
       const queda = b.unidades - monto;
       if (queda > 0.004) html += '<div class="w-row"><span>Te queda en tu saldo</span><strong>' + montoUnidades(queda, b.code, b.label) + '</strong></div>';
       html += '<div class="w-accounts"><span>Datos de pago</span>' + o.cuentas.map(c => '<div class="plan-account"><div><div class="pa-bank">' + escapeHtml(c.bank) + '</div><div class="pa-num">' + escapeHtml(c.number) + '</div></div></div>').join('') + '</div>';
@@ -891,7 +870,7 @@
     try {
       const res = await fetch('/api/producer/withdrawals', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wallet: $('withdraw-wallet').value, currency: $('withdraw-currency').value, amount: leerMonto($('withdraw-amount').value) }),
+        body: JSON.stringify({ wallet: $('withdraw-wallet').value, amount: leerMonto($('withdraw-amount').value) }),
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -916,10 +895,10 @@
   // ---------- Movimientos ----------
   let movimientos = [];
   let movOcultos = 0;
-  const MOV_TIPOS = { venta: 'Venta', bono: 'Bono', plan: 'Plan', retiro: 'Retiro' };
+  const MOV_TIPOS = { venta: 'Venta', bono: 'Bono', plan: 'Plan', retiro: 'Retiro', hot: 'Hot' };
   let movFiltro = '';
   let movMostrar = 20;
-  const MOV_ICONOS = { venta: '♪', bono: '★', plan: '◆', retiro: '↗' };
+  const MOV_ICONOS = { venta: '♪', bono: '★', plan: '◆', retiro: '↗', hot: '🔥' };
   async function loadMovimientos() {
     const res = await fetch('/api/producer/movimientos');
     if (!res.ok) return;
@@ -1062,7 +1041,7 @@
         '<div><strong>' + fmt(tot.ventas) + '</strong><span>ventas</span></div>' +
         '<div><strong>' + formatCup(tot.ganado) + '</strong><span>ganado</span></div>' +
       '</div>' +
-      (st.pistas.length ? '<div class="stats-table-wrap"><table class="stats-table"><thead><tr><th>Beat</th><th>Repr.</th><th>Me gusta</th><th>Ventas</th><th>Ganado</th></tr></thead><tbody>' +
+      (st.pistas.length ? '<div class="stats-table-wrap" tabindex="0" role="region" aria-label="Tabla de tus beats (se desliza a los lados)"><table class="stats-table"><thead><tr><th>Beat</th><th>Repr.</th><th>Me gusta</th><th>Ventas</th><th>Ganado</th></tr></thead><tbody>' +
         st.pistas.map(t => '<tr><td>' + escapeHtml(t.title) + '</td><td>' + fmt(t.plays) + '</td><td>' + fmt(t.likes) + '</td><td>' + fmt(t.ventas) + '</td><td>' + fmt(t.ganado, 0) + '</td></tr>').join('') +
         '</tbody></table></div>' : '<div class="empty-hint">Todavía no hay datos.</div>');
   }
@@ -1092,7 +1071,7 @@
     const rate = adminPago.rates.find(r => r.code === code);
     if (!rate || code === 'CUP' || !rate.cupPerUnit) return formatCup(cup);
     const v = cup / rate.cupPerUnit;
-    const dec = code === 'SALDO_MOVIL' ? 0 : 2;
+    const dec = decimalesDe(code);
     return fmt(v, dec) + ' ' + (rate.label || code);
   }
 
@@ -1229,6 +1208,137 @@
     }
   });
 
+  // ---------- Hots ----------
+  let hotsInfo = null;
+  const hotModal = $('hot-modal');
+  let hotState = { track: null, weeks: 1 };
+  const semanasTxt = (w) => w + (w === 1 ? ' semana' : ' semanas');
+
+  function pintarHotSaldo() {
+    const box = $('hot-balance-box');
+    const bills = (retiros && retiros.billeteras) || [];
+    const total = hotsInfo.precioSemanaCup * hotState.weeks;
+    const opciones = bills.map(b => ({ b, costo: costoEnBilletera(total, b.code) })).filter(x => x.costo !== null);
+    if (!opciones.length) { box.style.display = 'none'; return; }
+    box.style.display = '';
+    const sel = $('hot-wallet');
+    const antes = sel.value;
+    sel.innerHTML = opciones.map(x => '<option value="' + escapeHtml(x.b.code) + '">' + montoUnidades(x.b.unidades, x.b.code, x.b.label) +
+      (x.b.unidades + 1e-9 < x.costo ? ' (no alcanza)' : '') + '</option>').join('');
+    const alcanza = opciones.find(x => x.b.unidades + 1e-9 >= x.costo);
+    sel.value = opciones.some(x => x.b.code === antes) ? antes : (alcanza ? alcanza.b.code : opciones[0].b.code);
+    const x = opciones.find(o => o.b.code === sel.value);
+    const ok = x.b.unidades + 1e-9 >= x.costo;
+    $('hot-wallet-cost').textContent = fmt(x.costo, decimalesDe(x.b.code)) + ' ' + x.b.label;
+    $('hot-wallet-rest').textContent = ok ? fmt(x.b.unidades - x.costo, decimalesDe(x.b.code)) + ' ' + x.b.label : 'Tu saldo no alcanza';
+    $('hot-wallet-rest').classList.toggle('falta', !ok);
+    $('hot-balance-btn').disabled = !ok;
+  }
+  function actualizarModalHot() {
+    pintarHotSaldo();
+    const total = hotsInfo.precioSemanaCup * hotState.weeks;
+    const code = $('hot-currency').value || 'CUP';
+    $('hot-total').textContent = code === 'CUP' ? formatCup(total) : montoEnMoneda(total, code) + ' (' + formatCup(total) + ')';
+    const cuentas = adminPago.accounts.filter(a => a.currency === code);
+    $('hot-accounts').innerHTML = cuentas.length
+      ? cuentas.map(a => '<div class="plan-account"><div><div class="pa-bank">' + escapeHtml(a.bank) + '</div><div class="pa-num">' + escapeHtml(a.number) + '</div></div><button type="button" class="pa-copy" data-n="' + escapeHtml(a.number) + '">Copiar</button></div>').join('')
+      : '<p class="panel-hint">No hay cuenta configurada para esa moneda.</p>';
+    $('hot-accounts').querySelectorAll('.pa-copy').forEach(b => b.addEventListener('click', () => {
+      if (navigator.clipboard) navigator.clipboard.writeText(b.dataset.n).then(() => { b.textContent = 'Copiado'; setTimeout(() => { b.textContent = 'Copiar'; }, 1400); });
+    }));
+  }
+  async function abrirModalHot(t) {
+    await Promise.all([cargarDatosDePago(), loadWithdrawals()]);
+    const hres = await fetch('/api/producer/hots');
+    if (hres.ok) hotsInfo = await hres.json();
+    if (!hotsInfo || !hotsInfo.precioSemanaCup) { showToast('Los Hots todavía no tienen precio. Avísale al administrador.', true); return; }
+    const hasta = hotsInfo.activos[t.id];
+    if (!hasta && hotsInfo.libres <= 0) {
+      showToast('Los cupos de Hots están llenos.' + (hotsInfo.proximoLibre ? ' El próximo se libera el ' + ZBHistorial.fechaHora(hotsInfo.proximoLibre) + '.' : ''), true);
+      return;
+    }
+    hotState = { track: t, weeks: 1 };
+    $('hot-modal-title').textContent = (hasta ? 'Extender Hot: ' : 'Poner en Hots: ') + t.title;
+    $('hot-modal-info').textContent = 'Tu beat sale en el carrusel de la portada de la tienda. ' + formatCup(hotsInfo.precioSemanaCup) + ' por semana' +
+      (hotsInfo.precioSemanaUsd ? ' ($' + fmt(hotsInfo.precioSemanaUsd, hotsInfo.precioSemanaUsd % 1 ? 2 : 0) + ' USD)' : '') + '. ' +
+      (hasta ? 'Ya está en Hots hasta el ' + ZBHistorial.fechaHora(hasta) + ': el tiempo nuevo se suma a esa fecha.' : 'Quedan ' + hotsInfo.libres + ' de ' + hotsInfo.cupos + ' cupos libres.');
+    const monedas = [...new Set(adminPago.accounts.map(a => a.currency))];
+    $('hot-currency').innerHTML = (monedas.length ? monedas : ['CUP']).map(m => {
+      const r = adminPago.rates.find(x => x.code === m);
+      return '<option value="' + escapeHtml(m) + '">' + escapeHtml((r && r.label) || m) + '</option>';
+    }).join('');
+    hotModal.querySelectorAll('.week-opt').forEach(b => {
+      b.classList.toggle('active', b.dataset.w === '1');
+      b.textContent = semanasTxt(Number(b.dataset.w)) + ' · ' + formatCup(hotsInfo.precioSemanaCup * Number(b.dataset.w));
+    });
+    $('hot-receipt-input').value = '';
+    $('hot-receipt-label').textContent = 'Toca para subir la captura de la transferencia';
+    $('hot-receipt-drop').classList.remove('has-file');
+    actualizarModalHot();
+    hotModal.classList.add('active');
+  }
+  hotModal.querySelectorAll('.week-opt').forEach(b => b.addEventListener('click', () => {
+    hotState.weeks = Number(b.dataset.w);
+    hotModal.querySelectorAll('.week-opt').forEach(x => x.classList.toggle('active', x === b));
+    actualizarModalHot();
+  }));
+  $('hot-currency').addEventListener('change', actualizarModalHot);
+  $('hot-wallet').addEventListener('change', pintarHotSaldo);
+  $('hot-modal-close').addEventListener('click', () => hotModal.classList.remove('active'));
+  hotModal.addEventListener('click', (e) => { if (e.target === hotModal) hotModal.classList.remove('active'); });
+  wireFileDrop($('hot-receipt-drop'), $('hot-receipt-input'), $('hot-receipt-label'), 'Toca para subir la captura de la transferencia');
+
+  $('hot-balance-btn').addEventListener('click', async () => {
+    const btn = $('hot-balance-btn');
+    const x = $('hot-wallet').selectedOptions[0];
+    if (!confirm('¿Poner «' + hotState.track.title + '» en Hots por ' + semanasTxt(hotState.weeks) + ' pagando ' + $('hot-wallet-cost').textContent + ' de tu saldo?')) return;
+    btn.disabled = true;
+    try {
+      const res = await fetch('/api/producer/hots/saldo', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trackId: hotState.track.id, weeks: hotState.weeks, wallet: x ? x.value : 'CUP' }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) {
+        hotModal.classList.remove('active');
+        showToast('¡Listo! «' + hotState.track.title + '» está en la portada hasta el ' + ZBHistorial.fechaHora(d.hasta) + '.');
+        loadTracks(); loadWithdrawals(); loadEarnings();
+      } else if (res.status === 401) showLogin();
+      else { showToast(d.error || 'No se pudo activar el Hot.', true); btn.disabled = false; }
+    } catch {
+      showToast('Se perdió la conexión. Intenta de nuevo.', true);
+      btn.disabled = false;
+    }
+  });
+
+  $('hot-send-btn').addEventListener('click', async () => {
+    let f = $('hot-receipt-input').files[0];
+    if (!f) { showToast('Adjunta la foto del comprobante.', true); return; }
+    const btn = $('hot-send-btn');
+    btn.disabled = true;
+    btn.textContent = 'Enviando…';
+    if (window.ZBSubidas) f = await window.ZBSubidas.comprimirImagen(f, 1600, 0.82);
+    const fd = new FormData();
+    fd.append('trackId', String(hotState.track.id));
+    fd.append('weeks', String(hotState.weeks));
+    fd.append('currency', $('hot-currency').value || 'CUP');
+    fd.append('receipt', f, f.name || 'comprobante.jpg');
+    try {
+      const res = await fetch('/api/producer/hots', { method: 'POST', body: fd });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) {
+        hotModal.classList.remove('active');
+        showToast('Comprobante enviado. Tu beat sale en la portada cuando el administrador apruebe el pago.');
+        loadTracks(); loadMovimientos();
+      } else showToast(d.error || 'No se pudo enviar el comprobante.', true);
+    } catch {
+      showToast('Se perdió la conexión. Intenta de nuevo.', true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Enviar comprobante';
+    }
+  });
+
   // ---------- Redes y cuentas ----------
   function renderSocial(links) {
     const cont = $('social-list');
@@ -1255,7 +1365,7 @@
     const row = document.createElement('div');
     row.className = 'row-triple';
     row.innerHTML =
-      '<select class="a-currency">' + permitidas.map(m => '<option value="' + escapeHtml(m) + '"' + (m === currency ? ' selected' : '') + '>' + escapeHtml(m) + '</option>').join('') + '</select>' +
+      '<select class="a-currency" aria-label="Moneda de la cuenta">' + permitidas.map(m => '<option value="' + escapeHtml(m) + '"' + (m === currency ? ' selected' : '') + '>' + escapeHtml(((perfil && perfil.etiquetasMonedas) || {})[m] || m) + '</option>').join('') + '</select>' +
       '<input type="text" class="a-bank" placeholder="Banco / plataforma" maxlength="60" value="' + escapeHtml(bank) + '">' +
       '<input type="text" class="a-number" placeholder="Número de cuenta / wallet" maxlength="60" value="' + escapeHtml(number) + '">' +
       '<button type="button" class="row-remove" aria-label="Quitar">&times;</button>';

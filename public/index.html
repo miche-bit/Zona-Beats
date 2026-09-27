@@ -7,6 +7,7 @@
 <!--OG-->
 <meta name="theme-color" content="#0c0a12">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -19,7 +20,7 @@
       </button>
       <div class="currency-picker">
         <label for="currency-select" class="currency-picker-label">Ver precios en</label>
-        <select id="currency-select"></select>
+        <select id="currency-select" aria-label="Moneda de pago"></select>
       </div>
     </div>
   </div>
@@ -46,6 +47,20 @@
     </div>
   </header>
 
+  <!-- Hots: beats destacados por sus productores (carrusel que avanza de izquierda a derecha) -->
+  <section class="hots" id="hots" aria-labelledby="hots-title">
+    <div class="hots-head">
+      <h2 class="hots-title" id="hots-title"><span aria-hidden="true">🔥</span> Hots</h2>
+      <button type="button" class="hots-pause" id="hots-pause" aria-pressed="false" aria-label="Pausar el carrusel" hidden>
+        <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+        <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+      </button>
+    </div>
+    <div class="hots-viewport" id="hots-viewport" role="region" aria-roledescription="carrusel" aria-label="Beats destacados. Desliza para ver más.">
+      <div class="hots-track" id="hots-track"><div class="skel-wrap skel-tarjetas" role="status"><span class="sr-only">Cargando…</span><div class="skel hot-skel"></div><div class="skel hot-skel"></div><div class="skel hot-skel"></div><div class="skel hot-skel"></div></div></div>
+    </div>
+  </section>
+
   <!-- Tabs de navegación entre secciones -->
   <div class="section-tabs">
     <button class="section-tab active" data-section="catalog">Catálogo</button>
@@ -69,14 +84,14 @@
   <div class="catalog-layout">
     <aside class="payment-methods-rail" id="payment-methods-rail">
       <div class="payment-methods-title">Formas de pago</div>
-      <div class="payment-methods-list" id="payment-methods-list"></div>
+      <div class="payment-methods-list" id="payment-methods-list"><div class="skel-wrap skel-plaquitas" role="status"><span class="sr-only">Cargando…</span><span class="skel skel-chip"></span><span class="skel skel-chip"></span><span class="skel skel-chip"></span></div></div>
     </aside>
 
     <div class="catalog-main">
       <div id="producers-grid" class="producers-grid" style="display:none;"></div>
       <div id="producer-detail" class="producer-detail" style="display:none;"></div>
 
-      <main id="track-grid" class="track-grid"></main>
+      <main id="track-grid" class="track-grid"><div class="skel-wrap skel-tarjetas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-card"></div><div class="skel skel-card"></div><div class="skel skel-card"></div><div class="skel skel-card"></div><div class="skel skel-card"></div><div class="skel skel-card"></div><div class="skel skel-card"></div><div class="skel skel-card"></div></div></main>
       <div id="empty-state" class="empty-state" style="display:none;">
         <h3 id="empty-state-title">Aún no hay pistas</h3>
         <p id="empty-state-text">Está preparando el primer set. Vuelve pronto.</p>
@@ -103,6 +118,7 @@
         <img class="player-cover" id="player-cover" src="" alt="">
         <div class="player-text">
           <div class="player-track-title" id="player-title">—</div>
+          <div class="player-track-credits" id="player-credits"></div>
           <div class="player-actions">
             <button type="button" class="player-link-btn" id="player-desc-btn">
               <svg viewBox="0 0 24 24"><path d="M11 17h2v-6h-2v6zm1-15C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-11h2V7h-2v2z"/></svg>
@@ -119,11 +135,11 @@
         <svg id="icon-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
         <svg id="icon-pause" viewBox="0 0 24 24" style="display:none;"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
       </button>
-      <button class="player-buy-btn" id="player-buy-btn" style="display:none;">
+      <button class="player-buy-btn" id="player-buy-btn" type="button" aria-label="Comprar esta pista" style="display:none;">
         <svg viewBox="0 0 24 24" class="cart-icon"><path d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12L8.1 13h7.45c.75 0 1.41-.41 1.75-1.03L20.9 4H4.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z"/></svg>
         <span id="player-buy-price"></span>
       </button>
-      <button class="player-download-btn" id="player-download-btn" style="display:none;">
+      <button class="player-download-btn" id="player-download-btn" type="button" aria-label="Descargar" style="display:none;">
         <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
       </button>
       <div class="player-live-badge">
@@ -295,6 +311,8 @@
       <div id="purchases-list"></div>
     </div>
   </div>
+
+  <script src="/ui.js"></script>
 
   <script src="/app.js"></script>
 </body>

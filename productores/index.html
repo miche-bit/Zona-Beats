@@ -6,6 +6,7 @@
 <title>Portal de Productores · Zona Beats</title>
 <meta name="theme-color" content="#0c0a12">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/productores/productores.css">
 </head>
 <body>
@@ -100,9 +101,8 @@
         <div id="plan-warning" class="plan-warning" style="display:none;"></div>
         <div class="stats-row" id="stats-row">
           <div class="stat-card stat-card-highlight">
-            <div class="stat-label">Disponible para retirar</div>
-            <div class="stat-value" id="stat-available">0</div>
-            <div class="stat-sub" id="stat-available-other">CUP</div>
+            <div class="stat-label">Saldo a retirar</div>
+            <div class="wallet-chips" id="stat-available"><div class="skel-wrap skel-plaquitas" role="status"><span class="sr-only">Cargando…</span><span class="skel skel-chip"></span><span class="skel skel-chip"></span></div></div>
           </div>
           <div class="stat-card">
             <div class="stat-label">En retiro</div>
@@ -129,7 +129,7 @@
           <h2>Invita productores</h2>
           <p class="panel-hint" id="ref-hint">Comparte tu enlace. Cuando el administrador apruebe a los productores que invitaste, ganas un bono.</p>
           <div class="ref-box">
-            <input type="text" id="ref-link" readonly>
+            <input type="text" id="ref-link" aria-label="Tu enlace de referido" readonly>
             <button type="button" class="btn-secondary-p" id="ref-copy">Copiar</button>
           </div>
           <div class="ref-progress" id="ref-progress"></div>
@@ -255,7 +255,7 @@
             <span class="plan-chip ghost" id="beats-count"></span>
           </div>
           <p class="panel-hint">Puedes eliminar cualquier beat que no tenga ventas aprobadas.</p>
-          <div id="track-list"></div>
+          <div id="track-list"><div class="skel-wrap skel-filas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div></div></div>
         </div>
       </section>
 
@@ -265,9 +265,8 @@
           <h2>Retirar dinero</h2>
           <div class="balance-line">
             <div>
-              <div class="stat-label">Disponible</div>
-              <div class="balance-big wallets" id="w-available">0 CUP</div>
-              <div class="stat-sub" id="w-breakdown"></div>
+              <div class="stat-label">Saldo a retirar</div>
+              <div class="wallet-chips big" id="w-available"><div class="skel-wrap skel-plaquitas" role="status"><span class="sr-only">Cargando…</span><span class="skel skel-chip"></span><span class="skel skel-chip"></span></div></div>
             </div>
             <button type="button" class="btn-primary btn-withdraw" id="withdraw-btn">Retirar dinero</button>
           </div>
@@ -282,6 +281,7 @@
             <button type="button" class="mov-chip" data-tipo="venta">Ventas</button>
             <button type="button" class="mov-chip" data-tipo="retiro">Retiros</button>
             <button type="button" class="mov-chip" data-tipo="plan">Planes</button>
+            <button type="button" class="mov-chip" data-tipo="hot">Hots</button>
             <button type="button" class="mov-chip" data-tipo="bono">Bonos</button>
           </div>
           <div class="hist-tools">
@@ -289,7 +289,7 @@
             <button type="button" class="hist-btn danger" id="mov-clear">Borrar historial</button>
             <button type="button" class="hist-btn" id="mov-restore" hidden>Restaurar borrados</button>
           </div>
-          <div id="mov-list"></div>
+          <div id="mov-list"><div class="skel-wrap skel-filas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div></div></div>
           <button type="button" class="btn-add-row" id="mov-more" style="display:none;">Ver más</button>
         </div>
       </section>
@@ -298,7 +298,7 @@
       <section class="tab-page" data-page="stats">
         <div class="panel">
           <h2>Tus referidos</h2>
-          <div id="stats-referidos"></div>
+          <div id="stats-referidos"><div class="skel-wrap skel-lineas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-line" style="width:92%"></div><div class="skel skel-line" style="width:75%"></div><div class="skel skel-line" style="width:58%"></div></div></div>
         </div>
         <div class="panel" id="stats-bono-panel" style="display:none;">
           <h2>Bono Studio por me gusta</h2>
@@ -306,7 +306,7 @@
         </div>
         <div class="panel">
           <h2>Tus beats en números</h2>
-          <div id="stats-beats"></div>
+          <div id="stats-beats"><div class="skel-wrap skel-filas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div></div></div>
         </div>
       </section>
 
@@ -318,9 +318,9 @@
             <span class="plan-chip" id="plan-chip">Free</span>
           </div>
           <div id="plan-request-status" class="plan-request-status" style="display:none;"></div>
-          <div class="plan-facts" id="plan-facts"></div>
+          <div class="plan-facts" id="plan-facts"><div class="skel-wrap skel-lineas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-line" style="width:92%"></div><div class="skel skel-line" style="width:75%"></div><div class="skel skel-line" style="width:58%"></div></div></div>
           <p class="panel-hint" id="plan-contact" style="margin-top:14px;"></p>
-          <div class="plans-grid" id="plans-grid"></div>
+          <div class="plans-grid" id="plans-grid"><div class="skel-wrap skel-tarjetas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-card"></div><div class="skel skel-card"></div><div class="skel skel-card"></div></div></div>
           <p class="panel-hint" id="plan-rate-note" style="margin-top:12px;"></p>
         </div>
       </section>
@@ -364,7 +364,7 @@
           <div class="field">
             <label>Tus cuentas de cobro</label>
             <p class="panel-hint compact" id="currency-hint"></p>
-            <div id="accounts-list"></div>
+            <div id="accounts-list"><div class="skel-wrap skel-filas-chicas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row sm"></div></div></div>
             <button type="button" class="btn-add-row" id="add-account">+ Agregar cuenta</button>
           </div>
 
@@ -404,13 +404,8 @@
       <div class="login-badge">RETIRAR DINERO</div>
       <h3 id="withdraw-title">Retirar</h3>
       <div class="field" id="withdraw-wallet-field">
-        <label for="withdraw-wallet">¿Qué saldo quieres retirar?</label>
+        <label for="withdraw-wallet">Saldo a retirar</label>
         <select id="withdraw-wallet" class="select-p"></select>
-        <span class="field-hint">Cada venta queda en la moneda en que pagó el comprador. Los bonos van al saldo en CUP.</span>
-      </div>
-      <div class="field">
-        <label for="withdraw-currency">¿En qué moneda quieres cobrar?</label>
-        <select id="withdraw-currency" class="select-p"></select>
       </div>
       <div class="field">
         <label for="withdraw-amount" id="withdraw-amount-label">¿Cuánto quieres retirar?</label>
@@ -481,6 +476,57 @@
   </div>
 
   <!-- Modal para editar un beat -->
+  <!-- Modal de Hots: el beat sale en el carrusel de la portada -->
+  <div class="plan-modal-overlay" id="hot-modal" role="dialog" aria-modal="true" aria-labelledby="hot-modal-title">
+    <div class="plan-modal-box">
+      <button type="button" class="plan-modal-close" id="hot-modal-close" aria-label="Cerrar">&times;</button>
+      <div class="login-badge hot-badge-p"><span aria-hidden="true">🔥</span> HOTS</div>
+      <h3 id="hot-modal-title">Poner en Hots</h3>
+      <p class="panel-hint" id="hot-modal-info" style="margin:0 0 16px;"></p>
+
+      <div class="field">
+        <label id="hot-weeks-label">¿Cuánto tiempo?</label>
+        <div class="weeks-row" id="hot-weeks" role="group" aria-labelledby="hot-weeks-label">
+          <button type="button" class="week-opt active" data-w="1">1 semana</button>
+          <button type="button" class="week-opt" data-w="2">2 semanas</button>
+          <button type="button" class="week-opt" data-w="4">4 semanas</button>
+        </div>
+      </div>
+
+      <div class="pay-balance" id="hot-balance-box" style="display:none;">
+        <div class="pay-balance-title">Pagar con tu saldo</div>
+        <p class="panel-hint compact" style="margin:0 0 10px;">Se descuenta de lo que ganaste y tu beat sale en la portada al instante.</p>
+        <div class="field" style="margin-bottom:10px;">
+          <label for="hot-wallet">¿De qué saldo?</label>
+          <select id="hot-wallet" class="select-p"></select>
+        </div>
+        <div class="w-row"><span>Se descuenta</span><strong id="hot-wallet-cost">—</strong></div>
+        <div class="w-row"><span>Te queda</span><strong id="hot-wallet-rest">—</strong></div>
+        <button type="button" class="btn-primary" id="hot-balance-btn">Ponerlo en Hots ya</button>
+        <div class="or-sep"><span>o paga por transferencia</span></div>
+      </div>
+
+      <div class="plan-total">
+        <span>Total a transferir</span>
+        <strong id="hot-total">0 CUP</strong>
+      </div>
+      <div class="field">
+        <label for="hot-currency">Moneda en que vas a pagar</label>
+        <select id="hot-currency"></select>
+      </div>
+      <div id="hot-accounts" class="plan-accounts"></div>
+      <div class="field">
+        <label for="hot-receipt-input">Foto del comprobante</label>
+        <label class="file-drop" id="hot-receipt-drop">
+          <span id="hot-receipt-label">Toca para subir la captura de la transferencia</span>
+          <input type="file" id="hot-receipt-input" accept=".jpg,.jpeg,.png,.webp,image/*">
+        </label>
+      </div>
+      <button type="button" class="btn-primary" id="hot-send-btn">Enviar comprobante</button>
+      <p class="panel-hint" style="margin:10px 0 0;text-align:center;">Cuando el administrador apruebe el pago, tu beat sale en la portada.</p>
+    </div>
+  </div>
+
   <div class="plan-modal-overlay" id="edit-modal" role="dialog" aria-modal="true" aria-labelledby="edit-title">
     <div class="plan-modal-box">
       <button type="button" class="plan-modal-close" id="edit-close" aria-label="Cerrar">&times;</button>
@@ -509,7 +555,9 @@
     </div>
   </div>
 
-  <div class="toast" id="toast"></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="/ui.js"></script>
 
   <script src="/subidas.js"></script>
   <script src="/historial.js"></script>

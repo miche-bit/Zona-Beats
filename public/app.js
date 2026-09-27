@@ -11,6 +11,7 @@
   const timeCurrent = document.getElementById('time-current');
   const timeTotal = document.getElementById('time-total');
   const trackGrid = document.getElementById('track-grid');
+  const seccionesCargadas = new Set(); // secciones cuya lista ya llegó (antes: skeleton)
   const emptyState = document.getElementById('empty-state');
   const emptyStateTitle = document.getElementById('empty-state-title');
   const emptyStateText = document.getElementById('empty-state-text');
@@ -195,8 +196,7 @@
     const rate = exchangeRates.find(r => r.code === currencyCode);
     const converted = convertFromCup(priceCup, currencyCode);
     if (converted == null) return `${Number(priceCup || 0).toLocaleString('es')} CUP`;
-    const wholeNumberCurrencies = ['CUP', 'SALDO_MOVIL'];
-    const decimals = wholeNumberCurrencies.includes(currencyCode) ? 0 : 2;
+    const decimals = ZBUI.decimales(currencyCode);
     const formatted = converted.toLocaleString('es', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
     return `${formatted} ${rate.label}`;
   }
@@ -205,6 +205,7 @@
     selectedCurrency = currencySelect.value;
     renderPaymentMethodsRail();
     renderCurrentSection();
+    if (hotsLista.length) pintarHots();
     if (currentTrack) actualizarBotonCompra(currentTrack);
   });
 
@@ -220,6 +221,7 @@
         currencySelect.value = selectedCurrency;
         renderPaymentMethodsRail();
         renderCurrentSection();
+        if (hotsLista.length) pintarHots();
         if (currentTrack) actualizarBotonCompra(currentTrack);
       });
     });
@@ -266,7 +268,14 @@
         loadProducersList();
         return;
       }
-      renderCurrentSection();
+      if (!seccionesCargadas.has(section)) {
+        // mientras llega la lista: skeletons, no el aviso de «no hay pistas»
+        emptyState.style.display = 'none';
+        noResultsState.style.display = 'none';
+        ZBUI.mostrarSkeleton(trackGrid, 'tarjetas', 8);
+      } else {
+        renderCurrentSection();
+      }
       if (!tracksBySection[section].length) loadTracksForSection(section);
     });
   });
@@ -283,7 +292,7 @@
   }
 
   async function loadProducersList() {
-    producersGrid.innerHTML = '<div class="empty-hint">Cargando…</div>';
+    ZBUI.mostrarSkeleton(producersGrid, 'tarjetas', 6);
     const res = await fetch('/api/producers');
     const { producers } = await res.json();
     const favs = getFavProducers();
@@ -295,8 +304,8 @@
     }
 
     producersGrid.innerHTML = ordenados.map(p => `
-      <div class="producer-card" data-id="${p.id}">
-        <button type="button" class="fav-btn ${favs.includes(p.id) ? 'active' : ''}" data-fav="${p.id}" aria-label="Favorito">
+      <div class="producer-card" data-id="${p.id}" role="button" tabindex="0" aria-label="Ver los beats de ${escapeHtml(p.name)}">
+        <button type="button" class="fav-btn ${favs.includes(p.id) ? 'active' : ''}" data-fav="${p.id}" aria-label="Favorito" aria-pressed="${favs.includes(p.id)}">
           <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
         </button>
         ${p.avatar ? `<img class="producer-avatar" src="/api/producer/avatar/${p.id}?s=300" alt="" loading="lazy">` : `<div class="producer-avatar producer-avatar-fallback">${escapeHtml((p.name||'?').charAt(0).toUpperCase())}</div>`}
@@ -310,18 +319,23 @@
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const id = Number(btn.dataset.fav);
-        btn.classList.toggle('active', toggleFavProducer(id));
+        const fav = toggleFavProducer(id);
+        btn.classList.toggle('active', fav);
+        btn.setAttribute('aria-pressed', String(fav));
       });
     });
     producersGrid.querySelectorAll('.producer-card').forEach(card => {
       card.addEventListener('click', () => openProducerDetail(Number(card.dataset.id)));
+      card.addEventListener('keydown', (e) => {
+        if ((e.key === 'Enter' || e.key === ' ') && e.target === card) { e.preventDefault(); card.click(); }
+      });
     });
   }
 
   async function openProducerDetail(id) {
     producersGrid.style.display = 'none';
     producerDetail.style.display = 'block';
-    producerDetail.innerHTML = '<div class="empty-hint">Cargando…</div>';
+    producerDetail.innerHTML = ZBUI.skeleton('lineas', 3) + '<div class="track-grid">' + ZBUI.skeleton('tarjetas', 4) + '</div>';
     const res = await fetch(`/api/producers/${id}/tracks`);
     if (!res.ok) { producerDetail.innerHTML = '<div class="empty-hint">No se pudo cargar este productor.</div>'; return; }
     const { producer, tracks, discountPercent: dp } = await res.json();
@@ -364,6 +378,7 @@
     const res = await fetch(`/api/tracks?type=${section}`);
     const data = await res.json();
     tracksBySection[section] = data.tracks;
+    seccionesCargadas.add(section);
     if (section === 'catalog' && typeof data.discountPercent === 'number') discountPercent = data.discountPercent;
     renderCurrentSection();
   }
@@ -379,16 +394,32 @@
 
   function matchesSearch(track) {
     if (!searchQuery) return true;
-    const haystacks = [track.title, track.genre, track.artist_credit, track.price_label]
+    const haystacks = [track.title, track.genre, track.artist_credit, track.price_label, track.producer_display, track.producer_name]
       .filter(Boolean)
       .map(s => s.toLowerCase());
     return haystacks.some(h => h.includes(searchQuery));
   }
 
   function renderCurrentSection() {
+    if (!seccionesCargadas.has(currentSection)) return; // sigue el skeleton hasta que llegue la lista
     const allTracks = tracksBySection[currentSection] || [];
     const filtered = allTracks.filter(matchesSearch);
     renderTracks(filtered, allTracks.length);
+  }
+
+  // Quién hizo cada tema: en Playlist van los artistas (la colaboración); en Catálogo y VIP, género y productor.
+  const nombreProductor = (t) => t.producer_display || t.producer_name || 'Zona Beats';
+  function creditosHtml(track, seccion) {
+    const artistas = seccion === 'playlist' && track.artist_credit
+      ? `<div class="track-artists"><span aria-hidden="true">🎤</span><span class="sr-only">Artistas:</span> ${escapeHtml(track.artist_credit)}</div>` : '';
+    return artistas + `<div class="track-credits">${track.genre ? `<span class="track-genre">${escapeHtml(track.genre)}</span><span class="dot" aria-hidden="true">·</span>` : ''}<span class="track-prod">prod. ${escapeHtml(nombreProductor(track))}</span></div>`;
+  }
+  function creditosTexto(track, seccion, conComa) {
+    const partes = [];
+    if (seccion === 'playlist' && track.artist_credit) partes.push(track.artist_credit);
+    if (track.genre) partes.push(track.genre);
+    partes.push('prod. ' + nombreProductor(track));
+    return (conComa ? ', ' : '') + partes.join(' · ');
   }
 
   function renderTracks(tracks, totalBeforeFilter, targetGrid) {
@@ -423,13 +454,8 @@
         ? `<img src="/api/cover/${track.id}?s=600" alt="" loading="lazy" decoding="async" draggable="false">`
         : `<div class="track-cover-fallback">${(track.title || '?').charAt(0).toUpperCase()}</div>`;
 
-      const genreBadge = track.genre
-        ? `<div class="track-genre-badge">${escapeHtml(track.genre)}</div>`
-        : '';
-
-      const producerBadge = track.producer_name
-        ? `<div class="track-producer-badge${track.genre ? ' below-genre' : ''}">prod. ${escapeHtml(track.producer_name)}</div>`
-        : '';
+      // Créditos debajo del título: artistas (solo Playlist), género y quién lo produjo (también el admin)
+      const creditos = creditosHtml(track, currentSection);
 
       const exclusiveBadge = track.is_exclusive
         ? `<div class="track-exclusive-badge">★ Exclusiva</div>`
@@ -482,8 +508,6 @@
         <div class="track-cover-wrap">
           ${coverHtml}
           ${exclusiveBadge}
-          ${genreBadge}
-          ${producerBadge}
           <div class="play-overlay">
             <div class="play-btn-circle">
               <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
@@ -494,10 +518,18 @@
           <div class="track-title">${escapeHtml(track.title)}</div>
           ${priceChip}
         </div>
+        ${creditos}
         ${vipOwner}
         ${playlistStats}
       `;
       card.addEventListener('click', () => playTrack(track));
+      // se puede escuchar con el teclado (Enter o espacio)
+      card.tabIndex = 0;
+      card.setAttribute('role', 'button');
+      card.setAttribute('aria-label', 'Escuchar ' + track.title + creditosTexto(track, currentSection, true));
+      card.addEventListener('keydown', (e) => {
+        if ((e.key === 'Enter' || e.key === ' ') && e.target === card) { e.preventDefault(); playTrack(track); }
+      });
 
       const likeBtn = card.querySelector('.track-like-btn');
       if (likeBtn) {
@@ -509,6 +541,119 @@
 
       grid.appendChild(card);
     });
+  }
+
+  // ---------- Hots: carrusel de la portada ----------
+  const hotsSection = document.getElementById('hots');
+  const hotsViewport = document.getElementById('hots-viewport');
+  const hotsTrack = document.getElementById('hots-track');
+  const hotsPause = document.getElementById('hots-pause');
+  let hotsLista = [];
+  const hotsMov = { pausaUsuario: false, pausaTemporal: false, anchoSet: 0, ultimo: 0, raf: 0, velocidad: 28, pos: 0 };
+  const reducirMovimiento = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : { matches: false };
+
+  function tarjetaHot(track, clon) {
+    const precio = track.price_cup > 0 ? formatPriceInCurrency(track.price_cup, selectedCurrency) : '';
+    const multiples = (track.licenses || []).length > 1;
+    const cover = track.cover_filename
+      ? `<img src="/api/cover/${track.id}?s=300" alt="" loading="lazy" draggable="false">`
+      : `<div class="hot-cover-fallback" aria-hidden="true">♪</div>`;
+    return `<div class="hot-card" data-id="${track.id}" ${clon ? 'aria-hidden="true" tabindex="-1"' : 'role="button" tabindex="0"'}
+              aria-label="Escuchar ${escapeHtml(track.title)}${', ' + escapeHtml(creditosTexto(track, 'catalog', false))}${precio ? ', ' + escapeHtml((multiples ? 'desde ' : '') + precio) : ''}">
+      <div class="hot-cover">${cover}<span class="hot-badge" aria-hidden="true">🔥 HOT</span>
+        <span class="hot-play" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></span></div>
+      <div class="hot-info">
+        <div class="hot-name">${escapeHtml(track.title)}</div>
+        <div class="hot-by">${track.genre ? escapeHtml(track.genre) + ' · ' : ''}prod. ${escapeHtml(nombreProductor(track))}</div>
+        ${precio ? `<div class="hot-price">${multiples ? 'Desde ' : ''}${escapeHtml(precio)}</div>` : ''}
+      </div>
+    </div>`;
+  }
+
+  function pintarHots() {
+    cancelAnimationFrame(hotsMov.raf);
+    if (!hotsLista.length) { hotsSection.hidden = true; return; }
+    hotsSection.hidden = false;
+    hotsTrack.classList.remove('is-loop');
+    hotsTrack.innerHTML = hotsLista.map(t => tarjetaHot(t, false)).join('');
+    hotsViewport.scrollLeft = 0;
+    // si no caben todas, se repite la fila para que el carrusel no tenga fin
+    const hayDesborde = hotsTrack.scrollWidth > hotsViewport.clientWidth + 4;
+    hotsPause.hidden = !hayDesborde;
+    if (!hayDesborde) return;
+    hotsTrack.classList.add('is-loop');
+    hotsMov.anchoSet = hotsTrack.scrollWidth + parseFloat(getComputedStyle(hotsTrack).columnGap || '0');
+    hotsTrack.insertAdjacentHTML('beforeend', hotsLista.map(t => tarjetaHot(t, true)).join(''));
+    hotsViewport.scrollLeft = hotsMov.anchoSet;
+    hotsMov.pos = hotsViewport.scrollLeft;
+    hotsMov.ultimo = 0;
+    hotsMov.raf = requestAnimationFrame(moverHots);
+  }
+
+  // Avanza de izquierda a derecha: las tarjetas se desplazan hacia la derecha
+  function moverHots(ts) {
+    const quieto = hotsMov.pausaUsuario || hotsMov.pausaTemporal || reducirMovimiento.matches || document.hidden;
+    // si la persona deslizó con el dedo, se sigue desde donde lo dejó
+    if (Math.abs(hotsViewport.scrollLeft - hotsMov.pos) > 2) hotsMov.pos = hotsViewport.scrollLeft;
+    if (hotsMov.ultimo && !quieto) {
+      const dt = Math.min(64, ts - hotsMov.ultimo);
+      // la posición se lleva con decimales: el navegador redondea scrollLeft a píxeles enteros
+      hotsMov.pos -= (hotsMov.velocidad * dt) / 1000;
+      if (hotsMov.pos <= 1) hotsMov.pos += hotsMov.anchoSet;
+      hotsViewport.scrollLeft = hotsMov.pos;
+    }
+    // si desliza hasta el final, vuelve a la copia equivalente
+    if (hotsMov.pos >= hotsMov.anchoSet * 2 - hotsViewport.clientWidth - 1) { hotsMov.pos -= hotsMov.anchoSet; hotsViewport.scrollLeft = hotsMov.pos; }
+    hotsMov.ultimo = ts;
+    hotsMov.raf = requestAnimationFrame(moverHots);
+  }
+
+  function pausaHots(pausar) {
+    hotsMov.pausaUsuario = pausar;
+    hotsPause.setAttribute('aria-pressed', String(pausar));
+    hotsPause.setAttribute('aria-label', pausar ? 'Reanudar el carrusel' : 'Pausar el carrusel');
+    hotsPause.classList.toggle('is-paused', pausar);
+  }
+  hotsPause.addEventListener('click', () => pausaHots(!hotsMov.pausaUsuario));
+  if (reducirMovimiento.matches) pausaHots(true);
+  // se detiene mientras la persona lo toca, lo recorre con el teclado o pasa el mouse
+  let reanudarTimer = null;
+  const detener = () => { clearTimeout(reanudarTimer); hotsMov.pausaTemporal = true; };
+  const seguir = (ms) => { clearTimeout(reanudarTimer); reanudarTimer = setTimeout(() => { hotsMov.pausaTemporal = false; }, ms); };
+  hotsViewport.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') detener(); });
+  hotsViewport.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') seguir(300); });
+  hotsViewport.addEventListener('touchstart', detener, { passive: true });
+  hotsViewport.addEventListener('touchend', () => seguir(2500), { passive: true });
+  hotsViewport.addEventListener('focusin', detener);
+  hotsViewport.addEventListener('focusout', () => seguir(600));
+  hotsViewport.addEventListener('wheel', () => { detener(); seguir(2500); }, { passive: true });
+
+  hotsTrack.addEventListener('click', (e) => {
+    const card = e.target.closest('.hot-card');
+    if (!card) return;
+    const track = hotsLista.find(t => t.id === Number(card.dataset.id));
+    if (track) playTrack(track);
+  });
+  hotsTrack.addEventListener('keydown', (e) => {
+    const card = e.target.closest('.hot-card');
+    if (!card || (e.key !== 'Enter' && e.key !== ' ')) return;
+    e.preventDefault();
+    card.click();
+  });
+  let anchoVentana = window.innerWidth;
+  window.addEventListener('resize', () => {
+    if (Math.abs(window.innerWidth - anchoVentana) < 40) return;
+    anchoVentana = window.innerWidth;
+    pintarHots();
+  });
+
+  async function loadHots() {
+    try {
+      const res = await fetch('/api/hots');
+      if (!res.ok) throw new Error();
+      hotsLista = (await res.json()).hots || [];
+    } catch { hotsLista = []; }
+    pintarHots();
   }
 
   // Identificador anónimo de este dispositivo para que cada persona cuente un solo «me gusta» por pista
@@ -585,6 +730,8 @@
       audioEl.play().catch(() => {});
 
       playerTitle.textContent = track.title;
+      const pc = document.getElementById('player-credits');
+      if (pc) pc.textContent = creditosTexto(track, track._section || currentSection, false);
       playerCover.src = track.cover_filename ? `/api/cover/${track.id}?s=160` : '';
       playerBar.classList.add('active');
       markPlayingCard(track.id);
@@ -634,9 +781,9 @@
     if (track.cover_filename) { cover.src = '/api/cover/' + track.id + '?s=300'; cover.style.display = ''; } else { cover.style.display = 'none'; }
     document.getElementById('desc-title').textContent = track.title || '';
     const meta = [];
+    if (track._section === 'playlist' && track.artist_credit) meta.push(track.artist_credit);
     if (track.genre) meta.push(track.genre);
-    if (track.producer_name) meta.push('prod. ' + track.producer_name);
-    if (track.artist_credit) meta.push(track.artist_credit);
+    meta.push('prod. ' + nombreProductor(track));
     if (track._section === 'playlist') meta.push('Playlist · descarga gratis');
     else if (track.for_sale && track.price_cup > 0 && !track.sold) meta.push((track.licenses || []).length > 1 ? 'Desde ' + formatPriceInCurrency(track.price_cup, selectedCurrency) : formatPriceInCurrency(track.price_cup, selectedCurrency));
     document.getElementById('desc-meta').textContent = meta.join(' · ');
@@ -1224,6 +1371,7 @@
     loadSocialLinks();
     actualizarBotonCompras();
     revisarCompras();
+    loadHots();
     await loadTracksForSection('catalog');
     abrirPistaCompartida();
   }

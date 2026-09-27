@@ -6,6 +6,7 @@
 <title>Verificar licencia · Zona Beats</title>
 <meta name="theme-color" content="#0c0a12">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/style.css">
 <style>
   .verify-wrap { max-width: 640px; margin: 0 auto; padding: 48px 20px 80px; }
@@ -19,13 +20,13 @@
   .verify-search { display: flex; gap: 10px; margin-bottom: 28px; flex-wrap: wrap; }
   .verify-search input {
     flex: 1; min-width: 200px; background: var(--bg-card); border: 1px solid var(--line);
-    color: var(--text); border-radius: 9px; padding: 12px 14px; font-size: 16px;
+    color: var(--text); border-radius: var(--r-md); padding: 12px 14px; font-size: 16px;
     font-family: 'JetBrains Mono', monospace;
   }
   .verify-search input:focus { outline: none; border-color: var(--accent); }
   .verify-search button {
-    background: var(--accent); color: #0c0a12; font-weight: 700; font-size: 14px;
-    padding: 12px 22px; border-radius: 9px; white-space: nowrap;
+    background: var(--accent); color: var(--on-bright); font-weight: 700; font-size: 14px;
+    padding: 12px 22px; border-radius: var(--r-md); white-space: nowrap;
   }
   .verify-card {
     background: var(--bg-card); border: 1px solid var(--line); border-radius: 14px;
@@ -35,7 +36,7 @@
   .verify-card.show { display: block; }
   .verify-status { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 15px; margin-bottom: 20px; }
   .verify-status.ok { color: var(--live); }
-  .verify-status.bad { color: #ff5d5d; }
+  .verify-status.bad { color: var(--danger); }
   .verify-status-dot { width: 10px; height: 10px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
   .verify-row { display: flex; justify-content: space-between; gap: 14px; padding: 10px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
   .verify-key { color: var(--text-faint); font-size: 12px; font-family: 'JetBrains Mono', monospace; text-transform: uppercase; letter-spacing: 0.4px; }
@@ -47,7 +48,7 @@
   }
   .verify-pdf-btn {
     display: block; text-align: center; margin-top: 20px; background: var(--live);
-    color: #0c0a12; font-weight: 700; font-size: 14px; padding: 13px; border-radius: 9px; text-decoration: none;
+    color: var(--on-bright); font-weight: 700; font-size: 14px; padding: 13px; border-radius: var(--r-md); text-decoration: none;
   }
   .verify-note { color: var(--text-faint); font-size: 12px; margin-top: 18px; line-height: 1.5; }
   .verify-file {
@@ -57,7 +58,7 @@
   .verify-file-title { font-weight: 700; font-size: 14px; }
   .verify-file-drop {
     display: block; text-align: center; cursor: pointer; padding: 14px;
-    border: 1px solid var(--line); border-radius: 9px; font-size: 13px; color: var(--text-dim);
+    border: 1px solid var(--line); border-radius: var(--r-md); font-size: 13px; color: var(--text-dim);
     transition: border-color 0.2s var(--ease), color 0.2s var(--ease);
   }
   .verify-file-drop:hover { border-color: var(--accent); color: var(--accent); }
@@ -66,10 +67,10 @@
   .lic-mini a { color: var(--live); }
   .verify-dl-btn {
     display: block; text-align: center; margin-top: 20px; background: var(--accent);
-    color: #0c0a12; font-weight: 700; font-size: 15px; padding: 15px; border-radius: 9px; text-decoration: none;
+    color: var(--on-bright); font-weight: 700; font-size: 15px; padding: 15px; border-radius: var(--r-md); text-decoration: none;
   }
   .verify-pdf-btn { margin-top: 10px; }
-  .verify-status.warn { color: #ffc13d; }
+  .verify-status.warn { color: var(--warn); }
   .verify-status + .verify-status { margin-top: 10px; }
 </style>
 </head>

@@ -1,20 +1,8 @@
 @import url('https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap');
 
+/* Colores, radios y tipografías: /tokens.css */
 :root {
-  --bg: #0c0a12;
-  --bg-elevated: #17131f;
-  --bg-card: #1c1826;
-  --bg-card-hover: #241f31;
-  --line: #2a2436;
-  --text: #f3efe9;
-  --text-dim: #a89fb5;
-  --text-faint: #6b6278;
-  --accent: #ff3d7f;
-  --accent-dim: #c22e60;
-  --accent-glow: rgba(255, 61, 127, 0.35);
-  --live: #3dffe0;
   --radius: 10px;
-  --ease: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 * { box-sizing: border-box; }
@@ -24,21 +12,21 @@ html, body {
   padding: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: 'Inter', -apple-system, sans-serif;
+  font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
 }
 
 body {
   background-image:
-    radial-gradient(ellipse 900px 500px at 15% -10%, rgba(255, 61, 127, 0.14), transparent 60%),
-    radial-gradient(ellipse 700px 500px at 100% 10%, rgba(61, 255, 224, 0.08), transparent 55%);
+    radial-gradient(ellipse 900px 500px at 15% -10%, rgba(var(--accent-rgb), 0.14), transparent 60%),
+    radial-gradient(ellipse 700px 500px at 100% 10%, rgba(var(--live-rgb), 0.08), transparent 55%);
   background-attachment: fixed;
   min-height: 100vh;
   padding-bottom: 110px; /* espacio para el reproductor fijo */
 }
 
-::selection { background: var(--accent); color: #0c0a12; }
+::selection { background: var(--accent); color: var(--on-bright); }
 
 a { color: inherit; text-decoration: none; }
 
@@ -52,7 +40,7 @@ button {
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: var(--bg); }
-::-webkit-scrollbar-thumb { background: var(--line); border-radius: 6px; }
+::-webkit-scrollbar-thumb { background: var(--line); border-radius: var(--r-sm); }
 ::-webkit-scrollbar-thumb:hover { background: var(--accent-dim); }
 
 :focus-visible {
@@ -74,7 +62,7 @@ button {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-family: 'Anton', sans-serif;
+  font-family: var(--font-display);
   font-size: 20px;
   letter-spacing: 0.5px;
   text-transform: uppercase;
@@ -83,7 +71,7 @@ button {
 .brand-mark .dot {
   width: 9px;
   height: 9px;
-  border-radius: 50%;
+  border-radius: var(--r-round);
   background: var(--accent);
   box-shadow: 0 0 12px var(--accent-glow);
 }
@@ -96,7 +84,7 @@ button {
 }
 
 .currency-picker-label {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-faint);
   text-transform: uppercase;
@@ -112,11 +100,11 @@ button {
   background: var(--bg-card);
   border: 1px solid var(--line);
   color: var(--text);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 600;
   padding: 7px 10px;
-  border-radius: 7px;
+  border-radius: var(--r-sm);
   cursor: pointer;
   appearance: none;
   -webkit-appearance: none;
@@ -142,9 +130,9 @@ button {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: linear-gradient(90deg, rgba(255, 61, 127, 0.15), rgba(61, 255, 224, 0.08));
+  background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.15), rgba(var(--live-rgb), 0.08));
   border: 1px solid var(--accent-dim);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   padding: 12px 18px;
   font-size: 13px;
   color: var(--text);
@@ -152,7 +140,7 @@ button {
 }
 
 .promo-banner-icon {
-  color: var(--accent);
+  color: var(--accent-ink);
   flex-shrink: 0;
 }
 
@@ -164,7 +152,7 @@ button {
   margin-top: 14px;
   font-size: 13px;
   color: var(--text-faint);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
 }
 
 .hero {
@@ -186,15 +174,15 @@ button {
 .hero-avatar {
   width: 168px;
   height: 168px;
-  border-radius: 14px;
+  border-radius: var(--r-lg);
   object-fit: cover;
   background: var(--bg-card);
   border: 1px solid var(--line);
-  box-shadow: 0 20px 60px -20px rgba(255, 61, 127, 0.25);
+  box-shadow: 0 20px 60px -20px rgba(var(--accent-rgb), 0.25);
 }
 
 .hero-eyebrow {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   letter-spacing: 2px;
   text-transform: uppercase;
@@ -208,7 +196,7 @@ button {
 .hero-eyebrow .pulse {
   width: 7px;
   height: 7px;
-  border-radius: 50%;
+  border-radius: var(--r-round);
   background: var(--live);
   box-shadow: 0 0 8px var(--live);
   animation: pulse 1.8s ease-in-out infinite;
@@ -220,7 +208,7 @@ button {
 }
 
 .hero-title {
-  font-family: 'Anton', sans-serif;
+  font-family: var(--font-display);
   font-size: clamp(40px, 7vw, 72px);
   line-height: 0.95;
   letter-spacing: 0.5px;
@@ -249,7 +237,7 @@ button {
   justify-content: center;
   width: 38px;
   height: 38px;
-  border-radius: 50%;
+  border-radius: var(--r-round);
   background: var(--bg-card);
   border: 1px solid var(--line);
   color: var(--text-dim);
@@ -258,7 +246,7 @@ button {
 
 .hero-social a:hover {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-ink);
   transform: translateY(-2px);
   background: var(--bg-card-hover);
 }
@@ -280,7 +268,7 @@ button {
 }
 
 .section-tab {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   letter-spacing: 0.5px;
   text-transform: uppercase;
@@ -311,7 +299,7 @@ button {
   gap: 10px;
   background: var(--bg-card);
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   padding: 11px 16px;
   transition: border-color 0.15s;
 }
@@ -330,7 +318,7 @@ button {
   background: none;
   border: none;
   color: var(--text);
-  font-family: 'Inter', sans-serif;
+  font-family: var(--font-body);
   font-size: 16px;
 }
 
@@ -349,14 +337,14 @@ button {
 }
 
 .section-title {
-  font-family: 'Anton', sans-serif;
+  font-family: var(--font-display);
   font-size: 22px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
 .section-count {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-faint);
 }
@@ -386,7 +374,7 @@ button {
 }
 
 .payment-methods-title {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 1px;
   text-transform: uppercase;
@@ -403,14 +391,14 @@ button {
 }
 
 .payment-method-chip {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 600;
   text-align: center;
   color: var(--live);
-  background: rgba(61, 255, 224, 0.07);
-  border: 1px solid rgba(61, 255, 224, 0.2);
-  border-radius: 7px;
+  background: rgba(var(--live-rgb), 0.07);
+  border: 1px solid rgba(var(--live-rgb), 0.2);
+  border-radius: var(--r-sm);
   padding: 8px 4px;
 }
 
@@ -463,10 +451,10 @@ button {
 .track-cover-wrap {
   position: relative;
   aspect-ratio: 1;
-  border-radius: 7px;
+  border-radius: var(--r-sm);
   overflow: hidden;
   margin-bottom: 12px;
-  background: linear-gradient(135deg, #241f31, #17131f);
+  background: linear-gradient(135deg, var(--bg-card-hover), var(--bg-elevated));
 }
 
 .track-cover-wrap img {
@@ -485,86 +473,42 @@ button {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: 'Anton', sans-serif;
+  font-family: var(--font-display);
   font-size: 34px;
   color: var(--text-faint);
 }
 
 /* Etiqueta de género: arriba a la derecha de la portada, estilo "sticker" original */
-.track-genre-badge {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  background: rgba(12, 10, 18, 0.78);
-  backdrop-filter: blur(6px);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  color: var(--text);
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.6px;
-  text-transform: uppercase;
-  padding: 4px 8px;
-  border-radius: 20px;
-  z-index: 2;
-  max-width: calc(100% - 16px);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
-.track-producer-badge {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  background: rgba(12, 10, 18, 0.72);
-  backdrop-filter: blur(6px);
-  border: 1px solid rgba(61, 255, 224, 0.28);
-  color: var(--live);
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.3px;
-  padding: 3px 8px;
-  border-radius: 20px;
-  z-index: 2;
-  max-width: calc(100% - 16px);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
-.track-producer-badge.below-genre {
-  top: 34px;
-}
 
 .track-exclusive-badge {
   position: absolute;
   top: 8px;
   left: 8px;
-  background: linear-gradient(90deg, var(--accent), #ff8a3d);
-  color: #0c0a12;
-  font-family: 'JetBrains Mono', monospace;
+  background: linear-gradient(90deg, var(--accent), var(--orange));
+  color: var(--on-bright);
+  font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.6px;
   text-transform: uppercase;
   padding: 5px 10px;
-  border-radius: 20px;
+  border-radius: var(--r-xl);
   z-index: 3;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25), 0 4px 14px -2px rgba(255, 61, 127, 0.65);
+  box-shadow: 0 0 0 1px rgba(var(--white-rgb), 0.25), 0 4px 14px -2px rgba(var(--accent-rgb), 0.65);
   animation: exclusiveGlow 2.2s ease-in-out infinite;
 }
 
 @keyframes exclusiveGlow {
-  0%, 100% { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25), 0 4px 14px -2px rgba(255, 61, 127, 0.65); }
-  50% { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.4), 0 4px 22px 2px rgba(255, 61, 127, 0.9); }
+  0%, 100% { box-shadow: 0 0 0 1px rgba(var(--white-rgb), 0.25), 0 4px 14px -2px rgba(var(--accent-rgb), 0.65); }
+  50% { box-shadow: 0 0 0 1px rgba(var(--white-rgb), 0.4), 0 4px 22px 2px rgba(var(--accent-rgb), 0.9); }
 }
 
 .play-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(12, 10, 18, 0.55);
+  background: rgba(var(--bg-rgb), 0.55);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -578,7 +522,7 @@ button {
 .play-btn-circle {
   width: 46px;
   height: 46px;
-  border-radius: 50%;
+  border-radius: var(--r-round);
   background: var(--accent);
   display: flex;
   align-items: center;
@@ -586,7 +530,7 @@ button {
   box-shadow: 0 8px 24px -6px var(--accent-glow);
 }
 
-.play-btn-circle svg { width: 18px; height: 18px; fill: #0c0a12; }
+.play-btn-circle svg { width: 18px; height: 18px; fill: var(--bg); }
 
 /* Fila inferior: título a la izquierda (grande), precio + carrito a la derecha */
 .track-info-row {
@@ -614,7 +558,7 @@ button {
   display: flex;
   align-items: center;
   gap: 4px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   font-weight: 700;
   color: var(--live);
@@ -658,14 +602,14 @@ button {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 600;
   color: var(--text-faint);
   transition: color 0.15s, transform 0.1s;
 }
 
-.track-like-btn:hover { color: var(--accent); }
+.track-like-btn:hover { color: var(--accent-ink); }
 .track-like-btn:active { transform: scale(0.92); }
 
 .track-like-btn svg {
@@ -678,7 +622,7 @@ button {
 }
 
 .track-like-btn.liked {
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .track-like-btn.liked svg {
@@ -690,7 +634,7 @@ button {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-faint);
 }
@@ -731,7 +675,7 @@ button {
 }
 
 .empty-state h3 {
-  font-family: 'Anton', sans-serif;
+  font-family: var(--font-display);
   font-size: 24px;
   color: var(--text-dim);
   text-transform: uppercase;
@@ -781,7 +725,7 @@ button {
 .player-cover {
   width: 44px;
   height: 44px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   object-fit: cover;
   background: var(--bg-card);
   flex-shrink: 0;
@@ -798,7 +742,7 @@ button {
 .player-btn-play {
   width: 38px;
   height: 38px;
-  border-radius: 50%;
+  border-radius: var(--r-round);
   background: var(--accent);
   display: flex;
   align-items: center;
@@ -806,7 +750,7 @@ button {
   flex-shrink: 0;
 }
 
-.player-btn-play svg { width: 15px; height: 15px; fill: #0c0a12; }
+.player-btn-play svg { width: 15px; height: 15px; fill: var(--bg); }
 
 .player-progress-wrap {
   display: flex;
@@ -816,7 +760,7 @@ button {
 }
 
 .player-time {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-faint);
   min-width: 34px;
@@ -827,7 +771,7 @@ button {
   flex: 1;
   height: 4px;
   background: var(--line);
-  border-radius: 2px;
+  border-radius: var(--r-xs);
   position: relative;
   cursor: pointer;
 }
@@ -835,7 +779,7 @@ button {
 .player-progress-fill {
   height: 100%;
   background: var(--accent);
-  border-radius: 2px;
+  border-radius: var(--r-xs);
   width: 0%;
   position: relative;
 }
@@ -848,7 +792,7 @@ button {
   transform: translateY(-50%);
   width: 11px;
   height: 11px;
-  border-radius: 50%;
+  border-radius: var(--r-round);
   background: var(--text);
   opacity: 0;
   transition: opacity 0.15s;
@@ -860,7 +804,7 @@ button {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-faint);
   flex-shrink: 0;
@@ -872,20 +816,20 @@ button {
   align-items: center;
   gap: 6px;
   background: var(--accent);
-  color: #0c0a12;
+  color: var(--on-bright);
   font-weight: 700;
   font-size: 12px;
   padding: 9px 16px;
-  border-radius: 20px;
+  border-radius: var(--r-xl);
   flex-shrink: 1;
   min-width: 0;
   max-width: 200px;
   transition: background 0.15s, transform 0.15s;
 }
-.player-buy-btn:hover { background: #ff5c92; transform: translateY(-1px); }
-.player-buy-btn .cart-icon { width: 14px; height: 14px; fill: #0c0a12; flex-shrink: 0; }
+.player-buy-btn:hover { background: var(--accent-hi); transform: translateY(-1px); }
+.player-buy-btn .cart-icon { width: 14px; height: 14px; fill: var(--bg); flex-shrink: 0; }
 .player-buy-btn #player-buy-price {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   opacity: 0.9;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -897,7 +841,7 @@ button {
 .player-download-btn {
   width: 38px;
   height: 38px;
-  border-radius: 50%;
+  border-radius: var(--r-round);
   background: var(--bg-card);
   border: 1px solid var(--line);
   display: flex;
@@ -990,7 +934,7 @@ button {
   /* ---- Modal de compra: menos padding y números de cuenta que nunca desbordan ---- */
   .modal-box {
     padding: 24px 18px;
-    border-radius: 12px;
+    border-radius: var(--r-lg);
   }
   .modal-track-title { font-size: 20px; }
   .modal-price { font-size: 18px; }
@@ -1016,7 +960,7 @@ button {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(6, 5, 10, 0.75);
+  background: rgba(var(--shade-rgb), 0.75);
   backdrop-filter: blur(4px);
   display: none;
   align-items: center;
@@ -1029,14 +973,14 @@ button {
 .modal-box {
   background: var(--bg-card);
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: var(--r-lg);
   padding: 32px 28px;
   width: 100%;
   max-width: 400px;
   max-height: 90vh;
   overflow-y: auto;
   position: relative;
-  box-shadow: 0 30px 80px -20px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 30px 80px -20px rgba(var(--black-rgb), 0.6);
 }
 
 .modal-close {
@@ -1045,7 +989,7 @@ button {
   right: 14px;
   width: 30px;
   height: 30px;
-  border-radius: 50%;
+  border-radius: var(--r-round);
   background: var(--bg-elevated);
   color: var(--text-dim);
   font-size: 18px;
@@ -1057,15 +1001,15 @@ button {
 .modal-close:hover { color: var(--text); background: var(--line); }
 
 .modal-eyebrow {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 1.5px;
-  color: var(--accent);
+  color: var(--accent-ink);
   margin-bottom: 10px;
 }
 
 .modal-track-title {
-  font-family: 'Anton', sans-serif;
+  font-family: var(--font-display);
   font-size: 24px;
   text-transform: uppercase;
   margin: 0 0 6px;
@@ -1073,7 +1017,7 @@ button {
 }
 
 .modal-price {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 20px;
   color: var(--live);
   margin-bottom: 18px;
@@ -1092,7 +1036,7 @@ button {
   text-align: left;
   background: var(--bg-elevated);
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   padding: 13px 16px;
   cursor: pointer;
   opacity: 0;
@@ -1116,8 +1060,8 @@ button {
 
 .license-option.selected {
   border-color: var(--live);
-  background: rgba(61, 255, 224, 0.06);
-  box-shadow: 0 0 0 1px rgba(61, 255, 224, 0.3);
+  background: rgba(var(--live-rgb), 0.06);
+  box-shadow: 0 0 0 1px rgba(var(--live-rgb), 0.3);
 }
 
 .license-option-top {
@@ -1134,7 +1078,7 @@ button {
 }
 
 .license-option-price {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   color: var(--live);
   font-weight: 700;
@@ -1168,7 +1112,7 @@ button {
   text-underline-offset: 2px;
   margin: 0 0 18px;
 }
-.modal-terms-link:hover { color: var(--accent); }
+.modal-terms-link:hover { color: var(--accent-ink); }
 
 .modal-terms-check {
   display: flex;
@@ -1192,7 +1136,7 @@ button {
   font-weight: 600;
   font-size: inherit;
 }
-.modal-terms-check button:hover { color: var(--accent); }
+.modal-terms-check button:hover { color: var(--accent-ink); }
 
 .modal-box-terms {
   max-width: 620px;
@@ -1200,7 +1144,7 @@ button {
 }
 
 .terms-title {
-  font-family: 'Inter', sans-serif;
+  font-family: var(--font-body);
   font-size: 19px;
   font-weight: 800;
   color: var(--text);
@@ -1221,11 +1165,11 @@ button {
 }
 
 .terms-body h4 {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   letter-spacing: 0.5px;
   text-transform: uppercase;
-  color: var(--accent);
+  color: var(--accent-ink);
   margin: 22px 0 8px;
 }
 .terms-body h4:first-child { margin-top: 0; }
@@ -1245,14 +1189,14 @@ button {
   display: block;
   width: 100%;
   background: var(--accent);
-  color: #0c0a12;
+  color: var(--on-bright);
   font-weight: 700;
   font-size: 14px;
   padding: 13px;
-  border-radius: 9px;
+  border-radius: var(--r-md);
   transition: background 0.15s;
 }
-.btn-primary-wide:hover { background: #ff5c92; }
+.btn-primary-wide:hover { background: var(--accent-hi); }
 
 .modal-accounts {
   display: flex;
@@ -1266,9 +1210,9 @@ button {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  background: rgba(61, 255, 224, 0.07);
-  border: 1px solid rgba(61, 255, 224, 0.25);
-  border-radius: 8px;
+  background: rgba(var(--live-rgb), 0.07);
+  border: 1px solid rgba(var(--live-rgb), 0.25);
+  border-radius: var(--r-md);
   padding: 10px 14px;
   margin-bottom: 22px;
   font-size: 13px;
@@ -1280,7 +1224,7 @@ button {
 
 .modal-confirm-phone-number {
   color: var(--live);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-weight: 700;
 }
 
@@ -1291,14 +1235,14 @@ button {
   gap: 12px;
   background: var(--bg-elevated);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   padding: 10px 14px;
 }
 
 .modal-account-bank {
   font-size: 12px;
   color: var(--text-faint);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -1306,7 +1250,7 @@ button {
 .modal-account-number {
   font-size: 15px;
   font-weight: 600;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   letter-spacing: 0.5px;
 }
 
@@ -1315,21 +1259,21 @@ button {
   color: var(--text);
   font-size: 11px;
   padding: 5px 10px;
-  border-radius: 5px;
+  border-radius: var(--r-sm);
   flex-shrink: 0;
 }
 .modal-account-copy:hover { background: var(--accent-dim); }
-.modal-account-copy.copied { background: var(--live); color: #0c0a12; }
+.modal-account-copy.copied { background: var(--live); color: var(--on-bright); }
 
 .modal-whatsapp-btn {
   display: block;
   text-align: center;
   background: var(--live);
-  color: #0c0a12;
+  color: var(--on-bright);
   font-weight: 700;
   font-size: 14px;
   padding: 13px;
-  border-radius: 9px;
+  border-radius: var(--r-md);
   transition: filter 0.15s, background 0.15s, opacity 0.15s;
 }
 .modal-whatsapp-btn:hover { filter: brightness(1.08); }
@@ -1355,7 +1299,7 @@ button {
 
 .modal-receipt-label {
   display: block;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.5px;
   text-transform: uppercase;
@@ -1370,7 +1314,7 @@ button {
   flex-direction: column;
   gap: 8px;
   border: 1.5px dashed var(--line);
-  border-radius: 9px;
+  border-radius: var(--r-md);
   padding: 18px;
   cursor: pointer;
   text-align: center;
@@ -1383,7 +1327,7 @@ button {
 .modal-receipt-drop.has-receipt {
   border-color: var(--live);
   border-style: solid;
-  background: rgba(61, 255, 224, 0.06);
+  background: rgba(var(--live-rgb), 0.06);
   color: var(--live);
   padding: 10px;
 }
@@ -1391,7 +1335,7 @@ button {
 .modal-receipt-drop img {
   max-width: 100%;
   max-height: 140px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   object-fit: contain;
 }
 
@@ -1400,7 +1344,7 @@ button {
 }
 .modal-field label {
   display: block;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.5px;
   text-transform: uppercase;
@@ -1412,10 +1356,10 @@ button {
   background: var(--bg-elevated);
   border: 1px solid var(--line);
   color: var(--text);
-  border-radius: 7px;
+  border-radius: var(--r-sm);
   padding: 11px 12px;
   font-size: 16px;
-  font-family: 'Inter', sans-serif;
+  font-family: var(--font-body);
 }
 .modal-field input:focus {
   outline: none;
@@ -1425,7 +1369,7 @@ button {
 button.modal-whatsapp-btn {
   width: 100%;
   border: none;
-  font-family: 'Inter', sans-serif;
+  font-family: var(--font-body);
   cursor: pointer;
 }
 button.modal-whatsapp-btn:disabled,
@@ -1442,8 +1386,8 @@ button.modal-whatsapp-btn.disabled {
 .modal-success-icon {
   width: 52px;
   height: 52px;
-  border-radius: 50%;
-  background: rgba(61, 255, 224, 0.12);
+  border-radius: var(--r-round);
+  background: rgba(var(--live-rgb), 0.12);
   color: var(--live);
   border: 1px solid var(--live);
   font-size: 24px;
@@ -1453,7 +1397,7 @@ button.modal-whatsapp-btn.disabled {
   margin: 0 auto 16px;
 }
 .modal-success-title {
-  font-family: 'Anton', sans-serif;
+  font-family: var(--font-display);
   font-size: 20px;
   text-transform: uppercase;
   margin-bottom: 8px;
@@ -1473,7 +1417,7 @@ button.modal-whatsapp-btn.disabled {
   border-top: 1px solid var(--line);
   color: var(--text-faint);
   font-size: 12px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   text-align: center;
 }
 
@@ -1522,31 +1466,31 @@ button.modal-whatsapp-btn.disabled {
 }
 .producer-card:hover { border-color: var(--accent-dim); transform: translateY(-3px); }
 .producer-avatar, .producer-avatar-fallback {
-  width: 76px; height: 76px; border-radius: 50%; object-fit: cover;
+  width: 76px; height: 76px; border-radius: var(--r-round); object-fit: cover;
   margin: 0 auto 12px; display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, #241f31, #17131f);
-  font-family: 'Anton', sans-serif; font-size: 26px; color: var(--text-faint);
+  background: linear-gradient(135deg, var(--bg-card-hover), var(--bg-elevated));
+  font-family: var(--font-display); font-size: 26px; color: var(--text-faint);
 }
 .producer-card-name { font-weight: 700; font-size: 14.5px; margin-bottom: 4px; }
 .producer-card-bio { font-size: 11.5px; color: var(--text-faint); min-height: 14px; margin-bottom: 6px; }
-.producer-card-count { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--live); }
+.producer-card-count { font-family: var(--font-mono); font-size: 11px; color: var(--live); }
 .fav-btn {
   position: absolute; top: 8px; right: 8px; width: 30px; height: 30px;
-  border-radius: 50%; background: rgba(12,10,18,0.7); border: 1px solid rgba(255,255,255,0.15);
+  border-radius: var(--r-round); background: rgba(var(--bg-rgb), 0.7); border: 1px solid rgba(var(--white-rgb), 0.15);
   display: flex; align-items: center; justify-content: center;
 }
 .fav-btn svg { width: 15px; height: 15px; fill: none; stroke: var(--text-faint); stroke-width: 2; }
 .fav-btn.active svg { fill: var(--accent); stroke: var(--accent); }
 
 .producer-detail-head { display: flex; gap: 18px; align-items: center; margin-bottom: 28px; flex-wrap: wrap; }
-.producer-avatar-lg { width: 84px; height: 84px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+.producer-avatar-lg { width: 84px; height: 84px; border-radius: var(--r-round); object-fit: cover; flex-shrink: 0; }
 .producer-avatar-lg.producer-avatar-fallback { font-size: 30px; }
-.producer-detail-head h2 { font-family: 'Anton', sans-serif; font-size: 24px; text-transform: uppercase; margin: 0 0 4px; }
+.producer-detail-head h2 { font-family: var(--font-display); font-size: 24px; text-transform: uppercase; margin: 0 0 4px; }
 .producer-detail-head p { color: var(--text-dim); font-size: 13px; margin: 0 0 8px; }
 .back-to-producers {
   color: var(--text-faint); font-size: 13px; margin-bottom: 20px; display: inline-block;
 }
-.back-to-producers:hover { color: var(--accent); }
+.back-to-producers:hover { color: var(--accent-ink); }
 
 .price-strike {
   text-decoration: line-through;
@@ -1562,41 +1506,41 @@ button.modal-whatsapp-btn.disabled {
 .top-bar-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .my-purchases-btn {
   display: inline-flex; align-items: center; gap: 8px;
-  background: transparent; color: var(--live); border: 1px solid rgba(61, 255, 224, 0.45);
-  border-radius: 999px; padding: 7px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
+  background: transparent; color: var(--live); border: 1px solid rgba(var(--live-rgb), 0.45);
+  border-radius: var(--r-pill); padding: 7px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
   transition: background 0.15s;
 }
-.my-purchases-btn:hover { background: rgba(61, 255, 224, 0.08); }
+.my-purchases-btn:hover { background: rgba(var(--live-rgb), 0.08); }
 .my-purchases-badge:empty { display: none; }
 .my-purchases-badge {
-  background: var(--accent); color: #0c0a12; border-radius: 999px; font-size: 11px; font-weight: 700;
+  background: var(--accent); color: var(--on-bright); border-radius: var(--r-pill); font-size: 11px; font-weight: 700;
   min-width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; padding: 0 5px;
 }
 .modal-box-purchases { max-width: 460px; }
 .purchases-hint { font-size: 13px; color: var(--text-dim); margin: 0 0 16px; line-height: 1.5; }
 .purchase-card {
-  border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-bottom: 10px;
+  border: 1px solid var(--line); border-radius: var(--r-md); padding: 14px; margin-bottom: 10px;
   background: var(--bg-elevated); display: flex; flex-direction: column; gap: 8px;
 }
-.purchase-card.is-approved { border-color: rgba(61, 255, 224, 0.4); }
+.purchase-card.is-approved { border-color: rgba(var(--live-rgb), 0.4); }
 .purchase-title { font-weight: 700; font-size: 15px; overflow-wrap: anywhere; }
 .purchase-meta { font-size: 12px; color: var(--text-dim); }
 .purchase-status { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
-.purchase-status.pending { color: #ffc13d; }
+.purchase-status.pending { color: var(--warn); }
 .purchase-status.approved { color: var(--live); }
-.purchase-status.missing { color: #ff5d5d; }
+.purchase-status.missing { color: var(--danger); }
 .purchase-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .purchase-actions a {
   flex: 1 1 140px; text-align: center; text-decoration: none; font-size: 13px; font-weight: 700;
-  padding: 10px 12px; border-radius: 8px;
+  padding: 10px 12px; border-radius: var(--r-md);
 }
-.purchase-dl { background: var(--live); color: #0c0a12; }
+.purchase-dl { background: var(--live); color: var(--on-bright); }
 .purchase-pdf { border: 1px solid var(--line); color: var(--text); }
 .purchase-forget { background: none; border: none; color: var(--text-faint); font-size: 11px; cursor: pointer; align-self: flex-start; padding: 0; text-decoration: underline; }
 .modal-success-note { margin-top: 14px; }
 .btn-outline-wide {
   display: block; width: 100%; margin-top: 10px; background: transparent; color: var(--live);
-  border: 1px solid rgba(61, 255, 224, 0.45); border-radius: 9px; padding: 12px; font-weight: 700; font-size: 14px; cursor: pointer;
+  border: 1px solid rgba(var(--live-rgb), 0.45); border-radius: var(--r-md); padding: 12px; font-weight: 700; font-size: 14px; cursor: pointer;
 }
 @media (max-width: 640px) {
   .top-bar-right { width: 100%; justify-content: space-between; }
@@ -1606,8 +1550,8 @@ button.modal-whatsapp-btn.disabled {
 button.payment-method-chip { cursor: pointer; width: 100%; transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.15s; }
 .payment-methods-list button.payment-method-chip { width: auto; }
 @media (min-width: 641px) { .payment-methods-list button.payment-method-chip { width: 100%; } }
-button.payment-method-chip:hover { border-color: rgba(61, 255, 224, 0.55); transform: translateY(-1px); }
-button.payment-method-chip.active { background: var(--live); color: #0c0a12; border-color: var(--live); }
+button.payment-method-chip:hover { border-color: rgba(var(--live-rgb), 0.55); transform: translateY(-1px); }
+button.payment-method-chip.active { background: var(--live); color: var(--on-bright); border-color: var(--live); }
 
 /* ---- Reproductor: Descripción y Compartir ---- */
 .player-text { min-width: 0; flex: 1; }
@@ -1622,7 +1566,7 @@ button.payment-method-chip.active { background: var(--live); color: #0c0a12; bor
 
 .modal-box-desc { max-width: 440px; }
 .desc-head { display: flex; gap: 14px; align-items: center; margin-bottom: 14px; }
-.desc-cover { width: 84px; height: 84px; border-radius: 10px; object-fit: cover; flex-shrink: 0; background: var(--bg-elevated); }
+.desc-cover { width: 84px; height: 84px; border-radius: var(--r-md); object-fit: cover; flex-shrink: 0; background: var(--bg-elevated); }
 .desc-head-text { min-width: 0; }
 .desc-title { font-size: 20px; margin: 2px 0 4px; overflow-wrap: anywhere; line-height: 1.2; padding-right: 26px; }
 .desc-meta { font-size: 12.5px; color: var(--text-dim); overflow-wrap: anywhere; }
@@ -1637,14 +1581,85 @@ textarea { resize: vertical; max-height: 240px; }
 
 /* ---------- auditoría: VIP, compras y validaciones ---------- */
 .track-vip-owner {
-  padding-top: 6px; font-size: 11.5px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace;
+  padding-top: 6px; font-size: 11.5px; color: var(--text-dim); font-family: var(--font-mono);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left;
 }
-.track-exclusive-badge ~ .track-genre-badge { top: 40px; }
-.track-exclusive-badge ~ .track-producer-badge { top: 40px; }
-.track-exclusive-badge ~ .track-producer-badge.below-genre { top: 66px; }
-.purchase-card.is-rejected { border-color: rgba(255, 93, 93, 0.4); }
+.purchase-card.is-rejected { border-color: rgba(var(--danger-rgb), 0.4); }
 .purchase-status + .purchase-meta { line-height: 1.45; }
-.modal-field-error { display: block; min-height: 0; font-size: 12px; color: #ff5d5d; margin-top: 5px; }
+.modal-field-error { display: block; min-height: 0; font-size: 12px; color: var(--danger); margin-top: 5px; }
 .modal-field-error:empty { display: none; }
 #vip-public-wrap strong { color: var(--text); }
+
+/* ===== Hots: carrusel de beats destacados ===== */
+.hots { max-width: 1180px; margin: -12px auto 20px; padding: 0 32px; }
+.hots[hidden] { display: none; }
+.hots-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); margin-bottom: var(--s-3); }
+.hots-title {
+  font-family: var(--font-display); font-weight: 400; font-size: 22px; letter-spacing: .02em; margin: 0;
+  color: var(--text); text-transform: uppercase;
+}
+.hots-pause {
+  width: 36px; height: 36px; border-radius: var(--r-round); display: grid; place-items: center; padding: 0;
+  background: var(--bg-elevated); border: 1px solid var(--line); color: var(--text-dim); cursor: pointer;
+}
+.hots-pause svg { width: 16px; height: 16px; fill: currentColor; }
+.hots-pause .i-play { display: none; }
+.hots-pause.is-paused .i-pause { display: none; }
+.hots-pause.is-paused .i-play { display: block; }
+.hots-pause:hover { color: var(--text); border-color: var(--accent-dim); }
+.hots-viewport {
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  margin: 0 -32px; padding: 4px 32px 8px;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, rgba(var(--black-rgb), 1) 24px, rgba(var(--black-rgb), 1) calc(100% - 24px), transparent 100%);
+          mask-image: linear-gradient(90deg, transparent 0, rgba(var(--black-rgb), 1) 24px, rgba(var(--black-rgb), 1) calc(100% - 24px), transparent 100%);
+}
+.hots-viewport::-webkit-scrollbar { display: none; }
+.hots-track { display: flex; gap: var(--s-3); width: max-content; }
+.hots-track:not(.is-loop) { margin: 0 auto; }
+.hots-track .skel-wrap { display: flex; flex-direction: row; gap: var(--s-3); }
+.hot-skel { width: 150px; height: 222px; border-radius: var(--r-lg); flex-shrink: 0; }
+.hot-card {
+  width: 150px; flex-shrink: 0; cursor: pointer; user-select: none;
+  background: var(--bg-card); border: 1px solid rgba(var(--warn-rgb), 0.35); border-radius: var(--r-lg);
+  overflow: hidden; transition: transform var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.hot-card:hover, .hot-card:focus-visible { transform: translateY(-3px); border-color: var(--warn); }
+.hot-cover { position: relative; aspect-ratio: 1 / 1; background: var(--bg-elevated); }
+.hot-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.hot-cover-fallback { width: 100%; height: 100%; display: grid; place-items: center; font-size: 42px; color: var(--text-faint); }
+.hot-badge {
+  position: absolute; top: 8px; left: 8px; padding: 3px 8px; border-radius: var(--r-pill);
+  background: var(--warn); color: var(--on-bright); font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: .04em;
+}
+.hot-play {
+  position: absolute; right: 8px; bottom: 8px; width: 34px; height: 34px; border-radius: var(--r-round);
+  background: rgba(var(--bg-rgb), 0.78); display: grid; place-items: center;
+}
+.hot-play svg { width: 16px; height: 16px; fill: var(--live); }
+.hot-info { padding: 10px 10px 12px; min-width: 0; }
+.hot-name { font-weight: 700; font-size: var(--fs-md); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hot-by { font-size: var(--fs-sm); color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.hot-price { font-family: var(--font-mono); font-size: var(--fs-sm); font-weight: 700; color: var(--live); margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 640px) {
+  .hots { padding: 0 20px; margin-top: -24px; }
+  .hots-viewport { margin: 0 -20px; padding: 4px 20px 8px; }
+  .hots-head { justify-content: center; position: relative; }
+  .hots-pause { position: absolute; right: 0; }
+}
+
+/* Créditos de cada tema: artistas (Playlist), género y productor */
+.track-artists {
+  padding-top: 6px; font-size: var(--fs-sm); font-weight: 600; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left;
+}
+.track-credits {
+  display: flex; align-items: baseline; gap: 6px; padding-top: 4px; min-width: 0;
+  font-size: 11.5px; font-family: var(--font-mono); color: var(--text-dim); text-align: left;
+}
+.track-credits .track-genre { color: var(--live); flex-shrink: 0; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.track-credits .dot { color: var(--text-faint); }
+.track-credits .track-prod { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.player-track-credits {
+  font-size: 11px; color: var(--text-dim); font-family: var(--font-mono);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px;
+}
