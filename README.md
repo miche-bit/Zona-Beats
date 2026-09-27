@@ -6,41 +6,6 @@ Tienda de beats con tres partes:
 - **Portal de productores** (`/productores`): registro, planes Free / Pro / Studio, subida de beats, edición, estadísticas, referidos, bonos y retiros de dinero.
 - **Panel de administración** (`/admin`): pedidos, productores, planes, retiros, tu propia música, tasas de cambio, cuentas de cobro, marca de agua y copias de seguridad.
 
-Sin dependencias npm: solo **Node.js 22+** (usa `node:sqlite`) y **ffmpeg** (previews, marca de agua, MP3 de 320 kbps y miniaturas).
-
-## Estructura
-
-```
-server.js          Servidor HTTP: API, streaming, descargas y archivos estáticos
-db.js              Base de datos SQLite y migraciones (se aplican solas al arrancar)
-backup.js          Backups ZIP por partes (ZIP64) y restauración segura
-watermark.js       ffmpeg: marca de agua, MP3, duración y miniaturas
-license.js         PDF de la licencia
-producerAuth.js    Contraseñas y sesiones de productores
-streamAuth.js      Tokens temporales para escuchar
-public/            Tienda (index.html, app.js, style.css), verify.html, subidas.js, favicon.svg
-productores/       Portal de productores
-admin/             Panel de administración
-uploads/           audio (previews) · covers · receipts · watermark · masters (audio original, WAV, STEMS) · tmp
-db/                app.db
-```
-
-## Correrlo en tu computadora
-
-1. Node.js 22 o más nuevo (`node --version`) y ffmpeg instalado.
-2. `cp .env.example .env` y pon tu contraseña en `ADMIN_PASSWORD`.
-3. `node server.js` (o `npm start`).
-4. Tienda: `http://localhost:3000` · Portal: `/productores` · Panel: `/admin`.
-
-## Desplegar en Railway
-
-1. Sube el proyecto a GitHub (el `.gitignore` ya excluye `.env`, la base de datos y los archivos subidos) y crea el servicio desde ese repo. Railway usa el `Dockerfile` (instala ffmpeg); si no lo toma solo, en *Settings → Builder* elige **Dockerfile**.
-2. **Volume (obligatorio):** pestaña *Volumes → New Volume*, por ejemplo en `/data`. Railway crea sola la variable `RAILWAY_VOLUME_MOUNT_PATH` y la app guarda ahí la base de datos y todos los archivos. Sin Volume, cada deploy borra todo.
-3. **Variables:**
-   - `ADMIN_PASSWORD` — **obligatoria**. Si falta o es la de ejemplo, el panel queda bloqueado (cualquiera la conocería). Usa 10 caracteres o más.
-   - `ADMIN_SESSION_SECRET` — opcional. Si no la pones, la app genera una y la guarda en la base de datos.
-4. **Restart policy:** al restaurar un backup el servidor se reinicia solo (sale con código 1 para que Railway lo levante de nuevo). Deja la política en «On Failure» o «Always».
-5. Espacio: los WAV y STEMS pesan. El panel muestra el espacio usado en *Ventas → Resumen*; agranda el Volume cuando haga falta.
 
 ## Subidas por partes
 
