@@ -1002,17 +1002,31 @@
     const r = st.referidos;
     const pct = Math.min(100, Math.round(((r.aprobados % r.cadaCuantos) / r.cadaCuantos) * 100));
     const progreso =
-      '<div class="ref-stats">' +
-        '<div><strong>' + r.aprobados + '</strong><span>aprobados</span></div>' +
+      '<div class="ref-stats four">' +
+        '<div><strong>' + r.aprobados + '</strong><span>cuentan para el bono</span></div>' +
+        '<div><strong>' + (r.enCamino || 0) + '</strong><span>aprobados, les falta vender o subir beats</span></div>' +
         '<div><strong>' + r.pendientes + '</strong><span>esperando aprobación</span></div>' +
         '<div><strong>' + formatCup(r.ganadoCup) + '</strong><span>ganado en bonos</span></div>' +
       '</div>' +
       '<div class="bar"><div class="bar-fill" style="width:' + pct + '%"></div></div>' +
-      '<p class="panel-hint compact">Cada ' + r.cadaCuantos + ' referidos aprobados ganas ' + formatCup(r.bonoCup) + '. Te faltan ' + r.faltanParaBono + '.</p>';
+      '<p class="panel-hint compact">Cada ' + r.cadaCuantos + ' referidos que cuenten ganas ' + formatCup(r.bonoCup) + ' (se cobra en CUP). Un referido cuenta cuando el administrador lo aprueba' +
+        (r.minVentasCup > 0 || r.minBeats > 0 ? ', gana ' + formatCup(r.minVentasCup) + ' vendiendo sus beats y tiene ' + r.minBeats + ' beats aprobados' : '') + '. Para el próximo bono te faltan ' + r.faltanParaBono + '.</p>' +
+      (!r.habilitado && (r.minVentasCup > 0 || r.minBeats > 0) ? (() => {
+        const falVentas = Math.max(0, r.minVentasCup - r.ventasCup), falBeats = Math.max(0, r.minBeats - r.beatsSubidos);
+        const req = (ok, txt) => '<li class="' + (ok ? 'ok' : '') + '"><span aria-hidden="true">' + (ok ? '✓' : '○') + '</span> ' + txt + '</li>';
+        return '<div class="ref-lock"><strong>Para empezar a cobrar tus referidos (en CUP) te falta:</strong><ul class="ref-reqs">' +
+          (r.minVentasCup > 0 ? req(!falVentas, 'Ganar ' + formatCup(r.minVentasCup) + ' vendiendo tus beats — llevas ' + formatCup(r.ventasCup) + (falVentas ? ' (faltan ' + formatCup(falVentas) + ')' : '')) : '') +
+          (r.minBeats > 0 ? req(!falBeats, 'Tener ' + r.minBeats + ' beats aprobados en el catálogo — tienes ' + r.beatsSubidos + (falBeats ? ' (faltan ' + falBeats + ')' : '')) : '') +
+          '</ul>' + (r.enEsperaCup > 0 ? '<p class="panel-hint compact" style="margin:0">Tienes <strong>' + formatCup(r.enEsperaCup) + '</strong> en bonos guardados: se suman a tu saldo en CUP cuando cumplas.</p>' : '') + '</div>';
+      })() : '');
     $('ref-progress').innerHTML = progreso;
-    $('ref-hint').textContent = 'Comparte tu enlace. Cada ' + r.cadaCuantos + ' productores que el administrador apruebe, ganas ' + formatCup(r.bonoCup) + ' (se suma a tu saldo).';
+    $('ref-hint').textContent = 'Comparte tu enlace. Cada ' + r.cadaCuantos + ' productores que se registren con él y cumplan los mínimos, ganas ' + formatCup(r.bonoCup) + ' (se suma a tu saldo en CUP' +
+      (r.minVentasCup > 0 || r.minBeats > 0 ? ' cuando hayas ganado ' + formatCup(r.minVentasCup) + ' vendiendo tus beats y tengas ' + r.minBeats + ' beats aprobados' : '') + ').';
     $('stats-referidos').innerHTML = progreso + (r.lista.length
-      ? '<div class="mini-list">' + r.lista.map(x => '<div class="mini-row"><span>' + escapeHtml(x.name) + '</span><em class="' + (x.approved ? 'ok' : '') + '">' + (x.approved ? 'aprobado' : 'pendiente') + '</em></div>').join('') + '</div>'
+      ? '<div class="mini-list">' + r.lista.map(x => {
+        const est = !x.approved ? 'esperando aprobación' : x.cuenta ? 'cuenta ✓' : 'le falta ' + [x.faltaVentas ? 'vender' : '', x.faltaBeats ? 'subir beats' : ''].filter(Boolean).join(' y ');
+        return '<div class="mini-row"><span>' + escapeHtml(x.name) + '</span><em class="' + (x.cuenta ? 'ok' : '') + '">' + est + '</em></div>';
+      }).join('') + '</div>'
       : '<div class="empty-hint">Todavía nadie se registró con tu enlace.</div>');
 
     const bonoPanel = $('stats-bono-panel');

@@ -286,11 +286,17 @@ addPlat('likes_per_bonus', 'INTEGER DEFAULT 1000');
 addPlat('likes_bonus_cup', 'REAL DEFAULT 2000');
 addPlat('referrals_per_bonus', 'INTEGER DEFAULT 10');
 addPlat('referral_bonus_cup', 'REAL DEFAULT 200');
+// Lo mínimo que un productor tiene que ganar vendiendo sus beats para cobrar sus bonos por referidos
+addPlat('referral_min_sales_cup', 'REAL DEFAULT 500');
+// y haber subido al menos estos beats (aprobados, sin contar la Playlist)
+addPlat('referral_min_beats', 'INTEGER DEFAULT 3');
 
 // ---- Hots: beats destacados en la portada (los productores pagan por semana) ----
 addPlat('hot_price_usd', 'REAL DEFAULT 2');
 // Tasa del USD solo para calcular planes y Hots en CUP (no es forma de pago en la tienda)
 addPlat('plan_usd_rate', 'REAL DEFAULT 0');
+// Desde cuándo cuentan «Este mes» y «Desde el inicio» en el Resumen (el admin puede reiniciarlo)
+addPlat('stats_desde', "TEXT DEFAULT ''");
 addPlat('hot_slots', 'INTEGER DEFAULT 8');
 db.exec(`CREATE TABLE IF NOT EXISTS hot_requests (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

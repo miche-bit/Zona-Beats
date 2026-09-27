@@ -675,9 +675,10 @@
     const tarjeta = (titulo, grande, sub, clase) => '<div class="summary-card ' + (clase || '') + '"><span>' + titulo + '</span><strong>' + grande + '</strong><em>' + sub + '</em></div>';
     document.getElementById('admin-summary').innerHTML =
       tarjeta('Este mes', cup(d.mes.total), d.mes.ventas + ' venta' + (d.mes.ventas === 1 ? '' : 's') + ' · para ti ' + cup(d.mes.tuyo), 'highlight') +
-      tarjeta('Desde el inicio', cup(d.siempre.total), d.siempre.ventas + ' ventas · para ti ' + cup(d.siempre.tuyo)) +
+      tarjeta(d.contadorDesde ? 'Desde el ' + fechaHora(d.contadorDesde) : 'Desde el inicio', cup(d.siempre.total), d.siempre.ventas + ' venta' + (d.siempre.ventas === 1 ? '' : 's') + ' · para ti ' + cup(d.siempre.tuyo)) +
       tarjeta('Debes a productores', cup(d.deudaProductores), 'ventas y bonos sin pagar', d.deudaProductores > 0 ? 'warn' : '') +
       tarjeta('Espacio usado', gb(d.discoBytes || 0), 'audios, portadas y base de datos');
+    document.getElementById('reset-deshacer').hidden = !d.contadorDesde;
     const p = d.pendientes;
     const chips = [
       ['ventas', p.pedidos, 'comprobante', 'comprobantes'],
@@ -693,6 +694,29 @@
     cont.querySelectorAll('.pending-chip').forEach(b => b.addEventListener('click', () => abrirCategoria(b.dataset.cat)));
   }
   document.getElementById('summary-refresh').addEventListener('click', () => { loadSummary(true); loadOrders(); showToast('Actualizado.'); });
+
+  // ---------- Reiniciar ventas ----------
+  async function reiniciarContador(deshacer) {
+    const r = await fetch('/api/admin/ventas/reiniciar-contador', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deshacer: Boolean(deshacer) }) });
+    if (r.ok) { showToast(deshacer ? 'El Resumen vuelve a contar todas las ventas.' : 'Contador reiniciado: desde ahora cuenta de cero.'); loadSummary(true); }
+    else showToast('No se pudo cambiar el contador.', true);
+  }
+  document.getElementById('reset-contador').addEventListener('click', () => {
+    if (confirm('¿Reiniciar el contador? «Este mes» y «Desde el inicio» quedan en 0 y cuentan desde ahora. No se borra ninguna venta.')) reiniciarContador(false);
+  });
+  document.getElementById('reset-deshacer').addEventListener('click', () => reiniciarContador(true));
+  document.getElementById('reset-borrar').addEventListener('click', async (ev) => {
+    const txt = prompt('Esto BORRA todas las ventas e ingresos (licencias, bonos, retiros y pagos a productores) y no se puede deshacer desde el panel.\n\nSi fueron de prueba, escribe BORRAR para confirmar:');
+    if (txt === null) return;
+    if (txt.trim().toUpperCase() !== 'BORRAR') { showToast('No se borró nada: hay que escribir BORRAR.', true); return; }
+    ev.target.disabled = true;
+    const r = await fetch('/api/admin/ventas/borrar-todo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmar: 'BORRAR' }) });
+    const d = await r.json().catch(() => ({}));
+    ev.target.disabled = false;
+    if (!r.ok) { showToast(d.error || 'No se pudo borrar.', true); return; }
+    showToast('Listo: se borraron ' + d.ventas + ' ventas y ' + d.retiros + ' retiros. Todo quedó en 0.');
+    loadSummary(true); loadOrders(); loadHistory(); loadProducers(); loadPayouts(); loadTracks();
+  });
 
   async function loadOrders() {
     const res = await fetch('/api/admin/orders');
@@ -1282,7 +1306,7 @@
           '<div class="stats">Plan <strong>' + plan.label + '</strong> · ' + plan.com + '% comisión · ' + plan.beats +
             (p.plan_paid_until ? ' · paga hasta ' + escapeHtml(p.plan_paid_until) : '') +
             (vencido ? ' <span class="tag-vencido">VENCIDO</span>' : '') + '</div>' +
-          '<div class="stats">' + p.trackCount + ' beats · ' + Number(p.totalSalesCup || 0).toLocaleString('es') + ' CUP vendidos · ' + Number(p.pendingPayoutCup || 0).toLocaleString('es', { maximumFractionDigits: 2 }) + ' CUP pendientes de pagarle · ' + (p.referidos || 0) + ' referidos aprobados' +
+          '<div class="stats">' + p.trackCount + ' beats · ' + Number(p.totalSalesCup || 0).toLocaleString('es') + ' CUP vendidos · ' + Number(p.pendingPayoutCup || 0).toLocaleString('es', { maximumFractionDigits: 2 }) + ' CUP pendientes de pagarle · ' + (p.referidos || 0) + ' referidos que cuentan' +
             (p.pendingOrders ? ' · <strong>' + p.pendingOrders + ' compra(s) por aprobar</strong>' : '') + '</div>' +
           '<div class="plan-edit">' +
             '<select class="plan-select" aria-label="Plan de ' + escapeHtml(p.name) + '">' +
@@ -1547,6 +1571,8 @@
     document.getElementById('likes-per-bonus').value = d.likesPerBonus;
     document.getElementById('likes-bonus-cup').value = d.likesBonusCup;
     document.getElementById('referrals-per-bonus').value = d.referralsPerBonus;
+    document.getElementById('referral-min-sales').value = d.referralMinSalesCup != null ? d.referralMinSalesCup : 500;
+    document.getElementById('referral-min-beats').value = d.referralMinBeats != null ? d.referralMinBeats : 3;
     document.getElementById('referral-bonus-cup').value = d.referralBonusCup;
     payoutRatesCfg = d.payoutRates || {};
     pintarCupPlanes();
@@ -1569,6 +1595,8 @@
         likesPerBonus: document.getElementById('likes-per-bonus').value,
         likesBonusCup: document.getElementById('likes-bonus-cup').value,
         referralsPerBonus: document.getElementById('referrals-per-bonus').value,
+        referralMinSalesCup: document.getElementById('referral-min-sales').value.trim() || '0',
+        referralMinBeats: document.getElementById('referral-min-beats').value.trim() || '0',
         referralBonusCup: document.getElementById('referral-bonus-cup').value,
         payoutRates,
       }),

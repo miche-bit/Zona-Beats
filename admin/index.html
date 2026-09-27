@@ -228,6 +228,22 @@
         </div>
         <div class="summary-grid" id="admin-summary"><div class="skel-wrap skel-filas-chicas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row sm"></div><div class="skel skel-row sm"></div></div></div>
         <div class="summary-pending" id="admin-pending"></div>
+        <details class="reset-ventas">
+          <summary>Reiniciar ventas</summary>
+          <div class="reset-opcion">
+            <strong>Reiniciar el contador</strong>
+            <p class="panel-hint compact">«Este mes» y «Desde el inicio» empiezan a contar desde ahora. No se borra nada: las ventas siguen en el historial.</p>
+            <div class="reset-acciones">
+              <button type="button" class="btn-secondary" id="reset-contador">Reiniciar contador</button>
+              <button type="button" class="btn-link" id="reset-deshacer" hidden>Volver a contar todo</button>
+            </div>
+          </div>
+          <div class="reset-opcion peligro">
+            <strong>Borrar todas las ventas (de prueba)</strong>
+            <p class="panel-hint compact">Se borran <strong>todas</strong> las ventas e ingresos: comprobantes, licencias, bonos, retiros y pagos a productores. Todos los saldos quedan en 0. Los beats vendidos en exclusiva o ilimitada vuelven al catálogo. Productores, beats y planes no se tocan. Antes se guarda una copia de la base de datos en el servidor. <a href="/api/admin/backup?tipo=datos" download>Descarga también un Backup de datos</a>.</p>
+            <button type="button" class="btn-delete" id="reset-borrar">Borrar todas las ventas…</button>
+          </div>
+        </details>
       </div>
 
       <div class="panel" data-cat="ventas">
@@ -319,6 +335,16 @@
             <div class="field">
               <label for="referral-bonus-cup">Bono por referidos (CUP)</label>
               <input type="text" id="referral-bonus-cup" inputmode="decimal" placeholder="200">
+            </div>
+            <div class="field">
+              <label for="referral-min-sales">Ventas mínimas para cobrar referidos (CUP)</label>
+              <input type="text" id="referral-min-sales" inputmode="decimal" placeholder="500">
+              <span class="field-hint">Lo que el productor ya ganó vendiendo sus beats (sin la comisión).</span>
+            </div>
+            <div class="field">
+              <label for="referral-min-beats">Beats mínimos subidos para cobrar referidos</label>
+              <input type="text" id="referral-min-beats" inputmode="numeric" placeholder="3">
+              <span class="field-hint">Beats aprobados en el catálogo (la Playlist no cuenta). Los bonos por referidos se pagan en CUP cuando cumple las dos cosas; antes se le van guardando.</span>
             </div>
           </div>
 

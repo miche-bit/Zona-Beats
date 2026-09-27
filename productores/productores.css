@@ -917,3 +917,15 @@ label {
 .week-opt { font-size: 12px; line-height: 1.3; }
 .mov-hot .mov-icon { color: var(--warn); }
 @media (max-width: 420px) { .weeks-row { grid-template-columns: 1fr; } }
+
+/* Referidos: aviso de las ventas mínimas para cobrar */
+.ref-lock { margin-top: var(--s-3); padding: var(--s-3); border-radius: var(--r-md); border: 1px solid rgba(var(--warn-rgb), 0.45); background: rgba(var(--warn-rgb), 0.07); font-size: var(--fs-sm); color: var(--text-dim); line-height: 1.45; }
+.ref-lock strong { color: var(--text); }
+.ref-lock .bar { margin: var(--s-2) 0 0; }
+
+/* Requisitos para cobrar referidos */
+.ref-reqs { list-style: none; margin: var(--s-2) 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: var(--fs-sm); }
+.ref-reqs li { display: flex; gap: 8px; align-items: baseline; color: var(--text-dim); }
+.ref-reqs li span { color: var(--warn); font-weight: 700; flex-shrink: 0; }
+.ref-reqs li.ok { color: var(--text); }
+.ref-reqs li.ok span { color: var(--ok); }

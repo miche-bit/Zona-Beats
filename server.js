@@ -2973,6 +2973,8 @@ route('GET', '/api/admin/platform-config', (req, res) => {
     usdRate: tu.rate, usdRateCode: tu.code,
     likesPerBonus: bonos.likesPorBono, likesBonusCup: bonos.bonoLikesCup,
     referralsPerBonus: bonos.referidosPorBono, referralBonusCup: bonos.bonoReferidosCup,
+    referralMinSalesCup: bonos.referidosMinVentasCup,
+    referralMinBeats: bonos.referidosMinBeats,
     payoutRates: bonos.tasasRetiro,
   });
 });
@@ -2987,6 +2989,15 @@ route('POST', '/api/admin/platform-config', async (req, res) => {
     if (!(pro > 0) || !(studio > 0)) return sendJSON(res, 400, { error: 'Pon el precio mensual en USD de los planes Pro y Studio' });
     const lpb = parseInt(d.likesPerBonus, 10), lbc = num(d.likesBonusCup), rpb = parseInt(d.referralsPerBonus, 10), rbc = num(d.referralBonusCup);
     if (!(lpb >= 1) || !(rpb >= 1) || !(lbc >= 0) || !(rbc >= 0)) return sendJSON(res, 400, { error: 'Revisa los números de los bonos' });
+    if (d.referralMinBeats !== undefined) {
+      const minBeats = parseInt(d.referralMinBeats, 10);
+      if (!(minBeats >= 0 && minBeats <= 100)) return sendJSON(res, 400, { error: 'Los beats mínimos para cobrar referidos van de 0 a 100' });
+      db.prepare('UPDATE platform_config SET referral_min_beats = ? WHERE id = 1').run(minBeats);
+    }
+    if (d.referralMinSalesCup !== undefined) {
+      const minimo = parsePrecio(d.referralMinSalesCup, 0);
+      db.prepare('UPDATE platform_config SET referral_min_sales_cup = ? WHERE id = 1').run(Math.max(0, minimo));
+    }
     const tasas = {};
     if (d.payoutRates && typeof d.payoutRates === 'object') {
       for (const [code, v] of Object.entries(d.payoutRates)) {
@@ -3009,7 +3020,7 @@ route('POST', '/api/admin/platform-config', async (req, res) => {
 function redondear(n) { return Math.round((Number(n) || 0) * 100) / 100; }
 
 function configBonos() {
-  const c = db.prepare('SELECT likes_per_bonus, likes_bonus_cup, referrals_per_bonus, referral_bonus_cup, payout_rates_json FROM platform_config WHERE id = 1').get();
+  const c = db.prepare('SELECT likes_per_bonus, likes_bonus_cup, referrals_per_bonus, referral_bonus_cup, referral_min_sales_cup, referral_min_beats, payout_rates_json FROM platform_config WHERE id = 1').get();
   let tasas = {};
   try { tasas = JSON.parse(c.payout_rates_json || '{}'); } catch { tasas = {}; }
   return {
@@ -3017,6 +3028,8 @@ function configBonos() {
     bonoLikesCup: Math.max(0, Number(c.likes_bonus_cup) || 0),
     referidosPorBono: Math.max(1, Number(c.referrals_per_bonus) || 10),
     bonoReferidosCup: Math.max(0, Number(c.referral_bonus_cup) || 0),
+    referidosMinVentasCup: Math.max(0, Number(c.referral_min_sales_cup) || 0),
+    referidosMinBeats: Math.max(0, parseInt(c.referral_min_beats, 10) || 0),
     tasasRetiro: tasas,
   };
 }
@@ -3036,11 +3049,34 @@ function codigoReferido(full) {
   return code;
 }
 
-function referidosAprobados(producerId) {
-  return db.prepare('SELECT COUNT(*) as c FROM producers WHERE referred_by = ? AND approved = 1').get(producerId).c;
+// Un referido cuenta para el bono cuando su cuenta está aprobada y él también cumple los mínimos
+// (lo ganado vendiendo sus beats y los beats aprobados), igual que se le pide a quien lo invitó.
+function estadoReferido(ref, cfg) {
+  if (!ref.approved) return { cuenta: false, faltaVentas: false, faltaBeats: false };
+  const faltaVentas = gananciaVentasCup(ref.id) + 1e-9 < cfg.referidosMinVentasCup;
+  const faltaBeats = beatsSubidos(ref.id) < cfg.referidosMinBeats;
+  return { cuenta: !faltaVentas && !faltaBeats, faltaVentas, faltaBeats };
+}
+function referidosAprobados(producerId, cfg) {
+  const c = cfg || configBonos();
+  return db.prepare('SELECT id, approved FROM producers WHERE referred_by = ? AND approved = 1').all(producerId)
+    .filter(r => estadoReferido(r, c).cuenta).length;
 }
 
 // Convierte likes (Studio, pistas de Playlist) y referidos en créditos a favor del productor. Idempotente.
+// Lo que el productor ganó vendiendo sus beats (ventas aprobadas, en CUP, ya sin la comisión)
+// Beats que el productor tiene subidos y aprobados (a la venta o ya vendidos; la Playlist no cuenta)
+function beatsSubidos(producerId) {
+  return db.prepare("SELECT COUNT(*) as c FROM tracks WHERE producer_id = ? AND is_playlist = 0 AND approval_status = 'approved'").get(producerId).c;
+}
+// ¿Ya puede cobrar sus referidos? Tiene que haber ganado el mínimo vendiendo y tener el mínimo de beats subidos.
+function cobraReferidos(producerId, cfg) {
+  return gananciaVentasCup(producerId) + 1e-9 >= cfg.referidosMinVentasCup && beatsSubidos(producerId) >= cfg.referidosMinBeats;
+}
+function gananciaVentasCup(producerId) {
+  return db.prepare("SELECT COALESCE(SUM(producer_earning_cup), 0) as t FROM orders WHERE producer_id = ? AND status = 'approved'").get(producerId).t;
+}
+
 function acreditarBonos(producerId) {
   const full = producerFull(producerId);
   if (!full) return;
@@ -3058,8 +3094,10 @@ function acreditarBonos(producerId) {
       }
     }
   }
-  if (cfg.bonoReferidosCup > 0) {
-    const total = referidosAprobados(producerId);
+  // Los bonos por referidos se pagan en CUP y solo cuando el productor ya ganó el mínimo vendiendo sus beats
+  // y subió el mínimo de beats. Mientras tanto se van acumulando y se acreditan todos juntos al cumplirlo.
+  if (cfg.bonoReferidosCup > 0 && cobraReferidos(producerId, cfg)) {
+    const total = referidosAprobados(producerId, cfg);
     const unidades = Math.floor(total / cfg.referidosPorBono);
     const nuevas = unidades - (full.referral_units_credited || 0);
     if (nuevas > 0) {
@@ -3555,20 +3593,32 @@ route('GET', '/api/producer/stats', (req, res) => {
   const full = producerFull(producer.id);
   const plan = planEfectivo(full);
   const cfg = configBonos();
-  const referidos = db.prepare('SELECT name, approved, created_at FROM producers WHERE referred_by = ? ORDER BY id DESC').all(full.id);
-  const aprobados = referidos.filter(r => r.approved).length;
+  const referidos = db.prepare('SELECT id, name, approved, created_at FROM producers WHERE referred_by = ? ORDER BY id DESC').all(full.id)
+    .map(r => ({ ...r, ...estadoReferido(r, cfg) }));
+  // «aprobados» = los que ya cuentan para el bono
+  const aprobados = referidos.filter(r => r.cuenta).length;
+  const enCamino = referidos.filter(r => r.approved && !r.cuenta).length;
   const bonosRef = db.prepare("SELECT COALESCE(SUM(amount_cup),0) as t FROM producer_credits WHERE producer_id = ? AND kind = 'referidos'").get(full.id).t;
   const out = {
     referidos: {
       code: codigoReferido(full),
       total: referidos.length,
       aprobados,
-      pendientes: referidos.length - aprobados,
+      enCamino,
+      pendientes: referidos.filter(r => !r.approved).length,
       cadaCuantos: cfg.referidosPorBono,
       bonoCup: cfg.bonoReferidosCup,
       faltanParaBono: cfg.referidosPorBono - (aprobados % cfg.referidosPorBono),
       ganadoCup: bonosRef,
-      lista: referidos.map(r => ({ name: r.name, approved: Boolean(r.approved), createdAt: r.created_at })),
+      minVentasCup: cfg.referidosMinVentasCup,
+      ventasCup: redondear(gananciaVentasCup(full.id)),
+      minBeats: cfg.referidosMinBeats,
+      beatsSubidos: beatsSubidos(full.id),
+      habilitado: cobraReferidos(full.id, cfg),
+      // bonos ya ganados por referidos que esperan a que llegue al mínimo en ventas
+      enEsperaCup: Math.max(0, Math.floor(aprobados / cfg.referidosPorBono) - (full.referral_units_credited || 0)) * cfg.bonoReferidosCup,
+      // de cada invitado solo se dice qué le falta, no cuánto vendió
+      lista: referidos.map(r => ({ name: r.name, approved: Boolean(r.approved), cuenta: r.cuenta, faltaVentas: r.faltaVentas, faltaBeats: r.faltaBeats, createdAt: r.created_at })),
     },
     statsPermitidas: plan.stats,
   };
@@ -3799,13 +3849,15 @@ route('GET', '/api/admin/summary', (req, res, params, query) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   if (query.get('fresco') === '1') cacheDisco.at = 0;
   // 'YYYY-MM-01' compara bien tanto con fechas '2026-09-01 10:00:00' como '2026-09-01T10:00:00Z'
-  const desde = new Date().toISOString().slice(0, 8) + '01';
-  const mes = db.prepare(`SELECT COUNT(*) as ventas, COALESCE(SUM(price_cup_at_sale),0) as total,
+  // Los contadores empiezan el día 1 del mes, o desde que el admin los reinició (lo que sea más nuevo)
+  const reinicio = (db.prepare('SELECT stats_desde FROM platform_config WHERE id = 1').get() || {}).stats_desde || '';
+  const inicioMes = new Date().toISOString().slice(0, 8) + '01 00:00:00';
+  const desdeMes = reinicio && reinicio > inicioMes ? reinicio : inicioMes;
+  const sumar = (desde) => db.prepare(`SELECT COUNT(*) as ventas, COALESCE(SUM(price_cup_at_sale),0) as total,
       COALESCE(SUM(CASE WHEN producer_id IS NULL THEN price_cup_at_sale ELSE price_cup_at_sale - producer_earning_cup END),0) as tuyo
-      FROM orders WHERE status = 'approved' AND COALESCE(NULLIF(approved_at, ''), created_at) >= ?`).get(desde);
-  const siempre = db.prepare(`SELECT COUNT(*) as ventas, COALESCE(SUM(price_cup_at_sale),0) as total,
-      COALESCE(SUM(CASE WHEN producer_id IS NULL THEN price_cup_at_sale ELSE price_cup_at_sale - producer_earning_cup END),0) as tuyo
-      FROM orders WHERE status = 'approved'`).get();
+      FROM orders WHERE status = 'approved' AND datetime(COALESCE(NULLIF(approved_at, ''), created_at)) >= datetime(?)`).get(desde);
+  const mes = sumar(desdeMes);
+  const siempre = sumar(reinicio || '0000-01-01 00:00:00');
   const deuda = db.prepare('SELECT id FROM producers').all().reduce((s, p) => s + deudaConProductor(p.id), 0);
   if (Date.now() - cacheDisco.at > 10 * 60 * 1000) {
     cacheDisco = { at: Date.now(), bytes: tamanoCarpeta(path.join(DATA_ROOT, 'uploads')) + (() => { try { return fs.statSync(path.join(DATA_ROOT, 'db', 'app.db')).size; } catch { return 0; } })() };
@@ -3814,6 +3866,7 @@ route('GET', '/api/admin/summary', (req, res, params, query) => {
     mes: { ventas: mes.ventas, total: redondear(mes.total), tuyo: redondear(mes.tuyo) },
     siempre: { ventas: siempre.ventas, total: redondear(siempre.total), tuyo: redondear(siempre.tuyo) },
     deudaProductores: redondear(deuda),
+    contadorDesde: reinicio ? normalizarFecha(reinicio) : '',
     pendientes: {
       pedidos: db.prepare("SELECT COUNT(*) as c FROM orders WHERE status = 'pending'").get().c,
       beats: db.prepare("SELECT COUNT(*) as c FROM tracks WHERE approval_status = 'pending'").get().c,
@@ -3823,6 +3876,55 @@ route('GET', '/api/admin/summary', (req, res, params, query) => {
     },
     discoBytes: cacheDisco.bytes,
   });
+});
+
+// Reiniciar el contador del Resumen: «Este mes» y «Desde el inicio» cuentan desde ahora.
+// No borra nada. «deshacer» vuelve a contar todo.
+route('POST', '/api/admin/ventas/reiniciar-contador', async (req, res) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  let d = {};
+  try { const b = await readBody(req, 512); if (b.length) d = JSON.parse(b.toString('utf8')); } catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
+  const valor = d.deshacer ? '' : sqlFecha(new Date());
+  db.prepare('UPDATE platform_config SET stats_desde = ? WHERE id = 1').run(valor);
+  sendJSON(res, 200, { ok: true, contadorDesde: valor ? normalizarFecha(valor) : '' });
+});
+
+// Borrar TODAS las ventas (pedido del admin: fueron de prueba). Pide escribir BORRAR y antes guarda
+// una copia completa de la base de datos en el Volume para poder volver atrás.
+// Se van: comprobantes y licencias, retiros y pagos a productores, bonos y lo que se pagó con ese saldo.
+// Los beats vendidos en exclusiva/ilimitada vuelven al catálogo. Productores, beats y planes quedan.
+route('POST', '/api/admin/ventas/borrar-todo', async (req, res) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  let d = {};
+  try { d = JSON.parse((await readBody(req, 512)).toString('utf8') || '{}'); } catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
+  if (String(d.confirmar || '').trim().toUpperCase() !== 'BORRAR') return sendJSON(res, 400, { error: 'Escribe BORRAR para confirmar.' });
+  const copia = path.join(DATA_ROOT, 'db', `respaldo-antes-de-borrar-ventas-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.db`);
+  try { db.exec(`VACUUM INTO '${copia.replace(/'/g, "''")}'`); }
+  catch (e) { return sendJSON(res, 500, { error: 'No se pudo hacer la copia de seguridad; no se borró nada.' }); }
+  const ordenes = db.prepare('SELECT track_id, license_type, status, receipt_filename FROM orders').all();
+  const vendidas = [...new Set(ordenes.filter(o => o.status === 'approved' && SINGLE_SALE_LICENSES.includes(o.license_type)).map(o => o.track_id))];
+  const cuenta = {};
+  db.exec('BEGIN');
+  try {
+    cuenta.ventas = db.prepare('DELETE FROM orders').run().changes;
+    const volver = db.prepare('UPDATE tracks SET sold = 0 WHERE id = ?');
+    cuenta.beatsDevueltos = vendidas.reduce((n, id) => n + volver.run(id).changes, 0);
+    cuenta.retiros = db.prepare('DELETE FROM producer_withdrawals').run().changes;
+    cuenta.pagosViejos = db.prepare('DELETE FROM producer_payouts').run().changes;
+    // todos los ingresos de prueba: bonos y lo que se pagó con ese saldo (los planes y Hots siguen activos).
+    // Las marcas de bonos ya dados se quedan, así no se vuelven a acreditar los mismos me gusta o referidos.
+    cuenta.bonosYCargos = db.prepare('DELETE FROM producer_credits').run().changes;
+    db.prepare("DELETE FROM historial_oculto WHERE clave LIKE 'orden:%' OR clave LIKE 'retiro:%' OR clave LIKE 'pago:%' OR clave LIKE 'venta:%' OR clave LIKE 'credito:%'").run();
+    db.prepare("UPDATE platform_config SET stats_desde = '' WHERE id = 1").run();
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    return sendJSON(res, 500, { error: 'No se pudo borrar; todo quedó como estaba.' });
+  }
+  for (const o of ordenes) {
+    if (o.receipt_filename) fs.promises.unlink(path.join(UPLOADS_RECEIPTS, path.basename(o.receipt_filename))).catch(() => {});
+  }
+  sendJSON(res, 200, { ok: true, ...cuenta, copia: path.basename(copia) });
 });
 
 route('GET', '/api/admin/orders', (req, res) => {
