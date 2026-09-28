@@ -582,10 +582,11 @@
     }
   }
 
+  // Escapa también las comillas: el texto puede ir dentro de un atributo (alt, aria-label, href, title)
   function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str || '';
-    return div.innerHTML;
+    return String(str == null ? '' : str)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   async function loadProfile() {
@@ -1053,7 +1054,7 @@
     CUP: 'CUP',
     MLC: 'MLC',
     USD: 'USD',
-    BNB_BEP20: 'BNB (BEP20)',
+    USDT_BEP20: 'USDT (BEP20)',
     USDT_TRC20: 'USDT (TRC20)',
     USDT_POLYGON: 'USDT (Polygon)',
     SALDO_MOVIL: 'Saldo Móvil',

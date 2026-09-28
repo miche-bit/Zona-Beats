@@ -1671,3 +1671,21 @@ textarea { resize: vertical; max-height: 240px; }
   .section-tabs::-webkit-scrollbar { display: none; }
   .section-tab { margin-right: 10px; letter-spacing: 0.2px; font-size: 11.5px; }
 }
+
+/* Enlace al Panel de Productores (arriba, junto a la marca) */
+.join-producers {
+  margin-left: auto; margin-right: var(--s-3);
+  display: inline-flex; align-items: center; gap: 4px; min-height: 34px;
+  padding: 6px 8px 6px 14px; border-radius: var(--r-pill);
+  border: 1px solid rgba(var(--live-rgb), 0.45); background: rgba(var(--live-rgb), 0.08);
+  color: var(--text); text-decoration: none; font-size: var(--fs-sm); white-space: nowrap;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.join-producers strong { color: var(--live); font-weight: 700; }
+.join-producers svg { width: 16px; height: 16px; fill: var(--live); }
+.join-producers:hover { background: rgba(var(--live-rgb), 0.16); border-color: var(--live); }
+@media (max-width: 640px) {
+  .join-producers { margin-right: 0; font-size: 12px; padding-left: 12px; }
+  .top-bar-right { width: 100%; }
+}
+@media (max-width: 340px) { .join-producers .join-q { display: none; } }

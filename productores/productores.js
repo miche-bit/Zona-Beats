@@ -35,10 +35,11 @@
     toastTimer = setTimeout(() => { toast.className = 'toast'; }, isError ? 5000 : 3200);
   }
 
+  // Escapa también las comillas: el texto puede ir dentro de un atributo (alt, aria-label, href, title)
   function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str == null ? '' : String(str);
-    return div.innerHTML;
+    return String(str == null ? '' : str)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
   const fmt = (n, d = 0) => Number(n || 0).toLocaleString('es', { minimumFractionDigits: d, maximumFractionDigits: d });
   const formatCup = (n) => fmt(n, 0) + ' CUP';
@@ -130,9 +131,11 @@
   });
 
   // ---------- Registro ----------
-  const refParam = new URLSearchParams(location.search).get('ref');
-  if (refParam) {
-    $('reg-ref').value = refParam.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
+  const params = new URLSearchParams(location.search);
+  const refParam = params.get('ref');
+  if (refParam) $('reg-ref').value = refParam.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
+  // ?ref=CODIGO (enlace de un productor) o ?unirse (botón «Únete» de la tienda) abren directo «Crear cuenta»
+  if (refParam || params.has('unirse')) {
     $('login-mode').style.display = 'none';
     $('register-mode').style.display = 'block';
   }

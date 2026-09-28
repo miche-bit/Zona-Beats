@@ -41,8 +41,18 @@ const LICENSE_TERMS = {
   ],
 };
 
+// El PDF usa fuentes Latin-1: primero se pasan a Latin-1 los signos comunes y lo demás (emojis, otros
+// alfabetos) queda como «?». Si no, un carácter fuera de Latin-1 podía convertirse en «(» o «)» y
+// romper el PDF o permitir meter texto falso en la licencia.
+function aLatin1(str) {
+  return String(str)
+    .replace(/[\u2018\u2019\u201A\u2032]/g, "'").replace(/[\u201C\u201D\u201E\u2033]/g, '"')
+    .replace(/[\u2013\u2014\u2212]/g, '-').replace(/\u2026/g, '...').replace(/\u20AC/g, 'EUR')
+    .replace(/[\u0000-\u001F\u007F]/g, ' ')
+    .replace(/[^\u0000-\u00FF]/gu, '?');
+}
 function escapePdfText(str) {
-  return String(str).replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+  return aLatin1(str).replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
 }
 
 function toWinAnsi(str) {

@@ -73,10 +73,11 @@
     return `${m}:${s}`;
   }
 
+  // Escapa también las comillas: el texto puede ir dentro de un atributo (alt, aria-label, href, title)
   function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str || '';
-    return div.innerHTML;
+    return String(str == null ? '' : str)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   async function loadProfile() {
@@ -826,6 +827,7 @@
         const r = await fetch('/api/tracks?type=playlist');
         const d = await r.json();
         tracksBySection.playlist = d.tracks;
+        seccionesCargadas.add('playlist'); // si no, la pestaña Playlist se quedaba cargando para siempre
         track = d.tracks.find(t => t.id === id);
         seccion = 'playlist';
       } catch { /* sin conexión */ }

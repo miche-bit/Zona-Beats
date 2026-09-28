@@ -502,7 +502,7 @@ if (!ratesExist) {
     { code: 'CUP', label: 'CUP', cupPerUnit: 1 },
     { code: 'MLC', label: 'MLC', cupPerUnit: 0 },
     { code: 'USD', label: 'USD', cupPerUnit: 0 },
-    { code: 'BNB_BEP20', label: 'BNB (BEP20)', cupPerUnit: 0 },
+    { code: 'USDT_BEP20', label: 'USDT (BEP20)', cupPerUnit: 0 },
     { code: 'USDT_TRC20', label: 'USDT (TRC20)', cupPerUnit: 0 },
     { code: 'USDT_POLYGON', label: 'USDT (Polygon)', cupPerUnit: 0 },
     { code: 'SALDO_MOVIL', label: 'Saldo Móvil', cupPerUnit: 0 },

@@ -1226,9 +1226,13 @@ function beatParaHot(trackId, producerId) {
   return { track: t };
 }
 // Revisa si se puede pedir Hot para ese beat ahora (cupos, pedido repetido)
-function puedePedirHot(trackId) {
+function puedePedirHot(trackId, producerId) {
   if (db.prepare("SELECT 1 FROM hot_requests WHERE track_id = ? AND status = 'pending'").get(trackId)) {
     return 'Ese beat ya tiene un pedido de Hot en revisión.';
+  }
+  // un solo pedido por transferencia en revisión por productor (los pedidos apartan cupo)
+  if (producerId != null && db.prepare("SELECT 1 FROM hot_requests WHERE producer_id = ? AND status = 'pending'").get(producerId)) {
+    return 'Ya tienes un pedido de Hot en revisión. Espera a que el administrador lo apruebe o lo rechace.';
   }
   const c = cuposHot();
   // si el beat ya está en Hots, extender no ocupa otro cupo
@@ -1363,7 +1367,7 @@ route('POST', '/api/producer/hots', async (req, res) => {
   if (!receiptPart || !receiptPart.data.length) return sendJSON(res, 400, { error: 'Adjunta la foto del comprobante de pago' });
   const ext = safeExt(receiptPart.filename, '.jpg');
   if (!ALLOWED_IMAGE_EXT.includes(ext)) return sendJSON(res, 400, { error: 'El comprobante debe ser una imagen (JPG, PNG o WEBP)' });
-  const bloqueo = puedePedirHot(track.id);
+  const bloqueo = puedePedirHot(track.id, producer.id);
   if (bloqueo) return sendJSON(res, 409, { error: bloqueo });
   const currency = limpiarTexto(fields.currency || 'CUP', 30) || 'CUP';
   const filename = `hot-${crypto.randomUUID()}${ext}`;
@@ -1624,7 +1628,7 @@ route('POST', '/api/orders', async (req, res) => {
   const buyerName = (fields.buyerName || '').trim().slice(0, 100);
   const buyerPhone = (fields.buyerPhone || '').trim().slice(0, 40);
   const currency = (fields.currency || 'CUP').trim().slice(0, 20);
-  const displayedPrice = (fields.displayedPrice || '').trim().slice(0, 60);
+  // (el precio que muestra el navegador ya no se usa: la etiqueta de la licencia la arma el servidor)
   const licenseType = LICENSE_TYPES.includes(fields.licenseType) ? fields.licenseType : null;
 
   if (!trackId || !buyerName || !buyerPhone || !receiptPart || !licenseType) {
@@ -1693,7 +1697,7 @@ route('POST', '/api/orders', async (req, res) => {
                          wallet_currency, paid_units, rate_at_sale, producer_earning_units)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
-    track.id, track.title, displayedPrice || `${priceCupAtSale} CUP`, currency, buyerName, buyerPhone, receiptFilename,
+    track.id, track.title, etiquetaPrecioVenta(priceCupAtSale, pago), currency, buyerName, buyerPhone, receiptFilename,
     track.producer_id || null, priceCupAtSale, commissionPercent, redondear(producerEarning), licenseType, buyerToken, vipPublico,
     pago.moneda, pago.unidades, pago.tasa, track.producer_id ? redondearMoneda(pago.unidades * (1 - commissionPercent / 100), pago.moneda) : 0
   );
@@ -1740,6 +1744,9 @@ route('POST', '/api/tracks/:id/like', async (req, res, params) => {
   const voter = await leerVotante(req);
   if (!voter) return sendJSON(res, 400, { error: 'Solicitud inválida' });
   if (!rateLimit(req, 'like', 300, 60 * 60 * 1000)) return sendJSON(res, 429, { error: 'Demasiados me gusta seguidos. Intenta más tarde.' });
+  // Los me gusta dan dinero (bono Studio): desde una misma IP se aceptan hasta 20 por canción al día.
+  // No es 1 por IP porque en Cuba muchas personas salen a internet por la misma IP de la operadora.
+  if (!rateLimit(req, 'like-pista-' + track.id, 20, 24 * 60 * 60 * 1000)) return sendJSON(res, 429, { error: 'Esta canción ya recibió muchos me gusta desde tu conexión hoy. Prueba mañana.' });
   const r = db.prepare('INSERT OR IGNORE INTO track_likes (track_id, voter) VALUES (?, ?)').run(track.id, voter);
   if (r.changes) db.prepare('UPDATE tracks SET likes = likes + 1 WHERE id = ?').run(track.id);
   const likes = db.prepare('SELECT likes FROM tracks WHERE id = ?').get(track.id).likes;
@@ -2540,6 +2547,12 @@ route('POST', '/api/producer/tracks', async (req, res) => {
     if (!err || !err.status) console.error(err);
     return sendJSON(res, (err && err.status) || 500, { error: (err && err.error) || 'Error al procesar el beat' });
   }
+  // se vuelve a contar: mientras se procesaba el audio pudo entrar otro beat (subidas en paralelo)
+  const activosAhora = db.prepare("SELECT COUNT(*) as c FROM tracks WHERE producer_id = ? AND approval_status != 'rejected' AND sold = 0").get(producer.id).c;
+  if (plan.maxBeats !== Infinity && activosAhora >= plan.maxBeats) {
+    try { r.deshacer(); } catch { /* nada */ }
+    return sendJSON(res, 403, { error: `Tu plan ${plan.label} permite ${plan.maxBeats} beats activos y ya tienes ${activosAhora}. Elimina alguno o sube de plan para publicar más.` });
+  }
   const id = insertarPista(r, { producerId: producer.id, estado: 'pending' });
   sendJSON(res, 201, { id });
 });
@@ -2717,7 +2730,10 @@ route('POST', '/api/admin/payment-info', async (req, res) => {
     for (const prod of productores) {
       let cuentasProd = [];
       try { cuentasProd = JSON.parse(prod.accounts_json || '[]'); } catch { cuentasProd = []; }
-      const filtradas = cuentasProd.filter(a => monedasVigentes.includes(a.currency));
+      // se quitan las cuentas en monedas que el admin ya no acepta, salvo las de un saldo que el productor
+      // todavía tiene (si no, no podría cobrarlo)
+      const conSaldo = new Set(saldoDisponible(prod.id).billeteras.map(b => b.code));
+      const filtradas = cuentasProd.filter(a => monedasVigentes.includes(a.currency) || conSaldo.has(a.currency));
       if (filtradas.length !== cuentasProd.length) {
         db.prepare('UPDATE producers SET accounts_json = ? WHERE id = ?').run(JSON.stringify(filtradas), prod.id);
       }
@@ -3123,6 +3139,13 @@ function redondearMoneda(n, moneda) {
   return Math.round((Number(n) || 0) * f) / f;
 }
 const ETIQUETAS_VIEJAS = { USDT_BEP20: 'USDT (BEP20)', USDT_TRC20: 'USDT (TRC20)', USDT_POLYGON: 'USDT (Polygon)', BNB_BEP20: 'BNB (BEP20)', SALDO_MOVIL: 'Saldo Móvil' };
+// Precio que sale en la licencia y en la verificación: lo calcula el servidor, nunca lo manda el comprador
+function etiquetaPrecioVenta(priceCup, pago) {
+  const cup = `${Number(priceCup || 0).toLocaleString('es', { maximumFractionDigits: 2 })} CUP`;
+  if (!pago || pago.moneda === 'CUP') return cup;
+  const dec = decimalesMoneda(pago.moneda);
+  return `${Number(pago.unidades).toLocaleString('es', { minimumFractionDigits: dec, maximumFractionDigits: dec })} ${etiquetaMoneda(pago.moneda)} (${cup})`;
+}
 function etiquetaMoneda(code) {
   if (!code || code === 'CUP') return 'CUP';
   const r = ratesMap()[code];
@@ -4296,59 +4319,57 @@ desactivarVencidos();
 limpiarSubidasViejas();
 setInterval(() => { desactivarVencidos(); limpiarSubidasViejas(); }, 60 * 60 * 1000).unref();
 
-// ---------- Migración única: USDT (BEP20) pasa a ser BNB (BEP20) ----------
-// En la red BEP20 la dirección de la billetera es la misma para cualquier token, así que las cuentas
-// se pasan tal cual. La tasa arranca en 0 (1 BNB no vale lo mismo que 1 USDT): el admin la pone.
-// Lo ya vendido en USDT queda como USDT; quien tenga saldo en USDT lo sigue cobrando en USDT.
-function migrarBnbBep20() {
-  if (db.prepare("SELECT 1 FROM app_secrets WHERE clave = 'mig_bnb_bep20'").get()) return;
+// ---------- Migración única: vuelve USDT (BEP20) ----------
+// Por un tiempo la moneda se llamó «BNB (BEP20)». El cliente pidió que vuelva a ser USDT (BEP20):
+// las cuentas de cobro (admin y productores) vuelven a USDT (BEP20) con la misma dirección.
+// La tasa se conserva solo si parece de USDT (menos de 5000 CUP); si alguien puso el precio del BNB, queda en 0.
+// Si la tienda nunca tuvo la versión con BNB, no cambia nada.
+function volverUsdtBep20() {
+  if (db.prepare("SELECT 1 FROM app_secrets WHERE clave = 'mig_usdt_bep20_vuelta'").get()) return;
   db.exec('BEGIN');
   try {
     const row = db.prepare('SELECT rates_json FROM exchange_rates WHERE id = 1').get();
     let rates = [];
     try { rates = JSON.parse((row && row.rates_json) || '[]'); } catch { rates = []; }
-    if (rates.some(r => r.code === 'USDT_BEP20') && !rates.some(r => r.code === 'BNB_BEP20')) {
-      rates = rates.map(r => r.code === 'USDT_BEP20' ? { code: 'BNB_BEP20', label: 'BNB (BEP20)', cupPerUnit: 0 } : r);
+    if (rates.some(r => r.code === 'BNB_BEP20')) {
+      const bnb = rates.find(r => r.code === 'BNB_BEP20');
+      const tasa = Number(bnb.cupPerUnit) > 0 && Number(bnb.cupPerUnit) < 5000 ? Number(bnb.cupPerUnit) : 0;
+      rates = rates.some(r => r.code === 'USDT_BEP20')
+        ? rates.filter(r => r.code !== 'BNB_BEP20')
+        : rates.map(r => r.code === 'BNB_BEP20' ? { code: 'USDT_BEP20', label: 'USDT (BEP20)', cupPerUnit: tasa } : r);
       db.prepare('UPDATE exchange_rates SET rates_json = ? WHERE id = 1').run(JSON.stringify(rates));
     }
+    const sinRepetir = (acc) => {
+      const vistos = new Set();
+      return acc.map(a => a.currency === 'BNB_BEP20' ? { ...a, currency: 'USDT_BEP20' } : a)
+        .filter(a => { const k = a.currency + '|' + String(a.number || '').trim().toLowerCase(); if (vistos.has(k)) return false; vistos.add(k); return true; });
+    };
     const pi = db.prepare('SELECT accounts_json FROM payment_info WHERE id = 1').get();
-    if (pi) {
+    if (pi && String(pi.accounts_json || '').includes('BNB_BEP20')) {
       let acc = [];
       try { acc = JSON.parse(pi.accounts_json || '[]'); } catch { acc = []; }
-      if (acc.some(a => a.currency === 'USDT_BEP20')) {
-        acc = acc.map(a => a.currency === 'USDT_BEP20' ? { ...a, currency: 'BNB_BEP20' } : a);
-        db.prepare('UPDATE payment_info SET accounts_json = ? WHERE id = 1').run(JSON.stringify(acc));
-      }
+      db.prepare('UPDATE payment_info SET accounts_json = ? WHERE id = 1').run(JSON.stringify(sinRepetir(acc)));
     }
-    for (const p of db.prepare("SELECT id, accounts_json FROM producers WHERE accounts_json LIKE '%USDT_BEP20%'").all()) {
+    for (const p of db.prepare("SELECT id, accounts_json FROM producers WHERE accounts_json LIKE '%BNB_BEP20%'").all()) {
       let acc = [];
       try { acc = JSON.parse(p.accounts_json || '[]'); } catch { continue; }
-      const tieneSaldoUsdt = saldoDisponible(p.id).billeteras.some(b => b.code === 'USDT_BEP20');
-      const nuevas = [];
-      for (const a of acc) {
-        if (a.currency !== 'USDT_BEP20') { nuevas.push(a); continue; }
-        nuevas.push({ ...a, currency: 'BNB_BEP20' });
-        if (tieneSaldoUsdt) nuevas.push(a); // para poder cobrar lo que ya tiene en USDT
-      }
-      db.prepare('UPDATE producers SET accounts_json = ? WHERE id = ?').run(JSON.stringify(nuevas.slice(0, 10)), p.id);
+      db.prepare('UPDATE producers SET accounts_json = ? WHERE id = ?').run(JSON.stringify(sinRepetir(acc).slice(0, 10)), p.id);
     }
     const cfg = db.prepare('SELECT payout_rates_json FROM platform_config WHERE id = 1').get();
-    if (cfg) {
+    if (cfg && String(cfg.payout_rates_json || '').includes('BNB_BEP20')) {
       let t = {};
       try { t = JSON.parse(cfg.payout_rates_json || '{}'); } catch { t = {}; }
-      if (t.USDT_BEP20) {
-        if (!t.BNB_BEP20) t.BNB_BEP20 = { fee: 0 };
-        db.prepare('UPDATE platform_config SET payout_rates_json = ? WHERE id = 1').run(JSON.stringify(t));
-      }
+      delete t.BNB_BEP20; // el fee de BNB no sirve para USDT; el de USDT (BEP20) sigue guardado
+      db.prepare('UPDATE platform_config SET payout_rates_json = ? WHERE id = 1').run(JSON.stringify(t));
     }
-    db.prepare("INSERT INTO app_secrets (clave, valor) VALUES ('mig_bnb_bep20', datetime('now'))").run();
+    db.prepare("INSERT INTO app_secrets (clave, valor) VALUES ('mig_usdt_bep20_vuelta', datetime('now'))").run();
     db.exec('COMMIT');
   } catch (e) {
     db.exec('ROLLBACK');
-    console.error('No se pudo pasar USDT (BEP20) a BNB (BEP20):', e.message);
+    console.error('No se pudo volver a USDT (BEP20):', e.message);
   }
 }
-migrarBnbBep20();
+volverUsdtBep20();
 
 server.listen(PORT, () => {
   console.log(`Servidor corriendo en http://localhost:${PORT}`);

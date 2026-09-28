@@ -1202,6 +1202,7 @@ input, textarea, select { max-width: 100%; min-width: 0; }
 .reset-ventas[open] > summary { color: var(--text); }
 .reset-opcion { background: var(--bg-elevated); border: 1px solid var(--line); border-radius: var(--r-md); padding: var(--s-3); margin-top: var(--s-2); }
 .reset-opcion.peligro { border-color: rgba(var(--danger-rgb), 0.45); }
-.reset-opcion strong { display: block; margin-bottom: 4px; }
+.reset-opcion > strong { display: block; margin-bottom: 6px; font-size: var(--fs-md); line-height: 1.3; }
+.reset-opcion .panel-hint { margin-top: 0; }
 .reset-opcion a { color: var(--live); }
 .reset-acciones { display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: center; }
