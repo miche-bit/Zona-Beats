@@ -35,6 +35,24 @@ const { pipeline } = require('node:stream/promises');
 const { Transform } = require('node:stream');
 
 const PORT = process.env.PORT || 3000;
+
+// ---------- Configuración por variables de entorno (Railway > Variables) ----------
+// ALLOWED_ORIGINS: otros dominios que pueden usar la API desde el navegador, separados por coma
+//   (ej. https://zonabeats.com). Vacío = solo el propio dominio de la app (lo más seguro).
+// RATE_LIMIT_API_PER_MIN: pedidos a la API por minuto y por conexión antes de frenar (por defecto 1200).
+// MAX_CONNECTIONS: conexiones abiertas a la vez como máximo (0 = sin límite).
+const numeroEnv = (nombre, porDefecto, minimo) => {
+  const n = parseInt(process.env[nombre], 10);
+  return Number.isFinite(n) && n >= minimo ? n : porDefecto;
+};
+const CONFIG = {
+  origenesPermitidos: String(process.env.ALLOWED_ORIGINS || '').split(',').map(o => o.trim().replace(/\/+$/, '')).filter(Boolean),
+  limiteApiPorMinuto: numeroEnv('RATE_LIMIT_API_PER_MIN', 1200, 60),
+  maxConexiones: numeroEnv('MAX_CONNECTIONS', 0, 0),
+};
+for (const o of CONFIG.origenesPermitidos) {
+  if (!/^https?:\/\/[^/\s]+$/.test(o)) console.warn(`ATENCIÓN: ALLOWED_ORIGINS tiene un valor inválido («${o}»). Usa el formato https://dominio.com`);
+}
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'cambiaesto123';
 const EN_PRODUCCION = Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_ENVIRONMENT_NAME ||
   process.env.RAILWAY_PROJECT_ID || process.env.RAILWAY_VOLUME_MOUNT_PATH) || process.env.NODE_ENV === 'production';
@@ -157,8 +175,52 @@ function aplicarCabecerasSeguridad(res) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
-  res.setHeader('Content-Security-Policy', "frame-ancestors 'self'");
+  // CSP: el navegador solo ejecuta scripts de este mismo dominio; un script metido en un nombre o título no corre.
+  res.setHeader('Content-Security-Policy', [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com data:",
+    "img-src 'self' data: blob:",
+    "media-src 'self' blob:",
+    "connect-src 'self'",
+    "frame-ancestors 'self'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "object-src 'none'",
+  ].join('; '));
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  // otros sitios no pueden incrustar los audios ni las portadas (evita que usen tu ancho de banda)
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+}
+
+// ---------- CORS y pedidos falsificados desde otros sitios ----------
+// Un pedido que cambia datos (POST, PUT, DELETE) solo se acepta si viene de la propia app
+// o de un dominio de ALLOWED_ORIGINS. Sin cabecera Origin (apps, curl) se acepta: lo protege la sesión.
+function hostPropio(req) {
+  return String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim().toLowerCase();
+}
+function origenDelPedido(req) {
+  const o = req.headers.origin;
+  if (o) return String(o);
+  const ref = req.headers.referer;
+  if (ref) { try { return new URL(ref).origin; } catch { return 'null'; } }
+  return '';
+}
+function origenPermitido(req, origen) {
+  if (!origen) return true;
+  if (origen === 'null') return false;
+  let host;
+  try { host = new URL(origen).host.toLowerCase(); } catch { return false; }
+  return host === hostPropio(req) || CONFIG.origenesPermitidos.includes(origen.replace(/\/+$/, ''));
+}
+function aplicarCors(req, res, origen) {
+  // solo se abren las puertas a los dominios de ALLOWED_ORIGINS (el propio dominio no necesita CORS)
+  if (origen && CONFIG.origenesPermitidos.includes(origen)) {
+    res.setHeader('Access-Control-Allow-Origin', origen);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Vary', 'Origin');
+  }
 }
 
 function esHttps(req) {
@@ -584,10 +646,10 @@ route('DELETE', '/api/uploads/:id', (req, res, params) => {
   const owner = duenoSubida(req);
   if (!owner) return sendJSON(res, 401, { error: 'Tu sesión expiró. Vuelve a entrar.' });
   const up = subidaDe(params.id, owner);
-  if (up) {
-    try { fs.unlinkSync(rutaSubida(up.id)); } catch { /* nada */ }
-    db.prepare('DELETE FROM uploads WHERE id = ?').run(up.id);
-  }
+  // solo el dueño puede borrarla; para cualquier otro «no existe»
+  if (!up) return sendJSON(res, 404, { error: 'Subida no encontrada' });
+  try { fs.unlinkSync(rutaSubida(up.id)); } catch { /* nada */ }
+  db.prepare('DELETE FROM uploads WHERE id = ?').run(up.id);
   sendJSON(res, 200, { ok: true });
 });
 
@@ -1347,6 +1409,7 @@ route('POST', '/api/producer/hots/saldo', async (req, res) => {
 route('POST', '/api/producer/hots', async (req, res) => {
   const producer = getAuthedProducer(req);
   if (!producer) return sendJSON(res, 401, { error: 'No autorizado' });
+  if (!rateLimit(req, 'comprobantes', 30, 60 * 60 * 1000)) return sendJSON(res, 429, { error: 'Demasiados comprobantes seguidos. Espera un rato.' });
   const bm = (req.headers['content-type'] || '').match(/boundary=(.+)$/);
   if (!bm) return sendJSON(res, 400, { error: 'Falta boundary multipart' });
   let buffer;
@@ -1462,6 +1525,7 @@ route('POST', '/api/admin/hots/:id/quitar', (req, res, params) => {
 route('POST', '/api/producer/plan-request', async (req, res) => {
   const producer = getAuthedProducer(req);
   if (!producer) return sendJSON(res, 401, { error: 'No autorizado' });
+  if (!rateLimit(req, 'comprobantes', 30, 60 * 60 * 1000)) return sendJSON(res, 429, { error: 'Demasiados comprobantes seguidos. Espera un rato.' });
 
   const contentType = req.headers['content-type'] || '';
   const bm = contentType.match(/boundary=(.+)$/);
@@ -4296,8 +4360,31 @@ const server = http.createServer(async (req, res) => {
   }
   const pathname = url.pathname;
 
+  if (esHttps(req)) res.setHeader('Strict-Transport-Security', 'max-age=15552000');
   try {
     if (pathname.startsWith('/api/')) {
+      const origen = origenDelPedido(req);
+      aplicarCors(req, res, origen);
+      if (req.method === 'OPTIONS') {
+        // preflight: solo se contesta con permisos a los dominios de ALLOWED_ORIGINS
+        if (origen && CONFIG.origenesPermitidos.includes(origen)) {
+          res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE');
+          res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Panel');
+          res.setHeader('Access-Control-Max-Age', '600');
+        }
+        res.writeHead(204); return res.end();
+      }
+      if (!['GET', 'HEAD'].includes(req.method) && !origenPermitido(req, origen)) {
+        return sendJSON(res, 403, { error: 'Origen no permitido' });
+      }
+      // freno general por conexión: nadie puede tumbar la app a pedidos.
+      // No cuentan los pedidos baratos que el navegador hace solo y en cantidad: trozos de audio al
+      // reproducir (Range), portadas, fotos y los trozos de una subida (esos tienen sus propios controles).
+      const pedidoLiviano = /^\/api\/(stream\/|cover\/|avatar|producer\/avatar\/|uploads\/[a-f0-9]{32}\/chunk)/.test(pathname);
+      if (!pedidoLiviano && !rateLimit(req, 'api', CONFIG.limiteApiPorMinuto, 60 * 1000)) {
+        res.setHeader('Retry-After', '60');
+        return sendJSON(res, 429, { error: 'Demasiados pedidos seguidos. Espera un minuto.' });
+      }
       const matched = matchRoute(req.method, pathname);
       if (!matched) return sendJSON(res, 404, { error: 'Ruta no encontrada' });
       await matched.handler(req, res, matched.params, url.searchParams);
@@ -4378,6 +4465,9 @@ server.listen(PORT, () => {
 
 // subida de audio grande necesita más de los 2 min por defecto
 server.timeout = 10 * 60 * 1000;
-server.headersTimeout = 10 * 60 * 1000 + 5000;
+// Tiempos: las cabeceras tienen que llegar rápido (así no se puede colgar el servidor con conexiones
+// lentísimas); un pedido completo puede durar hasta 10 min (subidas por partes con datos móviles).
+server.headersTimeout = 30 * 1000;
 server.requestTimeout = 10 * 60 * 1000;
-server.keepAliveTimeout = 10 * 60 * 1000;
+server.keepAliveTimeout = 65 * 1000;
+if (CONFIG.maxConexiones > 0) server.maxConnections = CONFIG.maxConexiones;
