@@ -67,14 +67,17 @@
   // ---------- Pestañas ----------
   const tabs = document.querySelectorAll('.dash-tab');
   function abrirPestana(nombre) {
-    tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === nombre));
-    document.querySelectorAll('.tab-page').forEach(p => p.classList.toggle('active', p.dataset.page === nombre));
+    // crossfade entre pestañas
+    ZBUI.transicion(() => {
+      tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === nombre));
+      document.querySelectorAll('.tab-page').forEach(p => p.classList.toggle('active', p.dataset.page === nombre));
+      const activo = document.querySelector('.dash-tab.active');
+      if (activo && activo.scrollIntoView) activo.scrollIntoView({ block: 'nearest', inline: 'center' });
+    });
     try { sessionStorage.setItem('zb_prod_tab', nombre); } catch { /* sin almacenamiento */ }
     if (nombre === 'stats') loadStats();
     if (nombre === 'dinero') { loadWithdrawals(); loadEarnings(); }
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    const activo = document.querySelector('.dash-tab.active');
-    if (activo && activo.scrollIntoView) activo.scrollIntoView({ block: 'nearest', inline: 'center' });
   }
   tabs.forEach(t => t.addEventListener('click', () => abrirPestana(t.dataset.tab)));
 

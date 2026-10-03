@@ -242,6 +242,8 @@
     tab.addEventListener('click', () => {
       const section = tab.dataset.section;
       if (section === currentSection) return;
+      // crossfade: la sección anterior se desvanece mientras entra la nueva
+      ZBUI.transicion(() => {
       currentSection = section;
 
       document.querySelectorAll('.section-tab').forEach(t => t.classList.toggle('active', t === tab));
@@ -278,6 +280,7 @@
         renderCurrentSection();
       }
       if (!tracksBySection[section].length) loadTracksForSection(section);
+      });
     });
   });
 
@@ -326,17 +329,52 @@
       });
     });
     producersGrid.querySelectorAll('.producer-card').forEach(card => {
-      card.addEventListener('click', () => openProducerDetail(Number(card.dataset.id)));
+      card.addEventListener('click', () => openProducerDetail(Number(card.dataset.id), card));
       card.addEventListener('keydown', (e) => {
         if ((e.key === 'Enter' || e.key === ' ') && e.target === card) { e.preventDefault(); card.click(); }
       });
     });
   }
 
-  async function openProducerDetail(id) {
-    producersGrid.style.display = 'none';
-    producerDetail.style.display = 'block';
-    producerDetail.innerHTML = ZBUI.skeleton('lineas', 3) + '<div class="track-grid">' + ZBUI.skeleton('tarjetas', 4) + '</div>';
+  // Cabecera del productor: se pinta ya con lo que trae la tarjeta, para que el nombre y la
+  // foto «viajen» de la tarjeta a la página (elemento compartido) sin esperar al servidor.
+  function cabeceraProductor(id, nombre, conFoto, bio, socialHtml) {
+    return `
+      <button type="button" class="back-to-producers">&larr; Todos los productores</button>
+      <div class="producer-detail-head">
+        ${conFoto ? `<img class="producer-avatar-lg" src="/api/producer/avatar/${id}?s=300" alt="">` : `<div class="producer-avatar-lg producer-avatar-fallback">${escapeHtml((nombre||'?').charAt(0).toUpperCase())}</div>`}
+        <div>
+          <h2>${escapeHtml(nombre)}</h2>
+          <p>${escapeHtml(bio || '')}</p>
+          ${socialHtml ? `<div class="hero-social">${socialHtml}</div>` : ''}
+        </div>
+      </div>`;
+  }
+  function volverAProductores(id) {
+    const card = producersGrid.querySelector('.producer-card[data-id="' + id + '"]');
+    ZBUI.viaje(
+      { 'zb-titulo': producerDetail.querySelector('.producer-detail-head h2'), 'zb-avatar': producerDetail.querySelector('.producer-avatar-lg') },
+      () => { producerDetail.style.display = 'none'; producersGrid.style.display = 'grid'; },
+      () => card ? { 'zb-titulo': card.querySelector('.producer-card-name'), 'zb-avatar': card.querySelector('.producer-avatar') } : {}
+    );
+  }
+
+  async function openProducerDetail(id, card) {
+    const nombreCard = card ? card.querySelector('.producer-card-name') : null;
+    const fotoCard = card ? card.querySelector('.producer-avatar') : null;
+    await ZBUI.viaje(
+      { 'zb-titulo': nombreCard, 'zb-avatar': fotoCard },
+      () => {
+        producersGrid.style.display = 'none';
+        producerDetail.style.display = 'block';
+        producerDetail.innerHTML = (card
+          ? cabeceraProductor(id, nombreCard.textContent, fotoCard && fotoCard.tagName === 'IMG', card.querySelector('.producer-card-bio').textContent, '')
+          : ZBUI.skeleton('lineas', 3)) + '<div class="track-grid">' + ZBUI.skeleton('tarjetas', 4) + '</div>';
+        const atras = producerDetail.querySelector('.back-to-producers');
+        if (atras) atras.addEventListener('click', () => volverAProductores(id));
+      },
+      () => ({ 'zb-titulo': producerDetail.querySelector('.producer-detail-head h2'), 'zb-avatar': producerDetail.querySelector('.producer-avatar-lg') })
+    );
     const res = await fetch(`/api/producers/${id}/tracks`);
     if (!res.ok) { producerDetail.innerHTML = '<div class="empty-hint">No se pudo cargar este productor.</div>'; return; }
     const { producer, tracks, discountPercent: dp } = await res.json();
@@ -348,23 +386,10 @@
       return `<a href="${escapeHtml(l.url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(l.label || platform)}">${icon}</a>`;
     }).join('');
 
-    producerDetail.innerHTML = `
-      <button type="button" class="back-to-producers">&larr; Todos los productores</button>
-      <div class="producer-detail-head">
-        ${producer.avatar ? `<img class="producer-avatar-lg" src="/api/producer/avatar/${producer.id}?s=300" alt="">` : `<div class="producer-avatar-lg producer-avatar-fallback">${escapeHtml((producer.name||'?').charAt(0).toUpperCase())}</div>`}
-        <div>
-          <h2>${escapeHtml(producer.name)}</h2>
-          <p>${escapeHtml(producer.bio || '')}</p>
-          ${socialHtml ? `<div class="hero-social">${socialHtml}</div>` : ''}
-        </div>
-      </div>
-      <div class="track-grid" id="producer-track-grid"></div>
-    `;
+    producerDetail.innerHTML = cabeceraProductor(producer.id, producer.name, producer.avatar, producer.bio, socialHtml)
+      + '<div class="track-grid" id="producer-track-grid"></div>';
 
-    producerDetail.querySelector('.back-to-producers').addEventListener('click', () => {
-      producerDetail.style.display = 'none';
-      producersGrid.style.display = 'grid';
-    });
+    producerDetail.querySelector('.back-to-producers').addEventListener('click', () => volverAProductores(producer.id));
 
     const grid = document.getElementById('producer-track-grid');
     const savedSection = currentSection;

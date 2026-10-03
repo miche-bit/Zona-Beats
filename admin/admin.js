@@ -115,8 +115,11 @@
 
   // ---------- Navegación por categorías ----------
   function abrirCategoria(cat) {
-    document.querySelectorAll('.admin-nav-btn').forEach(b => b.classList.toggle('active', b.dataset.cat === cat));
-    document.querySelectorAll('.admin-main > .panel').forEach(p => p.classList.toggle('cat-hidden', p.dataset.cat !== cat));
+    // crossfade entre categorías
+    ZBUI.transicion(() => {
+      document.querySelectorAll('.admin-nav-btn').forEach(b => b.classList.toggle('active', b.dataset.cat === cat));
+      document.querySelectorAll('.admin-main > .panel').forEach(p => p.classList.toggle('cat-hidden', p.dataset.cat !== cat));
+    });
     try { sessionStorage.setItem('zb_admin_cat', cat); } catch { /* sin almacenamiento */ }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }

@@ -156,3 +156,31 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offs
 .skel-wrap.skel-lineas { gap: var(--s-3); padding: var(--s-2) 0; }
 /* dentro de una grilla, las tarjetas de carga ocupan las celdas de la grilla */
 .skel-wrap.skel-tarjetas { display: contents; }
+
+/* ---------- Movimiento: crossfade, elemento compartido, lupa y desenfoque ---------- */
+:root { --t-cross: 0.24s; --t-viaje: 0.38s; --blur-fondo: 10px; --blur-foco: 1.5px; }
+/* 1. Crossfade al cambiar de sección / pestaña / categoría */
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: var(--t-cross); animation-timing-function: var(--ease, ease); }
+/* 2. Elemento compartido: el título y la foto viajan de la tarjeta a la página */
+::view-transition-group(zb-titulo), ::view-transition-group(zb-avatar) { animation-duration: var(--t-viaje); animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1); }
+::view-transition-old(zb-titulo), ::view-transition-new(zb-titulo) { height: 100%; width: auto; object-fit: contain; object-position: left center; }
+::view-transition-old(zb-avatar), ::view-transition-new(zb-avatar) { height: 100%; width: 100%; object-fit: cover; border-radius: 50%; }
+/* 3. Lupa: la escala la pone ui.js; aquí solo el punto de apoyo y la suavidad */
+.hero-social a, [data-lupa] > * { transform-origin: 50% 100%; will-change: transform; position: relative; }
+/* 4. Desenfoque: con una ventana abierta, todo lo de atrás se desenfoca */
+.modal-overlay, .plan-modal-overlay, .receipt-modal-overlay {
+  -webkit-backdrop-filter: blur(var(--blur-fondo)) saturate(0.85) !important;
+  backdrop-filter: blur(var(--blur-fondo)) saturate(0.85) !important;
+}
+/* …y al señalar una tarjeta, las demás se apartan para que el ojo sepa dónde mirar */
+@media (hover: hover) and (pointer: fine) {
+  .track-grid > .track-card, .producers-grid > .producer-card, .hots-track > * {
+    transition: filter 0.22s var(--ease, ease), opacity 0.22s var(--ease, ease), transform 0.2s var(--ease, ease), border-color 0.2s, background 0.2s, box-shadow 0.2s;
+  }
+  .track-grid:has(> .track-card:hover) > .track-card:not(:hover):not(:focus-within),
+  .producers-grid:has(> .producer-card:hover) > .producer-card:not(:hover):not(:focus-within),
+  .hots-track:has(> :hover) > :not(:hover):not(:focus-within) {
+    filter: blur(var(--blur-foco));
+    opacity: 0.62;
+  }
+}

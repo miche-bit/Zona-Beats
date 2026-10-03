@@ -112,5 +112,88 @@
     return Number.isFinite(n) ? n : NaN;
   }
 
-  window.ZBUI = { skeleton, mostrarSkeleton, decimales, leerMonto };
+  // ---------- Movimiento: crossfade, elemento compartido y lupa ----------
+  const sinMovimiento = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Crossfade: lo viejo se desvanece mientras aparece lo nuevo. Sin soporte (o con
+  // «reducir movimiento») el cambio se hace directo, igual que antes.
+  function transicion(cambiar) {
+    if (!document.startViewTransition || sinMovimiento()) { cambiar(); return null; }
+    if (document.visibilityState !== 'visible') { cambiar(); return null; }
+    let vt, hecho = false;
+    const unaVez = () => { if (!hecho) { hecho = true; cambiar(); } };
+    try { vt = document.startViewTransition(unaVez); }
+    catch { unaVez(); return null; }
+    // red de seguridad: si el navegador no llega a pintar (pestaña tapada, equipo lento),
+    // el cambio se aplica igual, sin animación. Nunca se queda la pantalla vieja.
+    setTimeout(() => { if (!hecho) { unaVez(); try { vt.skipTransition(); } catch { /* nada */ } } }, 180);
+    vt.ready.catch(() => {});
+    vt.finished.catch(() => {});
+    return vt;
+  }
+
+  // Elemento compartido: los elementos de «origen» viajan hasta los de «destino».
+  // Devuelve una promesa: quien pinte después debe esperarla para no pisarse con el cambio.
+  // origen: { nombre: elemento }   destino: función que devuelve { nombre: elemento } ya con la pantalla nueva
+  function marcar(mapa, poner) {
+    Object.keys(mapa || {}).forEach(n => { if (mapa[n]) mapa[n].style.viewTransitionName = poner ? n : ''; });
+  }
+  function viaje(origen, cambiar, destino) {
+    if (!document.startViewTransition || sinMovimiento()) { cambiar(); return Promise.resolve(); }
+    marcar(origen, true);
+    let llegada = {};
+    const vt = transicion(() => {
+      marcar(origen, false);
+      cambiar();
+      llegada = (destino && destino()) || {};
+      marcar(llegada, true);
+    });
+    if (!vt) { marcar(origen, false); return Promise.resolve(); }
+    vt.finished.catch(() => {}).then(() => marcar(llegada, false));
+    // se resuelve cuando la pantalla nueva ya está puesta (no cuando termina la animación)
+    return vt.updateCallbackDone.catch(() => {});
+  }
+
+  // Lupa: los íconos crecen según se acerca el cursor, como en un dock. Solo con ratón.
+  const LUPA_SEL = '.hero-social, [data-lupa]';
+  const LUPA_RADIO = 110, LUPA_MAX = 0.35;
+  let lupaPend = null, lupaActivas = [];
+  function soltarLupa() {
+    lupaActivas.forEach(a => { a.style.transform = ''; a.style.zIndex = ''; });
+    lupaActivas = [];
+  }
+  function aplicarLupa() {
+    const e = lupaPend; lupaPend = null;
+    if (!e) return;
+    soltarLupa();
+    document.querySelectorAll(LUPA_SEL).forEach(caja => {
+      const r = caja.getBoundingClientRect();
+      if (e.clientX < r.left - LUPA_RADIO || e.clientX > r.right + LUPA_RADIO || e.clientY < r.top - 40 || e.clientY > r.bottom + 40) return;
+      Array.from(caja.children).forEach(a => {
+        const b = a.getBoundingClientRect();
+        const d = Math.hypot(e.clientX - (b.left + b.width / 2), e.clientY - (b.top + b.height / 2));
+        const f = Math.max(0, 1 - d / LUPA_RADIO);
+        if (!f) return;
+        // curva suave: crece más cerca del cursor
+        const esc = 1 + LUPA_MAX * f * f * (3 - 2 * f);
+        a.style.transform = 'translateY(' + (-(esc - 1) * 10).toFixed(1) + 'px) scale(' + esc.toFixed(3) + ')';
+        a.style.zIndex = '2';
+        lupaActivas.push(a);
+      });
+    });
+  }
+  function arrancarLupa() {
+    if (!window.matchMedia || !window.matchMedia('(hover: hover) and (pointer: fine)').matches) return;
+    document.addEventListener('pointermove', (e) => {
+      if (e.pointerType && e.pointerType !== 'mouse') return;
+      if (sinMovimiento()) return;
+      const habia = lupaPend; lupaPend = e;
+      if (!habia) requestAnimationFrame(aplicarLupa);
+    }, { passive: true });
+    document.addEventListener('pointerleave', soltarLupa);
+    window.addEventListener('blur', soltarLupa);
+  }
+  arrancarLupa();
+
+  window.ZBUI = { skeleton, mostrarSkeleton, decimales, leerMonto, transicion, viaje };
 })();
