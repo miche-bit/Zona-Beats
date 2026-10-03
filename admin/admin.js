@@ -153,6 +153,7 @@
     loadHistory();
     loadPlanRequests();
     loadHotsAdmin();
+    loadDenuncias();
     loadPayouts();
     loadSummary();
   }
@@ -1954,6 +1955,40 @@
   // ---------- Hots ----------
   let hotsData = null;
   const semTxt = (w) => w + (w === 1 ? ' semana' : ' semanas');
+  // ---------- Denuncias de derechos de autor ----------
+  async function loadDenuncias() {
+    const res = await fetch('/api/admin/denuncias');
+    if (!res.ok) return;
+    const d = await res.json();
+    const cont = document.getElementById('denuncias-list');
+    document.getElementById('denuncias-count').textContent = d.pendientes ? d.pendientes + ' sin resolver' : '';
+    actualizarNav('productores', 'denuncias', d.pendientes);
+    if (!d.denuncias.length) { cont.innerHTML = '<div class="empty-hint">No hay denuncias.</div>'; return; }
+    cont.innerHTML = d.denuncias.map(r => `
+      <div class="denuncia-item ${r.status === 'pending' ? '' : 'resuelta'}">
+        <div class="denuncia-head">
+          <strong>${escapeHtml(r.beat)}</strong>
+          <span class="denuncia-estado">${r.status === 'pending' ? 'Sin resolver' : 'Resuelta'}</span>
+        </div>
+        <div class="denuncia-meta">${escapeHtml(r.motivoTexto)} · ${fechaHora(r.created_at)}</div>
+        <p class="denuncia-detalle">${escapeHtml(r.detalle)}</p>
+        <div class="denuncia-meta">Denuncia: <strong>${escapeHtml(r.nombre)}</strong> · ${escapeHtml(r.contacto)}</div>
+        <div class="denuncia-actions">
+          <button type="button" class="btn-secondary" data-den-res="${r.id}">${r.status === 'pending' ? 'Marcar resuelta' : 'Volver a abrir'}</button>
+          <button type="button" class="btn-delete" data-den-del="${r.id}">Borrar</button>
+        </div>
+      </div>`).join('');
+    cont.querySelectorAll('[data-den-res]').forEach(b => b.addEventListener('click', async () => {
+      await fetch('/api/admin/denuncias/' + b.dataset.denRes + '/resolver', { method: 'POST' });
+      loadDenuncias();
+    }));
+    cont.querySelectorAll('[data-den-del]').forEach(b => b.addEventListener('click', async () => {
+      if (b.dataset.seguro !== '1') { b.dataset.seguro = '1'; b.textContent = '¿Seguro? Pulsa otra vez'; return; }
+      await fetch('/api/admin/denuncias/' + b.dataset.denDel, { method: 'DELETE' });
+      loadDenuncias();
+    }));
+  }
+
   async function loadHotsAdmin() {
     const res = await fetch('/api/admin/hots');
     if (!res.ok) return;

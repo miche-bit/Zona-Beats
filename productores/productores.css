@@ -929,3 +929,8 @@ label {
 .ref-reqs li span { color: var(--warn); font-weight: 700; flex-shrink: 0; }
 .ref-reqs li.ok { color: var(--text); }
 .ref-reqs li.ok span { color: var(--ok); }
+
+/* Casillas legales (registro y subida) */
+.legal-accept { align-items: flex-start; gap: var(--s-2); margin: var(--s-3) 0; font-size: 13px; line-height: 1.5; color: var(--text-dim); text-align: left; }
+.legal-accept input { margin-top: 2px; }
+.legal-accept a { color: var(--accent-ink); text-decoration: underline; }

@@ -999,7 +999,10 @@ route('POST', '/api/producer/register', async (req, res) => {
   }
   try {
     const body = await readBody(req, 1024 * 5);
-    const { name, email, password, phone, referralCode } = JSON.parse(body.toString('utf8'));
+    const { name, email, password, phone, referralCode, acepta } = JSON.parse(body.toString('utf8'));
+    if (acepta !== true) {
+      return sendJSON(res, 400, { error: 'Para crear tu cuenta tienes que aceptar los Términos y la Política de privacidad.' });
+    }
     const cleanName = (name || '').trim().slice(0, 80);
     const cleanEmail = (email || '').trim().toLowerCase().slice(0, 120);
     const cleanPhone = String(phone || '').replace(/[^0-9+]/g, '').slice(0, 20);
@@ -1018,8 +1021,8 @@ route('POST', '/api/producer/register', async (req, res) => {
     const { hash, salt } = producerAuth.hashPassword(password);
     const codigo = String(referralCode || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
     const padrino = codigo ? db.prepare('SELECT id FROM producers WHERE referral_code = ?').get(codigo) : null;
-    db.prepare(`INSERT INTO producers (name, email, password_hash, password_salt, active, approved, plan, contact_phone, referral_code, referred_by)
-                VALUES (?, ?, ?, ?, 1, 0, 'free', ?, ?, ?)`)
+    db.prepare(`INSERT INTO producers (name, email, password_hash, password_salt, active, approved, plan, contact_phone, referral_code, referred_by, terms_accepted_at)
+                VALUES (?, ?, ?, ?, 1, 0, 'free', ?, ?, ?, datetime('now'))`)
       .run(cleanName, cleanEmail, hash, salt, cleanPhone, nuevoCodigoReferido(), padrino ? padrino.id : null);
     sendJSON(res, 201, { ok: true, pending: true });
   } catch {
@@ -2595,6 +2598,9 @@ route('POST', '/api/producer/tracks', async (req, res) => {
   let d;
   try { d = JSON.parse((await readBody(req, 64 * 1024)).toString('utf8') || '{}'); }
   catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
+  if (d.declaraAutoria !== true) {
+    return sendJSON(res, 400, { error: 'Marca la casilla donde declaras que el beat es tuyo y que tienes los derechos de todo lo que usa.' });
+  }
   let r;
   try {
     r = await crearPistaDesdeSubidas(d, `p:${producer.id}`, {
@@ -2618,6 +2624,7 @@ route('POST', '/api/producer/tracks', async (req, res) => {
     return sendJSON(res, 403, { error: `Tu plan ${plan.label} permite ${plan.maxBeats} beats activos y ya tienes ${activosAhora}. Elimina alguno o sube de plan para publicar más.` });
   }
   const id = insertarPista(r, { producerId: producer.id, estado: 'pending' });
+  db.prepare("UPDATE tracks SET authorship_declared_at = datetime('now') WHERE id = ?").run(id);
   sendJSON(res, 201, { id });
 });
 
@@ -3932,6 +3939,42 @@ function tamanoCarpeta(dir) {
   return total;
 }
 
+// ---------- Denuncias de derechos de autor ----------
+const MOTIVOS_DENUNCIA = { autor: 'El beat es mío y lo subió otra persona', sample: 'Usa un sample o una voz mía sin permiso', otro: 'Otro motivo' };
+route('POST', '/api/denuncias', async (req, res) => {
+  if (!rateLimit(req, 'denuncia', 5, 60 * 60 * 1000)) return sendJSON(res, 429, { error: 'Ya enviaste varias denuncias. Intenta más tarde.' });
+  let d;
+  try { d = JSON.parse((await readBody(req, 16 * 1024)).toString('utf8') || '{}'); }
+  catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
+  const beat = limpiarTexto(d.beat, 160), nombre = limpiarTexto(d.nombre, 80), contacto = limpiarTexto(d.contacto, 120), detalle = limpiarTexto(d.detalle, 1500);
+  const motivo = Object.prototype.hasOwnProperty.call(MOTIVOS_DENUNCIA, d.motivo) ? d.motivo : '';
+  if (!beat) return sendJSON(res, 400, { error: 'Escribe el nombre del beat que denuncias.' });
+  if (!motivo) return sendJSON(res, 400, { error: 'Elige el motivo de la denuncia.' });
+  if (!nombre) return sendJSON(res, 400, { error: 'Escribe tu nombre.' });
+  if (contacto.length < 6) return sendJSON(res, 400, { error: 'Deja un teléfono o correo para poder contactarte.' });
+  if (detalle.length < 15) return sendJSON(res, 400, { error: 'Explica en pocas palabras por qué el beat es tuyo y cómo podemos comprobarlo.' });
+  if (d.declara !== true) return sendJSON(res, 400, { error: 'Tienes que declarar que lo que dices es cierto.' });
+  db.prepare('INSERT INTO reportes (beat, motivo, nombre, contacto, detalle) VALUES (?, ?, ?, ?, ?)').run(beat, motivo, nombre, contacto, detalle);
+  sendJSON(res, 201, { ok: true });
+});
+route('GET', '/api/admin/denuncias', (req, res) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  const rows = db.prepare("SELECT * FROM reportes ORDER BY (status = 'pending') DESC, id DESC LIMIT 300").all()
+    .map(r => ({ ...r, motivoTexto: MOTIVOS_DENUNCIA[r.motivo] || r.motivo }));
+  sendJSON(res, 200, { denuncias: rows, pendientes: rows.filter(r => r.status === 'pending').length });
+});
+route('POST', '/api/admin/denuncias/:id/resolver', (req, res, params) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  const r = db.prepare("UPDATE reportes SET status = CASE status WHEN 'pending' THEN 'resolved' ELSE 'pending' END WHERE id = ?").run(Number(params.id));
+  if (!r.changes) return sendJSON(res, 404, { error: 'No encontrada' });
+  sendJSON(res, 200, { ok: true });
+});
+route('DELETE', '/api/admin/denuncias/:id', (req, res, params) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  db.prepare('DELETE FROM reportes WHERE id = ?').run(Number(params.id));
+  sendJSON(res, 200, { ok: true });
+});
+
 route('GET', '/api/admin/summary', (req, res, params, query) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   if (query.get('fresco') === '1') cacheDisco.at = 0;
@@ -4299,6 +4342,8 @@ function serveStatic(req, res, pathname, query) {
   if (pathname === '/verify' || pathname.startsWith('/verify/')) {
     return sendFile(res, path.join(STATIC_DIRS[''], 'verify.html'), 'text/html; charset=utf-8');
   }
+  const legal = { '/terminos': 'terminos.html', '/privacidad': 'privacidad.html', '/denunciar': 'denunciar.html' }[pathname.replace(/\/$/, '')];
+  if (legal) return sendFile(res, path.join(STATIC_DIRS[''], legal), 'text/html; charset=utf-8');
   if (pathname === '/' || pathname === '/index.html') {
     return fs.readFile(path.join(STATIC_DIRS[''], 'index.html'), 'utf8', (err, html) => {
       if (err) return sendJSON(res, 404, { error: 'No encontrado' });

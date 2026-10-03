@@ -298,6 +298,19 @@ addPlat('plan_usd_rate', 'REAL DEFAULT 0');
 // Desde cuándo cuentan «Este mes» y «Desde el inicio» en el Resumen (el admin puede reiniciarlo)
 addPlat('stats_desde', "TEXT DEFAULT ''");
 addPlat('hot_slots', 'INTEGER DEFAULT 8');
+// Legal: cuándo aceptó los términos cada productor, cuándo declaró la autoría de cada beat, y denuncias
+if (!db.prepare("PRAGMA table_info(producers)").all().some(c => c.name === 'terms_accepted_at')) db.exec("ALTER TABLE producers ADD COLUMN terms_accepted_at TEXT DEFAULT ''");
+if (!db.prepare("PRAGMA table_info(tracks)").all().some(c => c.name === 'authorship_declared_at')) db.exec("ALTER TABLE tracks ADD COLUMN authorship_declared_at TEXT DEFAULT ''");
+db.exec(`CREATE TABLE IF NOT EXISTS reportes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  beat TEXT NOT NULL,
+  motivo TEXT NOT NULL,
+  nombre TEXT NOT NULL,
+  contacto TEXT NOT NULL,
+  detalle TEXT DEFAULT '',
+  status TEXT DEFAULT 'pending',
+  created_at TEXT DEFAULT (datetime('now'))
+)`);
 db.exec(`CREATE TABLE IF NOT EXISTS hot_requests (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   producer_id INTEGER,

@@ -160,13 +160,21 @@
       email: $('reg-email').value.trim(),
       password: $('reg-password').value,
       referralCode: $('reg-ref').value.trim(),
+      acepta: $('reg-acepta').checked,
     };
+    if (!body.acepta) {
+      err.textContent = 'Para crear tu cuenta marca la casilla de los Términos y la Política de privacidad.';
+      err.classList.add('show');
+      $('reg-acepta').focus();
+      return;
+    }
     const res = await fetch('/api/producer/register', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
     if (res.ok) {
       ok.classList.add('show');
       ['reg-name', 'reg-email', 'reg-password', 'reg-phone', 'reg-ref'].forEach(id => { $(id).value = ''; });
+      $('reg-acepta').checked = false;
     } else {
       const d = await res.json().catch(() => ({}));
       err.textContent = d.error || 'No se pudo crear la cuenta.';
@@ -510,6 +518,11 @@
       return showToast(exclusivo ? 'Ponle el precio exclusivo al beat.' : 'Ponle precio a al menos una licencia.', true);
     }
 
+    if (!$('declara-autoria').checked) {
+      $('declara-autoria').focus();
+      return showToast('Marca la casilla donde declaras que el beat es tuyo.', true);
+    }
+
     uploadBtn.disabled = true;
     const problema = await validarArchivosAntesDeSubir(esPlaylist, precios);
     if (problema) { uploadBtn.disabled = false; return showToast(problema, true); }
@@ -539,6 +552,7 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          declaraAutoria: $('declara-autoria').checked,
           title: titleInput.value, genre: genreInput.value, description: descriptionInput.value,
           isPlaylist: esPlaylist, artistCredit: esPlaylist ? artistCreditInput.value : '',
           priceBasic: precios.basic, pricePremium: precios.premium, priceUnlimited: precios.unlimited, priceExclusive: precios.exclusive,

@@ -65,6 +65,10 @@
           <label for="reg-ref">Código de quien te invitó (opcional)</label>
           <input type="text" id="reg-ref" placeholder="Ej: A1B2C3D" autocapitalize="characters">
         </div>
+        <label class="checkbox-label legal-accept" for="reg-acepta">
+          <input type="checkbox" id="reg-acepta">
+          <span>Acepto los <a href="/terminos" target="_blank" rel="noopener">Términos</a> y la <a href="/privacidad" target="_blank" rel="noopener">Política de privacidad</a>, y declaro que los beats que suba serán míos.</span>
+        </label>
         <button class="btn-primary" id="register-btn">Crear cuenta</button>
         <div class="error-msg" id="register-error"></div>
         <div class="register-ok" id="register-ok">
@@ -242,6 +246,10 @@
               </div>
               <p class="panel-hint compact">Si se corta la conexión, la subida sigue sola. Si cierras la página, vuelve a elegir los mismos archivos y pulsa el botón: sigue donde quedó.</p>
             </div>
+            <label class="checkbox-label legal-accept" for="declara-autoria">
+              <input type="checkbox" id="declara-autoria">
+              <span>Declaro que este beat es mío y que tengo los derechos de todo lo que usa (samples, voces, loops). <a href="/terminos" target="_blank" rel="noopener">Ver términos</a></span>
+            </label>
             <button type="submit" class="btn-primary" id="upload-btn">Enviar a revisión</button>
           </form>
         </div>

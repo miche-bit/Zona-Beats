@@ -1689,3 +1689,33 @@ textarea { resize: vertical; max-height: 240px; }
   .top-bar-right { width: 100%; }
 }
 @media (max-width: 340px) { .join-producers .join-q { display: none; } }
+
+/* ---------- Páginas legales y denuncia ---------- */
+.footer-legal { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--s-2) var(--s-4); margin: var(--s-2) 0; }
+.footer-legal a { color: var(--text-dim); text-decoration: underline; padding: 6px 2px; }
+.footer-legal a:hover { color: var(--text); }
+.legal-wrap { max-width: 720px; margin: 0 auto; padding: 40px 20px 80px; }
+.legal-back { display: inline-block; color: var(--text-dim); text-decoration: underline; margin-bottom: var(--s-4); font-size: 14px; }
+.legal-wrap h1 { font-family: var(--font-display, 'Anton', sans-serif); font-size: 30px; text-transform: uppercase; margin: 0 0 6px; }
+.legal-fecha { color: var(--text-faint); font-size: 13px; margin: 0 0 var(--s-5, 28px); }
+.legal-wrap h2 { font-size: 17px; margin: 28px 0 8px; color: var(--text); }
+.legal-wrap p, .legal-wrap li { color: var(--text-dim); font-size: 15px; line-height: 1.65; }
+.legal-wrap ul { padding-left: 20px; margin: 8px 0; }
+.legal-wrap a { color: var(--live); text-decoration: underline; }
+.legal-resumen { background: var(--bg-card); border: 1px solid var(--line); border-radius: var(--r-md); padding: 14px 16px; margin: 0 0 8px; }
+.legal-form { display: flex; flex-direction: column; gap: 16px; margin-top: 20px; }
+.legal-form label { display: block; font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+.legal-form input[type=text], .legal-form select, .legal-form textarea {
+  width: 100%; background: var(--bg-card); border: 1px solid var(--line); color: var(--text);
+  border-radius: var(--r-md); padding: 12px 14px; font-size: 16px; font-family: inherit;
+}
+.legal-form textarea { min-height: 120px; resize: vertical; }
+.legal-form input:focus-visible, .legal-form select:focus-visible, .legal-form textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.legal-check { display: flex !important; gap: 10px; align-items: flex-start; font-weight: 400 !important; color: var(--text-dim) !important; line-height: 1.5; }
+.legal-check input { margin-top: 3px; width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--accent); }
+.legal-form button { background: var(--accent); color: var(--on-bright); font-weight: 700; font-size: 15px; padding: 13px 22px; border-radius: var(--r-md); align-self: flex-start; }
+.legal-form button:disabled { opacity: 0.6; }
+.legal-msg { padding: 12px 14px; border-radius: var(--r-md); font-size: 14px; }
+.legal-msg:empty { display: none; }
+.legal-msg.ok { background: rgba(var(--live-rgb), 0.12); border: 1px solid rgba(var(--live-rgb), 0.4); color: var(--text); }
+.legal-msg.err { background: rgba(var(--accent-rgb), 0.12); border: 1px solid rgba(var(--accent-rgb), 0.4); color: var(--text); }

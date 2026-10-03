@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Denunciar un beat · Zona Beats</title>
+<meta name="theme-color" content="#0c0a12">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/tokens.css">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="legal-wrap">
+    <a class="legal-back" href="/">&larr; Volver a la tienda</a>
+    <h1>Denunciar un beat</h1>
+    <p class="legal-fecha">Derechos de autor</p>
+    <p class="legal-resumen">Si un beat publicado aquí es tuyo, o usa un sample o una voz tuya sin permiso, cuéntanoslo. El administrador revisa cada caso, te contacta y, si procede, retira el beat.</p>
+    <form class="legal-form" id="denuncia-form" novalidate>
+      <div><label for="d-beat">Nombre del beat (y del productor, si lo sabes)</label><input type="text" id="d-beat" maxlength="160" autocomplete="off"></div>
+      <div><label for="d-motivo">Motivo</label>
+        <select id="d-motivo">
+          <option value="autor">El beat es mío y lo subió otra persona</option>
+          <option value="sample">Usa un sample o una voz mía sin permiso</option>
+          <option value="otro">Otro motivo</option>
+        </select></div>
+      <div><label for="d-nombre">Tu nombre</label><input type="text" id="d-nombre" maxlength="80" autocomplete="name"></div>
+      <div><label for="d-contacto">Teléfono (WhatsApp) o correo</label><input type="text" id="d-contacto" maxlength="120"></div>
+      <div><label for="d-detalle">Explica por qué es tuyo y cómo podemos comprobarlo</label><textarea id="d-detalle" maxlength="1500" placeholder="Ej: lo publiqué antes en…, tengo el proyecto original, enlace a mi versión…"></textarea></div>
+      <label class="legal-check" for="d-declara"><input type="checkbox" id="d-declara"> <span>Declaro que lo que digo es cierto y que soy el autor o lo represento.</span></label>
+      <div class="legal-msg" id="denuncia-msg" role="status" aria-live="polite"></div>
+      <button type="submit" id="denuncia-btn">Enviar denuncia</button>
+    </form>
+
+    <nav class="footer-legal" aria-label="Información legal">
+      <a href="/terminos">Términos y condiciones</a>
+      <a href="/privacidad">Política de privacidad</a>
+      <a href="/denunciar">Denunciar un beat</a>
+    </nav>
+  </main>
+  <script src="/denunciar.js"></script>
+</body>
+</html>
