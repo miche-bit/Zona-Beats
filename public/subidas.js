@@ -11,6 +11,7 @@
     audio: 250 * 1024 * 1024,
     wav: 1024 * 1024 * 1024,
     stems: 4 * 1024 * 1024 * 1024,
+    pack: 20 * 1024 * 1024 * 1024,
     cover: 8 * 1024 * 1024,
   };
 
@@ -26,7 +27,8 @@
   function recordar(kind, file, id) {
     var m = leerMapa();
     var ahora = Date.now();
-    Object.keys(m).forEach(function (k) { if (!m[k] || ahora - (m[k].t || 0) > 40 * 3600 * 1000) delete m[k]; });
+    // el servidor guarda una subida a medias 7 días: se recuerda lo mismo aquí
+    Object.keys(m).forEach(function (k) { if (!m[k] || ahora - (m[k].t || 0) > 7 * 24 * 3600 * 1000) delete m[k]; });
     m[huella(kind, file)] = { id: id, t: ahora };
     guardarMapa(m);
   }
@@ -174,11 +176,13 @@
         throw errorSubida(r.data.error || 'La subida se perdió en el servidor. Vuelve a intentarlo.', 404);
       }
       if (r.status === 413) throw errorSubida(r.data.error || 'El servidor no aceptó el tamaño del trozo.', 413);
+      if (r.status === 507) throw errorSubida(r.data.error || 'El servidor se quedó sin espacio. Avísale al administrador.', 507);
       // sin conexión, tiempo agotado, error del servidor o trozo incompleto: se espera y se reintenta.
       // Con conexión lenta el trozo se achica (hasta 256 KB) para que cada parte llegue a tiempo.
       if (r.status === 0 || r.status === 400) { trozo = Math.max(256 * 1024, Math.floor(trozo / 2)); rapidos = 0; }
       fallos++;
-      if (fallos > 8) throw errorSubida('Se cortó la conexión varias veces. Revisa tu internet y vuelve a pulsar el botón: la subida sigue donde quedó.', 0);
+      // un archivo enorme tarda horas: se aguantan cortes largos (apagones, wifi que se cae) antes de rendirse
+      if (fallos > (file.size > 1024 * 1024 * 1024 ? 60 : 8)) throw errorSubida('Se cortó la conexión varias veces. Revisa tu internet y vuelve a pulsar el botón: la subida sigue donde quedó.', 0);
       if (op.alReintentar) op.alReintentar(fallos);
       await esperar(Math.min(30000, 1500 * Math.pow(2, fallos - 1)));
       if (op.senal && op.senal.aborted) throw errorSubida('Subida pausada.', -1);

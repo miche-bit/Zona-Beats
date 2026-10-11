@@ -28,7 +28,8 @@ const db = require('./db');
 const { issueStreamToken, validateStreamToken } = require('./streamAuth');
 const { enviarBackup, restaurarDesdeZip, limpiarRestosRestauracion } = require('./backup');
 const { DatabaseSync } = require('node:sqlite');
-const { buildLicensePdf, LICENSE_LABELS } = require('./license');
+const { buildLicensePdf, buildRegistroPdf, buildPedidoPdf, LICENSE_LABELS } = require('./license');
+const almacen = require('./almacen');
 const producerAuth = require('./producerAuth');
 const { applyWatermark, getDurationSeconds, transcodificarMp3, miniaturaImagen } = require('./watermark');
 const { pipeline } = require('node:stream/promises');
@@ -493,6 +494,7 @@ const UPLOAD_KINDS = {
   audio: { exts: ALLOWED_AUDIO_EXT, max: 250 * 1024 * 1024, etiqueta: 'el audio' },
   wav: { exts: ['.wav'], max: 1024 * 1024 * 1024, etiqueta: 'el WAV' },
   stems: { exts: ['.zip', '.rar', '.7z'], max: 4 * 1024 * 1024 * 1024, etiqueta: 'los STEMS' },
+  pack: { exts: ['.zip', '.rar', '.7z'], max: 20 * 1024 * 1024 * 1024, etiqueta: 'el Sample Pack' },
   cover: { exts: ALLOWED_IMAGE_EXT, max: MAX_COVER_BYTES, etiqueta: 'la portada' },
   backup: { exts: ['.zip'], max: 64 * 1024 * 1024 * 1024, etiqueta: 'el backup', soloAdmin: true },
 };
@@ -500,6 +502,11 @@ const CHUNK_SIZE = 4 * 1024 * 1024;
 const CHUNK_MAX = 8 * 1024 * 1024;
 const subidasOcupadas = new Set();
 
+// Espacio libre del volumen (ZB_ESPACIO_LIBRE solo sirve para pruebas)
+function espacioLibre() {
+  if (process.env.ZB_ESPACIO_LIBRE) return Number(process.env.ZB_ESPACIO_LIBRE);
+  try { const st = fs.statfsSync(TMP_PROCESSING); return Number(st.bavail) * Number(st.bsize); } catch { return Infinity; }
+}
 function fmtMB(bytes) {
   return bytes >= 1024 * 1024 * 1024 ? `${Math.round(bytes / 1024 / 1024 / 1024 * 10) / 10} GB` : `${Math.round(bytes / 1024 / 1024)} MB`;
 }
@@ -521,7 +528,8 @@ function subidaDe(id, owner) {
 }
 
 function limpiarSubidasViejas() {
-  const limite = Date.now() - 48 * 3600 * 1000;
+  // una subida a medias se guarda 7 días desde el último trozo (apagones, conexión que se cae por horas)
+  const limite = Date.now() - 7 * 24 * 3600 * 1000;
   for (const up of db.prepare('SELECT id FROM uploads WHERE updated_at < ?').all(limite)) {
     try { fs.unlinkSync(rutaSubida(up.id)); } catch { /* ya no estaba */ }
     db.prepare('DELETE FROM uploads WHERE id = ?').run(up.id);
@@ -610,6 +618,7 @@ route('POST', '/api/uploads', async (req, res) => {
     const plan = planEfectivo(full);
     if (kind === 'wav' && !plan.wav) return sendJSON(res, 403, { error: `Tu plan ${plan.label} no incluye entrega en WAV. Sube al plan Pro o Studio.` });
     if (kind === 'stems' && !plan.stems) return sendJSON(res, 403, { error: `Tu plan ${plan.label} no incluye STEMS. Solo el plan Studio permite subir STEMS.` });
+    if (kind === 'pack' && !plan.packs) return sendJSON(res, 403, { error: `Tu plan ${plan.label} no permite vender Sample Packs. Sube al plan Pro o Studio.` });
     if (kind === 'audio' && !plan.audioExt.includes(ext)) {
       return sendJSON(res, 403, { error: plan.audioExt.length === 1 ? `Tu plan ${plan.label} solo permite subir audio en MP3 (320 kbps).` : `Tu plan ${plan.label} permite subir el audio en MP3 (320 kbps) o WAV.` });
     }
@@ -620,10 +629,18 @@ route('POST', '/api/uploads', async (req, res) => {
     try { fs.unlinkSync(rutaSubida(vieja.id)); } catch { /* nada */ }
     db.prepare('DELETE FROM uploads WHERE id = ?').run(vieja.id);
   }
+  // ¿cabe en el disco? Se cuenta lo que falta por llegar de las otras subidas a medias
+  const faltaDeOtras = db.prepare('SELECT COALESCE(SUM(size - received), 0) as s FROM uploads').get().s;
+  const libre = espacioLibre();
+  if (size + faltaDeOtras + 512 * 1024 * 1024 > libre) {
+    return sendJSON(res, 507, { sinEspacio: true, error: owner === 'admin'
+      ? `No hay espacio en el servidor: el archivo pesa ${fmtMB(size)} y quedan ${fmtMB(Math.max(0, libre - faltaDeOtras))} libres. Amplía el volumen en Railway (Volume → Settings) o borra archivos que no uses.`
+      : `El servidor no tiene espacio para este archivo (${fmtMB(size)}). Avísale al administrador para que lo amplíe.` });
+  }
   if (owner !== 'admin') {
     const enCurso = db.prepare('SELECT COALESCE(SUM(size), 0) as s FROM uploads WHERE owner = ?').get(owner).s;
-    if (enCurso + size > 6 * 1024 * 1024 * 1024) {
-      return sendJSON(res, 413, { error: 'Tienes demasiados archivos a medio subir. Termina de publicar tu beat o espera 2 días a que se borren solos.' });
+    if (enCurso + size > 22 * 1024 * 1024 * 1024) {
+      return sendJSON(res, 413, { error: 'Tienes demasiados archivos a medio subir. Termina de publicar tu beat o espera 7 días a que se borren solos.' });
     }
   }
   const id = crypto.randomBytes(16).toString('hex');
@@ -705,8 +722,10 @@ route('PUT', '/api/uploads/:id/chunk', async (req, res, params, query) => {
     try { fs.truncateSync(destino, up.received); } catch { /* nada */ }
     if (!res.headersSent && !res.destroyed) {
       const grande = err && err.code === 'TROZO_GRANDE';
-      const body = JSON.stringify({ error: grande ? 'El trozo es demasiado grande.' : 'El trozo no llegó completo. Se reintenta.', received: up.received });
-      res.writeHead(grande ? 413 : 400, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Length': Buffer.byteLength(body), Connection: 'close' });
+      const lleno = err && err.code === 'ENOSPC';
+      const body = JSON.stringify({ error: lleno ? 'El servidor se quedó sin espacio a mitad de la subida. Avísale al administrador: cuando haya espacio, vuelve a pulsar el botón y sigue donde quedó.'
+        : grande ? 'El trozo es demasiado grande.' : 'El trozo no llegó completo. Se reintenta.', received: up.received });
+      res.writeHead(lleno ? 507 : grande ? 413 : 400, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Length': Buffer.byteLength(body), Connection: 'close' });
       res.end(body);
       res.once('finish', () => { if (req.socket && !req.socket.destroyed) setTimeout(() => req.socket.destroy(), 1500).unref(); });
     }
@@ -733,7 +752,7 @@ function conProductor(rows) {
   return rows.map(t => ({ ...t, producer_display: t.producer_name || admin }));
 }
 
-// GET /api/tracks?type=catalog|playlist|vip
+// GET /api/tracks?type=catalog|playlist|vip|packs
 route('GET', '/api/tracks', (req, res, params, query) => {
   const type = query.get('type') || 'catalog';
   let rows;
@@ -755,23 +774,23 @@ route('GET', '/api/tracks', (req, res, params, query) => {
                ORDER BY o.id DESC LIMIT 1) as vip_owner
       FROM tracks t
       LEFT JOIN producers p ON p.id = t.producer_id
-      WHERE t.is_playlist = 0 AND t.is_exclusive = 1 AND t.sold = 1 AND t.approval_status = 'approved'
+      WHERE t.is_playlist = 0 AND t.is_pack = 0 AND t.is_exclusive = 1 AND t.sold = 1 AND t.approval_status = 'approved'
       ORDER BY t.created_at DESC
     `).all();
   } else {
     rows = db.prepare(`
       SELECT t.id, t.title, t.genre, t.description, t.cover_filename, t.duration_seconds, t.plays, t.likes,
-             t.price_label, t.price_cup, t.for_sale, t.is_exclusive, t.sold, t.created_at,
+             t.price_label, t.price_cup, t.for_sale, t.is_exclusive, t.sold, t.is_pack, t.created_at,
              t.producer_id, p.name as producer_name
       FROM tracks t
       LEFT JOIN producers p ON p.id = t.producer_id
-      WHERE t.is_playlist = 0 AND t.sold = 0 AND t.approval_status = 'approved' AND ${FILTRO_PRODUCTOR_ACTIVO}
+      WHERE t.is_playlist = 0 AND t.sold = 0 AND t.is_pack = ${type === 'packs' ? 1 : 0} AND t.approval_status = 'approved' AND ${FILTRO_PRODUCTOR_ACTIVO}
       ORDER BY t.created_at DESC
     `).all();
   }
 
   const pct = descuentoActivo();
-  if (type === 'catalog') {
+  if (type === 'catalog' || type === 'packs') {
     rows = rows.map(t => ({
       ...t,
       price_cup: aplicarDescuento(t.price_cup, pct),
@@ -838,7 +857,7 @@ route('GET', '/api/verify-hash/:hash', (req, res, params) => {
 
   const track = db.prepare(`
     SELECT t.id, t.title, t.created_at, p.name as producer_name,
-           CASE WHEN t.stems_hash = ? THEN 'stems' WHEN t.wav_hash = ? THEN 'wav' WHEN t.mp3_hash = ? THEN 'mp3' ELSE 'master' END as tipo_archivo
+           CASE WHEN t.stems_hash = ? THEN (CASE WHEN t.is_pack = 1 THEN 'pack' ELSE 'stems' END) WHEN t.wav_hash = ? THEN 'wav' WHEN t.mp3_hash = ? THEN 'mp3' ELSE 'master' END as tipo_archivo
     FROM tracks t LEFT JOIN producers p ON p.id = t.producer_id
     WHERE t.master_hash = ? OR t.mp3_hash = ? OR t.wav_hash = ? OR t.stems_hash = ?
   `).get(hash, hash, hash, hash, hash, hash, hash);
@@ -861,6 +880,11 @@ route('GET', '/api/verify-hash/:hash', (req, res, params) => {
       })),
     });
   }
+
+  // el beat pudo borrarse de la tienda, pero su registro de autoría sigue
+  const reg = db.prepare('SELECT * FROM registros WHERE archivos_json LIKE ?').get(`%"hash":"${hash}"%`)
+    || db.prepare('SELECT r.* FROM registros r JOIN registro_huellas h ON h.codigo = r.codigo WHERE h.hash = ?').get(hash);
+  if (reg) return sendJSON(res, 200, { type: 'registro', ...registroPublico(reg) });
 
   sendJSON(res, 404, { error: 'Ese hash no corresponde a ninguna licencia ni a ningún archivo registrado en esta plataforma.' });
 });
@@ -895,12 +919,13 @@ function findOrderByBuyerToken(token) {
 
 // Qué archivos recibe cada licencia: Básica MP3 · Premium MP3 + WAV · Ilimitada/Exclusiva MP3 + WAV + STEMS
 function archivosDeCompra(order) {
-  const t = db.prepare('SELECT title, master_filename, mp3_filename, wav_filename, stems_filename FROM tracks WHERE id = ?').get(order.track_id);
+  const t = db.prepare('SELECT title, master_filename, mp3_filename, wav_filename, stems_filename, stems_remote, stems_size FROM tracks WHERE id = ?').get(order.track_id);
   if (!t) return [];
   const lista = [];
   const vistos = new Set();
   const nombreBonito = (ext, tipo) => {
     if (tipo === 'stems') return `STEMS (${ext.replace('.', '').toUpperCase()})`;
+    if (tipo === 'pack') return `Sample Pack (${ext.replace('.', '').toUpperCase()})`;
     return ext.replace('.', '').toUpperCase();
   };
   const agregar = (tipo, nombre) => {
@@ -913,9 +938,18 @@ function archivosDeCompra(order) {
     const ext = path.extname(nombre).toLowerCase();
     lista.push({ f: tipo, etiqueta: nombreBonito(ext, tipo), nombre, path: p, ext, size: st.size, titulo: t.title });
   };
+  // el archivo grande (pack o STEMS) puede estar en el almacenamiento externo
+  const agregarGrande = (tipo) => {
+    if (t.stems_remote) {
+      const ext = path.extname(t.stems_remote).toLowerCase();
+      lista.push({ f: tipo, etiqueta: nombreBonito(ext, tipo), nombre: t.stems_remote, remoto: t.stems_remote, ext, size: Number(t.stems_size) || 0, titulo: t.title });
+    } else agregar(tipo, t.stems_filename);
+  };
+  // un Sample Pack entrega solo el archivo comprimido del pack
+  if (order.license_type === 'pack') { agregarGrande('pack'); return lista; }
   agregar('mp3', t.mp3_filename || t.master_filename);
   if (['premium', 'unlimited', 'exclusive'].includes(order.license_type)) agregar('wav', t.wav_filename);
-  if (SINGLE_SALE_LICENSES.includes(order.license_type)) agregar('stems', t.stems_filename);
+  if (SINGLE_SALE_LICENSES.includes(order.license_type)) agregarGrande('stems');
   return lista;
 }
 
@@ -944,6 +978,13 @@ route('GET', '/api/purchase/:token', (req, res, params) => {
     pdfUrl: aprobada ? `/api/license/${encodeURIComponent(order.certificate_id)}/pdf` : null,
     files: archivos.map(a => ({ f: a.f, label: a.etiqueta, size: a.size, url: `${base}?f=${a.f}` })),
     downloadUrl: archivos.length ? `${base}?f=${archivos[0].f}` : null,
+    codigo: codigoPedido(order),
+    comprobanteUrl: `/api/purchase/${order.buyer_token}/comprobante`,
+    limiteAprobacion: limiteAprobacion(order).toISOString(),
+    horasAprobacion: confianzaConfig().horas,
+    puedeReclamar: order.status === 'rejected' || (order.status === 'pending' && Date.now() >= limiteAprobacion(order).getTime()),
+    reclamo: order.reclamo_at ? { fecha: order.reclamo_at, texto: order.reclamo_texto, atendido: Boolean(order.reclamo_atendido) } : null,
+    adminPhone: telefonoAdmin(),
   });
 });
 
@@ -957,7 +998,13 @@ route('GET', '/api/purchase/:token/download', (req, res, params, query) => {
   if (!archivo) {
     return sendJSON(res, 404, { error: 'El archivo de esta compra todavía no está disponible para descarga automática. Escríbele al vendedor.' });
   }
-  const nombre = `${archivo.titulo || 'beat'} - ${archivo.etiqueta.replace(/[()]/g, '')}${archivo.ext}`;
+  const nombre = archivo.f === 'pack' ? `${archivo.titulo || 'Sample Pack'}${archivo.ext}` : `${archivo.titulo || 'beat'} - ${archivo.etiqueta.replace(/[()]/g, '')}${archivo.ext}`;
+  if (archivo.remoto) {
+    // directo desde el almacenamiento: no pasa por el límite de 15 minutos de Railway y se puede retomar
+    if (!almacen.activo()) return sendJSON(res, 503, { error: 'El archivo está en el almacenamiento externo y el servidor no tiene sus credenciales. Avísale al vendedor.' });
+    res.writeHead(302, { Location: almacen.enlaceFirmado(archivo.remoto, { nombre }), 'Cache-Control': 'private, no-store' });
+    return res.end();
+  }
   enviarArchivo(req, res, archivo.path, contentTypeDescarga(archivo.ext), {
     'Content-Disposition': dispositionAdjunto(nombre),
     'Cache-Control': 'private, no-store',
@@ -1036,7 +1083,7 @@ route('GET', '/api/producer/me', (req, res) => {
   const full = producerFull(producer.id);
   const plan = getPlan(full);
   const cfg = db.prepare('SELECT admin_phone FROM platform_config WHERE id = 1').get();
-  const usados = db.prepare("SELECT COUNT(*) as c FROM tracks WHERE producer_id = ? AND approval_status != 'rejected' AND sold = 0").get(producer.id).c;
+  const usados = db.prepare("SELECT COUNT(*) as c FROM tracks WHERE producer_id = ? AND approval_status != 'rejected' AND sold = 0 AND is_pack = 0").get(producer.id).c;
   let social = []; let accounts = [];
   try { social = JSON.parse(full.social_links_json || '[]'); } catch {}
   try { accounts = JSON.parse(full.accounts_json || '[]'); } catch {}
@@ -1265,7 +1312,7 @@ function hotConfig() {
   return { precioSemanaUsd: usd, precioSemanaCup: usd > 0 && rate > 0 ? Math.round(usd * rate) : 0, cupos: Math.max(1, Number(c.hot_slots) || 8) };
 }
 // Condición SQL de un beat que puede estar en Hots (a la venta, aprobado, de un productor activo)
-const HOT_TRACK_OK = `t.is_playlist = 0 AND t.sold = 0 AND t.approval_status = 'approved' AND ${FILTRO_PRODUCTOR_ACTIVO}`;
+const HOT_TRACK_OK = `t.is_playlist = 0 AND t.is_pack = 0 AND t.sold = 0 AND t.approval_status = 'approved' AND ${FILTRO_PRODUCTOR_ACTIVO}`;
 function hotsActivos() {
   return db.prepare(`
     SELECT h.track_id, MAX(h.ends_at) as ends_at
@@ -1487,17 +1534,21 @@ route('POST', '/api/admin/hots/:id/approve', (req, res, params) => {
   if (r.status !== 'pending') return sendJSON(res, 409, { error: 'Este pedido ya fue respondido' });
   const { error } = beatParaHot(r.track_id, null);
   if (error) return sendJSON(res, 400, { error: error + ' Recházalo y avísale al productor.' });
-  sendJSON(res, 200, { ok: true, ...activarHot(r.id) });
+  const act = activarHot(r.id);
+  const tituloHot = (db.prepare('SELECT title FROM tracks WHERE id = ?').get(r.track_id) || {}).title || '';
+  anotar(r.producer_id, 'Aprobó tu Hot', `«${tituloHot}» · ${r.weeks} semana(s)`, r.track_id);
+  sendJSON(res, 200, { ok: true, ...act });
 });
 
 route('POST', '/api/admin/hots/:id/reject', async (req, res, params) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
-  const r = db.prepare('SELECT id, status FROM hot_requests WHERE id = ?').get(params.id);
+  const r = db.prepare('SELECT id, status, producer_id, track_id FROM hot_requests WHERE id = ?').get(params.id);
   if (!r) return sendJSON(res, 404, { error: 'Pedido no encontrado' });
   if (r.status !== 'pending') return sendJSON(res, 409, { error: 'Este pedido ya fue respondido' });
   let reason = '';
   try { const b = await readBody(req, 2048); if (b.length) reason = limpiarTexto(JSON.parse(b.toString('utf8')).reason, 300); } catch { /* sin motivo */ }
   db.prepare("UPDATE hot_requests SET status = 'rejected', reject_reason = ?, resolved_at = datetime('now') WHERE id = ?").run(reason, r.id);
+  anotar(r.producer_id, 'Rechazó tu pedido de Hot', reason ? `Motivo: ${reason}` : '', r.track_id);
   sendJSON(res, 200, { ok: true });
 });
 
@@ -1522,6 +1573,8 @@ route('POST', '/api/admin/hots/:id/quitar', (req, res, params) => {
   const r = db.prepare('SELECT * FROM hot_requests WHERE id = ?').get(params.id);
   if (!r || r.status !== 'approved') return sendJSON(res, 404, { error: 'Hot no encontrado' });
   db.prepare("UPDATE hot_requests SET ends_at = datetime('now'), starts_at = CASE WHEN starts_at > datetime('now') THEN datetime('now') ELSE starts_at END, reject_reason = 'Lo quitó el administrador' WHERE id = ?").run(r.id);
+  const tq = db.prepare('SELECT title FROM tracks WHERE id = ?').get(r.track_id) || {};
+  anotar(r.producer_id, 'Quitó tu beat de Hots antes de tiempo', `«${tq.title || ''}»`, r.track_id);
   sendJSON(res, 200, { ok: true });
 });
 
@@ -1600,12 +1653,13 @@ route('POST', '/api/admin/plan-requests/:id/approve', (req, res, params) => {
   const { hasta, extendido } = activarPlan(p, r.plan, r.months);
   db.prepare("UPDATE plan_requests SET status = 'approved', paid_until_result = ?, resolved_at = datetime('now') WHERE id = ?").run(hasta, r.id);
   const previewsLimpios = quitarMarcaDePreviews(r.producer_id);
+  anotar(r.producer_id, 'Aprobó tu compra de plan', `Plan ${(PRODUCER_PLANS[r.plan] || {}).label || r.plan} hasta el ${hasta}`);
   sendJSON(res, 200, { ok: true, plan: r.plan, paidUntil: hasta, extendido, previewsSinMarca: previewsLimpios });
 });
 
 route('POST', '/api/admin/plan-requests/:id/reject', async (req, res, params) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
-  const r = db.prepare('SELECT id, status FROM plan_requests WHERE id = ?').get(params.id);
+  const r = db.prepare('SELECT id, status, producer_id FROM plan_requests WHERE id = ?').get(params.id);
   if (!r) return sendJSON(res, 404, { error: 'Solicitud no encontrada' });
   if (r.status !== 'pending') return sendJSON(res, 409, { error: 'Esta solicitud ya fue respondida' });
   let reason = '';
@@ -1614,6 +1668,7 @@ route('POST', '/api/admin/plan-requests/:id/reject', async (req, res, params) =>
     if (body.length) reason = String(JSON.parse(body.toString('utf8')).reason || '').slice(0, 300).trim();
   } catch { /* sin motivo */ }
   db.prepare("UPDATE plan_requests SET status = 'rejected', reject_reason = ?, resolved_at = datetime('now') WHERE id = ?").run(reason, r.id);
+  anotar(r.producer_id, 'Rechazó tu compra de plan', reason ? `Motivo: ${reason}` : '');
   sendJSON(res, 200, { ok: true });
 });
 
@@ -1627,7 +1682,7 @@ route('GET', '/api/producers', (req, res) => {
     if (planEfectivo(r).social) {
       try { social = JSON.parse(r.social_links_json || '[]'); } catch {}
     }
-    const beats = db.prepare("SELECT COUNT(*) as c FROM tracks WHERE producer_id = ? AND approval_status = 'approved' AND sold = 0").get(r.id).c;
+    const beats = db.prepare("SELECT COUNT(*) as c FROM tracks WHERE producer_id = ? AND approval_status = 'approved' AND sold = 0 AND is_pack = 0").get(r.id).c;
     return { id: r.id, name: r.name, bio: r.bio || '', avatar: r.avatar_filename || '', socialLinks: social, beats };
   });
   sendJSON(res, 200, { producers });
@@ -1643,7 +1698,7 @@ route('GET', '/api/producers/:id/tracks', (req, res, params) => {
   let tracks = db.prepare(`
     SELECT id, title, genre, description, cover_filename, duration_seconds, plays, likes,
            price_label, price_cup, for_sale, is_exclusive, sold, created_at, producer_id
-    FROM tracks WHERE producer_id = ? AND approval_status = 'approved' AND sold = 0 AND is_playlist = 0
+    FROM tracks WHERE producer_id = ? AND approval_status = 'approved' AND sold = 0 AND is_playlist = 0 AND is_pack = 0
     ORDER BY created_at DESC
   `).all(params.id);
   const pct = descuentoActivo();
@@ -1696,7 +1751,7 @@ route('POST', '/api/orders', async (req, res) => {
   const buyerPhone = (fields.buyerPhone || '').trim().slice(0, 40);
   const currency = (fields.currency || 'CUP').trim().slice(0, 20);
   // (el precio que muestra el navegador ya no se usa: la etiqueta de la licencia la arma el servidor)
-  const licenseType = LICENSE_TYPES.includes(fields.licenseType) ? fields.licenseType : null;
+  const licenseType = (LICENSE_TYPES.includes(fields.licenseType) || fields.licenseType === 'pack') ? fields.licenseType : null;
 
   if (!trackId || !buyerName || !buyerPhone || !receiptPart || !licenseType) {
     return sendJSON(res, 400, { error: 'Faltan datos: nombre, teléfono, comprobante o tipo de licencia' });
@@ -1768,8 +1823,10 @@ route('POST', '/api/orders', async (req, res) => {
     track.producer_id || null, priceCupAtSale, commissionPercent, redondear(producerEarning), licenseType, buyerToken, vipPublico,
     pago.moneda, pago.unidades, pago.tasa, track.producer_id ? redondearMoneda(pago.unidades * (1 - commissionPercent / 100), pago.moneda) : 0
   );
+  const nuevaOrden = db.prepare('SELECT * FROM orders WHERE buyer_token = ?').get(buyerToken);
+  const codigo = codigoPedido(nuevaOrden);
 
-  sendJSON(res, 201, { ok: true, orderToken: buyerToken });
+  sendJSON(res, 201, { ok: true, orderToken: buyerToken, codigo, comprobanteUrl: `/api/purchase/${buyerToken}/comprobante`, horasAprobacion: confianzaConfig().horas });
 });
 
 const reproduccionesRecientes = new Map();
@@ -1870,6 +1927,244 @@ route('GET', '/api/avatar', async (req, res, params, query) => {
   const profile = db.prepare('SELECT avatar_filename FROM profile WHERE id = 1').get();
   if (!profile || !profile.avatar_filename) return sendJSON(res, 404, { error: 'Sin avatar' });
   await servirImagen(req, res, UPLOADS_COVERS, profile.avatar_filename, query, 600);
+});
+
+
+// ---------- Confianza: registro de autoría, actividad, comprobantes y reclamos ----------
+function nuevoCodigo(prefijo, id) {
+  return `${prefijo}-${String(id).padStart(6, '0')}-${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
+}
+
+// Anota en el registro del productor algo que el administrador hizo con sus cosas.
+// `sinRepetirMin` evita anotar diez veces la misma descarga (el navegador la pide por partes).
+function anotar(producerId, accion, detalle = '', trackId = null, sinRepetirMin = 0) {
+  if (!producerId) return;
+  try {
+    if (sinRepetirMin) {
+      const igual = db.prepare(`SELECT 1 FROM actividad WHERE producer_id = ? AND accion = ? AND COALESCE(track_id, 0) = ? AND detalle = ?
+                                AND created_at > datetime('now', ?)`).get(producerId, accion, trackId || 0, String(detalle || ''), `-${sinRepetirMin} minutes`);
+      if (igual) return;
+    }
+    db.prepare('INSERT INTO actividad (producer_id, accion, detalle, track_id) VALUES (?, ?, ?, ?)')
+      .run(producerId, accion, String(detalle || '').slice(0, 500), trackId || null);
+  } catch (e) { console.error('Registro de actividad:', e.message); }
+}
+
+function archivosParaRegistro(t) {
+  const lista = [];
+  const vistos = new Set();
+  const add = (etiqueta, hash) => { if (hash && !vistos.has(hash)) { vistos.add(hash); lista.push({ etiqueta, hash }); } };
+  if (t.is_pack) { add('Archivo del pack', t.stems_hash); add('Demo', t.master_hash); return lista; }
+  add('Audio original', t.master_hash);
+  add('MP3 de entrega', t.mp3_hash);
+  add('WAV', t.wav_hash);
+  add('STEMS', t.stems_hash);
+  return lista;
+}
+
+// Registro de autoría de un beat o pack de productor (una vez; luego no cambia ni se borra)
+function registrarObra(trackId) {
+  const t = db.prepare('SELECT t.*, p.name as producer_name FROM tracks t JOIN producers p ON p.id = t.producer_id WHERE t.id = ?').get(trackId);
+  if (!t) return null;
+  const ya = db.prepare('SELECT * FROM registros WHERE track_id = ?').get(t.id);
+  if (ya) return ya;
+  db.prepare(`INSERT INTO registros (codigo, track_id, producer_id, producer_name, titulo, tipo, archivos_json, declarado_at, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(nuevoCodigo('REG', t.id), t.id, t.producer_id, t.producer_name, t.title, t.is_pack ? 'pack' : 'beat',
+      JSON.stringify(archivosParaRegistro(t)), t.authorship_declared_at || '', t.created_at || new Date().toISOString().slice(0, 19).replace('T', ' '));
+  return db.prepare('SELECT * FROM registros WHERE track_id = ?').get(t.id);
+}
+// los beats y packs subidos antes de existir el registro también quedan registrados
+try {
+  for (const t of db.prepare('SELECT id FROM tracks WHERE producer_id IS NOT NULL AND id NOT IN (SELECT track_id FROM registros WHERE track_id IS NOT NULL)').all()) registrarObra(t.id);
+} catch (e) { console.error('Registros de autoría:', e.message); }
+
+// agrega a un registro la huella que se calculó después (solo se agrega, nunca se cambia)
+function agregarHuellaRegistro(trackId, etiqueta, hash) {
+  const r = db.prepare('SELECT * FROM registros WHERE track_id = ?').get(trackId);
+  if (!r || !hash) return;
+  if (registroPublico(r).archivos.some(a => a.hash === hash)) return;
+  db.prepare('INSERT INTO registro_huellas (codigo, etiqueta, hash) VALUES (?, ?, ?)').run(r.codigo, etiqueta, hash);
+}
+
+function registroPublico(r) {
+  let archivos = [];
+  try { archivos = JSON.parse(r.archivos_json || '[]'); } catch { archivos = []; }
+  for (const h of db.prepare('SELECT etiqueta, hash FROM registro_huellas WHERE codigo = ? ORDER BY id').all(r.codigo)) archivos.push({ etiqueta: h.etiqueta, hash: h.hash });
+  return {
+    codigo: r.codigo, titulo: r.titulo, tipo: r.tipo, productor: r.producer_name,
+    fecha: r.created_at, declarado: r.declarado_at || '', archivos,
+  };
+}
+
+route('GET', '/api/producer/registros', (req, res) => {
+  const producer = getAuthedProducer(req);
+  if (!producer) return sendJSON(res, 401, { error: 'No autorizado' });
+  const filas = db.prepare(`SELECT r.*, (SELECT COUNT(*) FROM tracks t WHERE t.id = r.track_id) as sigue
+                            FROM registros r WHERE r.producer_id = ? ORDER BY r.id DESC`).all(producer.id);
+  sendJSON(res, 200, { registros: filas.map(r => ({ ...registroPublico(r), trackId: r.track_id, sigue: Boolean(r.sigue) })) });
+});
+
+route('GET', '/api/producer/registros/:codigo/pdf', (req, res, params) => {
+  const producer = getAuthedProducer(req);
+  if (!producer) return sendJSON(res, 401, { error: 'No autorizado' });
+  const r = db.prepare('SELECT * FROM registros WHERE codigo = ? AND producer_id = ?').get(String(params.codigo || '').toUpperCase(), producer.id);
+  if (!r) return sendJSON(res, 404, { error: 'Registro no encontrado' });
+  const perfil = db.prepare('SELECT artist_name FROM profile WHERE id = 1').get();
+  const d = registroPublico(r);
+  const pdf = buildRegistroPdf({ ...d, verifyUrl: `${baseUrlFrom(req)}/verify/${r.codigo}`, platformName: (perfil && perfil.artist_name) || 'Zona Beats' });
+  res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': dispositionAdjunto(`Registro ${r.codigo}.pdf`), 'Content-Length': pdf.length, 'Cache-Control': 'private, no-store' });
+  res.end(pdf);
+});
+
+// verificación pública de un registro de autoría
+route('GET', '/api/registro/:codigo', (req, res, params) => {
+  if (!rateLimit(req, 'registro', 240, 60 * 1000)) return sendJSON(res, 429, { error: 'Demasiadas consultas. Espera un minuto.' });
+  const r = db.prepare('SELECT * FROM registros WHERE codigo = ?').get(String(params.codigo || '').toUpperCase());
+  if (!r) return sendJSON(res, 404, { error: 'No existe un registro con ese código' });
+  sendJSON(res, 200, registroPublico(r));
+});
+
+route('GET', '/api/producer/actividad', (req, res) => {
+  const producer = getAuthedProducer(req);
+  if (!producer) return sendJSON(res, 401, { error: 'No autorizado' });
+  const filas = db.prepare('SELECT id, accion, detalle, track_id, created_at FROM actividad WHERE producer_id = ? ORDER BY id DESC LIMIT 1000').all(producer.id);
+  sendJSON(res, 200, { actividad: filas });
+});
+
+// --- pedidos: comprobante, plazo y reclamo
+function confianzaConfig() {
+  const c = db.prepare('SELECT titular_nombre, titular_figura, orden_horas FROM platform_config WHERE id = 1').get() || {};
+  return { titular: c.titular_nombre || '', figura: c.titular_figura || '', horas: Math.max(1, Number(c.orden_horas) || 24) };
+}
+function fechaUtc(f) {
+  const t = String(f || '');
+  return new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(t) ? t : t.replace(' ', 'T') + 'Z');
+}
+function limiteAprobacion(order) {
+  return new Date(fechaUtc(order.created_at).getTime() + confianzaConfig().horas * 3600000);
+}
+function codigoPedido(order) {
+  if (order.control_code) return order.control_code;
+  const codigo = nuevoCodigo('PED', order.id);
+  db.prepare('UPDATE orders SET control_code = ? WHERE id = ?').run(codigo, order.id);
+  return codigo;
+}
+const ESTADO_PEDIDO = { pending: 'pago enviado, pendiente de verificación', approved: 'aprobado (licencia emitida)', rejected: 'rechazado' };
+
+route('GET', '/api/purchase/:token/comprobante', (req, res, params) => {
+  if (!rateLimit(req, 'purchase', 400, 60 * 1000)) return sendJSON(res, 429, { error: 'Demasiadas consultas. Espera un minuto.' });
+  const order = findOrderByBuyerToken(params.token);
+  if (!order) return sendJSON(res, 404, { error: 'No encontramos esta compra.' });
+  const perfil = db.prepare('SELECT artist_name FROM profile WHERE id = 1').get();
+  const cfg = confianzaConfig();
+  const codigo = codigoPedido(order);
+  const pdf = buildPedidoPdf({
+    codigo, titulo: order.track_title, esPack: order.license_type === 'pack',
+    licencia: LICENSE_LABELS[order.license_type] || order.license_type, precio: order.price_label,
+    comprador: order.buyer_name, fecha: order.created_at, estado: ESTADO_PEDIDO[order.status] || order.status,
+    horas: cfg.horas, titular: cfg.titular, figura: cfg.figura, contacto: telefonoAdmin(),
+    verifyUrl: `${baseUrlFrom(req)}/verify/${codigo}`, platformName: (perfil && perfil.artist_name) || 'Zona Beats',
+  });
+  res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': dispositionAdjunto(`Pedido ${codigo}.pdf`), 'Content-Length': pdf.length, 'Cache-Control': 'private, no-store' });
+  res.end(pdf);
+});
+
+// verificación pública de un pedido (sin datos personales del comprador)
+route('GET', '/api/pedido/:codigo', (req, res, params) => {
+  if (!rateLimit(req, 'license', 240, 60 * 1000)) return sendJSON(res, 429, { error: 'Demasiadas consultas. Espera un minuto.' });
+  const o = db.prepare('SELECT * FROM orders WHERE control_code = ?').get(String(params.codigo || '').toUpperCase());
+  if (!o) return sendJSON(res, 404, { error: 'No existe un pedido con ese código' });
+  sendJSON(res, 200, {
+    codigo: o.control_code, titulo: o.track_title, licencia: LICENSE_LABELS[o.license_type] || o.license_type,
+    precio: o.price_label, fecha: o.created_at, estado: o.status, estadoTexto: ESTADO_PEDIDO[o.status] || o.status,
+    certificateId: o.status === 'approved' ? o.certificate_id : null,
+  });
+});
+
+route('POST', '/api/purchase/:token/reclamo', async (req, res, params) => {
+  if (!rateLimit(req, 'reclamo', 10, 60 * 60 * 1000)) return sendJSON(res, 429, { error: 'Ya enviaste varios reclamos. Espera un rato.' });
+  const order = findOrderByBuyerToken(params.token);
+  if (!order) return sendJSON(res, 404, { error: 'No encontramos esta compra.' });
+  let d;
+  try { d = JSON.parse((await readBody(req, 4096)).toString('utf8') || '{}'); } catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
+  const texto = limpiarTexto(d.texto, 600);
+  if (texto.length < 5) return sendJSON(res, 400, { error: 'Cuéntale al vendedor qué pasó.' });
+  if (order.status === 'approved') return sendJSON(res, 409, { error: 'Esta compra ya fue aprobada.' });
+  if (order.status === 'pending' && Date.now() < limiteAprobacion(order).getTime()) {
+    return sendJSON(res, 409, { error: 'El vendedor todavía está dentro del plazo para aprobar tu compra.' });
+  }
+  db.prepare("UPDATE orders SET reclamo_at = datetime('now'), reclamo_texto = ?, reclamo_atendido = 0 WHERE id = ?").run(texto, order.id);
+  sendJSON(res, 200, { ok: true, adminPhone: telefonoAdmin(), codigo: codigoPedido(order) });
+});
+
+route('POST', '/api/admin/orders/:id/reclamo-atendido', (req, res, params) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  const r = db.prepare("UPDATE orders SET reclamo_atendido = 1 WHERE id = ? AND reclamo_at != ''").run(Number(params.id));
+  if (!r.changes) return sendJSON(res, 404, { error: 'Ese pedido no tiene reclamo' });
+  sendJSON(res, 200, { ok: true });
+});
+
+// --- datos públicos de la tienda: quién vende y cifras reales
+function minutosAprobacion() {
+  const filas = db.prepare("SELECT created_at, approved_at FROM orders WHERE status = 'approved' AND approved_at != '' AND approved_at IS NOT NULL AND created_at > datetime('now', '-90 days')").all();
+  const mins = filas.map(o => (fechaUtc(o.approved_at) - fechaUtc(o.created_at)) / 60000).filter(m => Number.isFinite(m) && m >= 0).sort((a, b) => a - b);
+  if (!mins.length) return null;
+  const mitad = Math.floor(mins.length / 2);
+  return { mediana: Math.round(mins.length % 2 ? mins[mitad] : (mins[mitad - 1] + mins[mitad]) / 2), muestras: mins.length };
+}
+
+route('GET', '/api/confianza', (req, res) => {
+  const cfg = confianzaConfig();
+  const entregadas = db.prepare("SELECT COUNT(*) as c FROM orders WHERE status = 'approved'").get().c;
+  const productores = db.prepare('SELECT COUNT(*) as c FROM producers WHERE approved = 1 AND active = 1').get().c;
+  const primera = db.prepare("SELECT MIN(created_at) as f FROM orders WHERE status = 'approved'").get().f || '';
+  sendJSON(res, 200, {
+    titular: cfg.titular, figura: cfg.figura, contacto: telefonoAdmin(), horasAprobacion: cfg.horas,
+    cifras: { entregadas, productores, aprobacion: minutosAprobacion(), desde: primera },
+  });
+});
+
+route('GET', '/api/admin/confianza', (req, res) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  sendJSON(res, 200, confianzaConfig());
+});
+route('POST', '/api/admin/confianza', async (req, res) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  let d;
+  try { d = JSON.parse((await readBody(req, 4096)).toString('utf8') || '{}'); } catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
+  const horas = Math.round(Number(d.horas));
+  if (!Number.isFinite(horas) || horas < 1 || horas > 720) return sendJSON(res, 400, { error: 'El plazo para aprobar va de 1 a 720 horas.' });
+  db.prepare('UPDATE platform_config SET titular_nombre = ?, titular_figura = ?, orden_horas = ? WHERE id = 1')
+    .run(limpiarTexto(d.titular, 120), limpiarTexto(d.figura, 200), horas);
+  sendJSON(res, 200, { ok: true, ...confianzaConfig() });
+});
+
+// --- comprobante del pago que el administrador le hace al productor
+function guardarImagenDataUrl(dataUrl, prefijo) {
+  const m = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(String(dataUrl || ''));
+  if (!m) return null;
+  const buf = Buffer.from(m[2], 'base64');
+  if (!buf.length || buf.length > MAX_RECEIPT_BYTES) return null;
+  const firmas = { jpeg: [0xff, 0xd8], png: [0x89, 0x50], webp: [0x52, 0x49] };
+  if (!firmas[m[1]].every((b, i) => buf[i] === b)) return null;
+  const nombre = `${prefijo}${crypto.randomUUID()}.${m[1] === 'jpeg' ? 'jpg' : m[1]}`;
+  fs.writeFileSync(path.join(UPLOADS_RECEIPTS, nombre), buf);
+  return nombre;
+}
+function enviarComprobantePago(req, res, w) {
+  if (!w || !w.proof_filename) return sendJSON(res, 404, { error: 'Este pago no tiene comprobante' });
+  const ext = path.extname(w.proof_filename).toLowerCase();
+  enviarArchivo(req, res, path.join(UPLOADS_RECEIPTS, path.basename(w.proof_filename)), contentTypeForImage(ext), { 'Cache-Control': 'private, no-store' });
+}
+route('GET', '/api/producer/withdrawals/:id/comprobante', (req, res, params) => {
+  const producer = getAuthedProducer(req);
+  if (!producer) return sendJSON(res, 401, { error: 'No autorizado' });
+  enviarComprobantePago(req, res, db.prepare('SELECT * FROM producer_withdrawals WHERE id = ? AND producer_id = ?').get(params.id, producer.id));
+});
+route('GET', '/api/admin/withdrawals/:id/comprobante', (req, res, params) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  enviarComprobantePago(req, res, db.prepare('SELECT * FROM producer_withdrawals WHERE id = ?').get(params.id));
 });
 
 route('POST', '/api/admin/login', async (req, res) => {
@@ -1985,7 +2280,7 @@ route('GET', '/api/producer/check', (req, res) => {
 route('GET', '/api/producer/tracks', (req, res) => {
   const producer = getAuthedProducer(req);
   if (!producer) return sendJSON(res, 401, { error: 'No autorizado' });
-  const tracks = db.prepare('SELECT * FROM tracks WHERE producer_id = ? ORDER BY created_at DESC').all(producer.id).map(t => ({
+  const tracks = db.prepare('SELECT * FROM tracks WHERE producer_id = ? AND is_pack = 0 ORDER BY created_at DESC').all(producer.id).map(t => ({
     id: t.id, title: t.title, genre: t.genre, description: t.description, artist_credit: t.artist_credit,
     cover_filename: t.cover_filename, plays: t.plays, likes: t.likes, price_label: t.price_label, price_cup: t.price_cup,
     is_playlist: t.is_playlist, is_exclusive: t.is_exclusive, sold: t.sold, approval_status: t.approval_status,
@@ -1993,6 +2288,7 @@ route('GET', '/api/producer/tracks', (req, res) => {
     licenses: getTrackLicenses(t.id),
     archivos: archivosDePista(t),
     ventas: db.prepare("SELECT COUNT(*) as c FROM orders WHERE track_id = ? AND status = 'approved'").get(t.id).c,
+    registro: (db.prepare('SELECT codigo FROM registros WHERE track_id = ?').get(t.id) || {}).codigo || '',
   }));
   sendJSON(res, 200, { tracks });
 });
@@ -2004,6 +2300,7 @@ route('POST', '/api/producer/tracks/:id', async (req, res, params) => {
   if (!producer) return sendJSON(res, 401, { error: 'No autorizado' });
   const track = db.prepare('SELECT * FROM tracks WHERE id = ? AND producer_id = ?').get(params.id, producer.id);
   if (!track) return sendJSON(res, 404, { error: 'Beat no encontrado' });
+  if (track.is_pack) return sendJSON(res, 400, { error: 'Los Sample Packs se editan desde la pestaña Sample Packs.' });
   if (track.sold) return sendJSON(res, 409, { error: 'Este beat ya se vendió con licencia única y no se puede editar.' });
   let d;
   try { d = JSON.parse((await readBody(req, 16 * 1024)).toString('utf8')); }
@@ -2097,8 +2394,20 @@ route('GET', '/api/producer/earnings', (req, res) => {
 
 function borrarArchivosTrack(t) {
   borrarMiniaturas(t.cover_filename);
+  if (t.stems_remote) almacen.borrar(t.stems_remote);
+  // si el pack se borra antes de terminar su huella, primero se calcula (para el registro del productor) y después se borra
+  let stemsLocal = t.stems_filename;
+  if (t.stems_filename && !t.stems_hash && t.producer_id && fs.existsSync(path.join(UPLOADS_MASTERS, t.stems_filename))) {
+    const ruta = path.join(UPLOADS_MASTERS, t.stems_filename);
+    stemsLocal = '';
+    colaArchivos = colaArchivos
+      .then(() => hashArchivo(ruta))
+      .then((h) => agregarHuellaRegistro(t.id, t.is_pack ? 'Archivo del pack' : 'STEMS', h))
+      .catch((e) => console.error('Huella antes de borrar:', e.message))
+      .then(() => { try { fs.unlinkSync(ruta); } catch { /* nada */ } });
+  }
   const pares = [[UPLOADS_AUDIO, t.audio_filename], [UPLOADS_COVERS, t.cover_filename], [UPLOADS_MASTERS, t.master_filename],
-                 [UPLOADS_MASTERS, t.stems_filename], [UPLOADS_MASTERS, t.wav_filename], [UPLOADS_MASTERS, t.mp3_filename]];
+                 [UPLOADS_MASTERS, stemsLocal], [UPLOADS_MASTERS, t.wav_filename], [UPLOADS_MASTERS, t.mp3_filename]];
   for (const [dir, file] of pares) {
     if (!file) continue;
     try { const fp = path.join(dir, file); if (fs.existsSync(fp)) fs.unlinkSync(fp); } catch { /* ya no existe */ }
@@ -2234,9 +2543,10 @@ async function procesarPista({ titulo, genero, descripcion, credito, esPlaylist,
 
     let stemsFilename = '', stemsHash = '';
     if (stems) {
-      stemsFilename = moverSubida(stems, UPLOADS_MASTERS, 'stems-');
+      stemsFilename = moverSubida(stems, UPLOADS_MASTERS, opts.prefijoGrande || 'stems-');
       creados.push([UPLOADS_MASTERS, stemsFilename]);
-      stemsHash = await hashArchivo(path.join(UPLOADS_MASTERS, stemsFilename));
+      // un pack de 20 GB tarda en leerse: su huella se calcula después, en segundo plano
+      if (!opts.hashStemsLater) stemsHash = await hashArchivo(path.join(UPLOADS_MASTERS, stemsFilename));
     }
 
     // MP3 que recibe el comprador (o que se descarga gratis en la Playlist):
@@ -2302,7 +2612,7 @@ async function procesarPista({ titulo, genero, descripcion, credito, esPlaylist,
 
 function archivosDePista(t) {
   const existe = (f) => { if (!f) return false; try { return fs.statSync(path.join(UPLOADS_MASTERS, f)).isFile(); } catch { return false; } };
-  return { wav: existe(t.wav_filename), stems: existe(t.stems_filename), mp3: existe(t.mp3_filename || t.master_filename) };
+  return { wav: existe(t.wav_filename), stems: Boolean(t.stems_remote) || existe(t.stems_filename), mp3: existe(t.mp3_filename || t.master_filename) };
 }
 
 // Revisa que cada licencia con precio tenga el archivo que entrega.
@@ -2352,17 +2662,17 @@ const PRODUCER_PLANS = {
   free: {
     label: 'Free', commission: 30, maxBeats: 5, watermarkPreview: true, exclusiveAuto: false,
     payout: '7-14 días', payoutDays: 14, audioExt: ['.mp3'], wav: false, stems: false,
-    social: false, playlist: false, stats: false, licenses: ['basic'],
+    social: false, playlist: false, stats: false, packs: false, licenses: ['basic'],
   },
   pro: {
     label: 'Pro', commission: 20, maxBeats: 50, watermarkPreview: false, exclusiveAuto: false,
     payout: '3 días', payoutDays: 3, audioExt: ['.mp3', '.wav'], wav: true, stems: false,
-    social: true, playlist: false, stats: true, licenses: ['basic', 'premium'],
+    social: true, playlist: false, stats: true, packs: true, licenses: ['basic', 'premium'],
   },
   studio: {
     label: 'Studio', commission: 10, maxBeats: Infinity, watermarkPreview: false, exclusiveAuto: true,
     payout: '24 horas', payoutDays: 1, audioExt: ['.mp3', '.wav'], wav: true, stems: true,
-    social: true, playlist: true, stats: true, licenses: ['basic', 'premium', 'unlimited', 'exclusive'],
+    social: true, playlist: true, stats: true, packs: true, licenses: ['basic', 'premium', 'unlimited', 'exclusive'],
   },
 };
 
@@ -2567,6 +2877,244 @@ function getTrackLicenses(trackId) {
   return db.prepare('SELECT license_type, price_cup FROM track_licenses WHERE track_id = ? ORDER BY price_cup ASC').all(trackId);
 }
 
+
+// ---------- Archivos grandes (packs y STEMS): huella y copia al almacenamiento externo ----------
+// Se hace en segundo plano, de a uno, para que publicar un pack de 20 GB no deje la página esperando.
+// Si el servidor se reinicia a la mitad, la revisión periódica lo retoma.
+const archivosEnCola = new Set();
+let colaArchivos = Promise.resolve();
+function programarArchivo(trackId) {
+  if (!trackId || archivosEnCola.has(trackId)) return;
+  archivosEnCola.add(trackId);
+  colaArchivos = colaArchivos
+    .then(() => procesarArchivoGrande(trackId))
+    .catch((e) => console.error(`Archivo grande de la pista ${trackId}:`, e.message))
+    .then(() => { archivosEnCola.delete(trackId); });
+}
+async function procesarArchivoGrande(id) {
+  let t = db.prepare('SELECT * FROM tracks WHERE id = ?').get(id);
+  if (!t || !t.stems_filename) return;
+  const local = path.join(UPLOADS_MASTERS, t.stems_filename);
+  const hayLocal = fs.existsSync(local);
+  if (!t.stems_hash && hayLocal) {
+    const h = await hashArchivo(local);
+    db.prepare('UPDATE tracks SET stems_hash = ? WHERE id = ?').run(h, id);
+    agregarHuellaRegistro(id, t.is_pack ? 'Archivo del pack' : 'STEMS', h);
+    t = db.prepare('SELECT * FROM tracks WHERE id = ?').get(id);
+    if (!t) return;
+  }
+  if (t.producer_id) registrarObra(id);
+  if (almacen.activo() && !t.stems_remote && hayLocal) {
+    const key = `${t.is_pack ? 'packs' : 'stems'}/${t.stems_filename}`;
+    const size = await almacen.subirArchivo(local, key, { tipo: contentTypeDescarga(path.extname(local).toLowerCase()) });
+    if (!db.prepare('SELECT id FROM tracks WHERE id = ?').get(id)) { almacen.borrar(key); return; }
+    db.prepare('UPDATE tracks SET stems_remote = ?, stems_size = ? WHERE id = ?').run(key, size, id);
+    try { fs.unlinkSync(local); } catch { /* nada */ }
+  }
+}
+function revisarArchivosPendientes() {
+  const remoto = almacen.activo() ? " OR stems_remote = '' OR stems_remote IS NULL" : '';
+  for (const f of db.prepare(`SELECT id FROM tracks WHERE stems_filename != '' AND stems_filename IS NOT NULL AND (stems_hash = '' OR stems_hash IS NULL${remoto})`).all()) {
+    programarArchivo(f.id);
+  }
+}
+setTimeout(revisarArchivosPendientes, 4000).unref();
+setInterval(revisarArchivosPendientes, 10 * 60 * 1000).unref();
+function archivoGrandeEnProceso(t) {
+  if (!t || !t.stems_filename) return false;
+  return !t.stems_hash || (almacen.activo() && !t.stems_remote);
+}
+
+// ---------- Sample Packs ----------
+// Un pack es una pista con is_pack = 1: tiene una demo para escuchar (audio), una portada y el
+// archivo comprimido que recibe el comprador (se guarda en stems_filename). Tiene un solo precio
+// (licencia «pack») y no es exclusivo: se vende cuantas veces se compre.
+async function crearPackDesdeSubidas(d, owner, opts = {}) {
+  const titulo = limpiarTexto(d.title, 120);
+  if (!titulo) throw { status: 400, error: 'Ponle nombre al Sample Pack' };
+  const genero = limpiarTexto(d.genre, 60);
+  const descripcion = limpiarTexto(d.description, 1000);
+  const precio = parsePrecio(d.price);
+  if (!(precio > 0)) throw { status: 400, error: 'Ponle precio al Sample Pack' };
+  const audio = tomarSubida(d.audioUploadId, owner, 'audio');
+  if (!audio) throw { status: 400, error: 'Falta la demo: un audio corto para que se escuche el pack' };
+  const cover = tomarSubida(d.coverUploadId, owner, 'cover');
+  if (!cover) throw { status: 400, error: 'La portada es obligatoria. Sube una imagen cuadrada.' };
+  const pack = tomarSubida(d.packUploadId, owner, 'pack');
+  if (!pack) throw { status: 400, error: 'Falta el archivo del pack (ZIP, RAR o 7Z)' };
+  if (opts.audioExt && !opts.audioExt.includes(audio.ext)) {
+    throw { status: 403, error: `Tu plan ${opts.planLabel} permite la demo en MP3 o WAV.` };
+  }
+  const precios = { basic: 0, premium: 0, unlimited: 0, exclusive: 0 };
+  const r = await conCupoAudio(() => procesarPista({
+    titulo, genero, descripcion, credito: '', esPlaylist: false, precios, validacion: { ok: true, offered: [], isExclusive: false },
+    audio, cover, wav: null, stems: pack,
+  }, { ...opts, hashStemsLater: true, prefijoGrande: 'pack-' }));
+  return { ...r, precio };
+}
+
+function insertarPack(r, { producerId, estado }) {
+  const result = db.prepare(`
+    INSERT INTO tracks (title, genre, description, artist_credit, audio_filename, cover_filename,
+                        price_label, price_cup, for_sale, is_playlist, is_exclusive, is_pack, producer_id, approval_status,
+                        master_filename, master_hash, stems_filename, stems_hash, wav_filename, wav_hash,
+                        mp3_filename, mp3_hash, duration_seconds, preview_marca, authorship_declared_at)
+    VALUES (?, ?, ?, '', ?, ?, ?, ?, 1, 0, 0, 1, ?, ?, ?, ?, ?, ?, '', '', ?, ?, ?, ?, datetime('now'))
+  `).run(
+    r.titulo, r.genero, r.descripcion, r.audioFilename, r.coverFilename,
+    `${r.precio} CUP`, r.precio, producerId, estado,
+    r.masterFilename, r.masterHash, r.stemsFilename, r.stemsHash,
+    r.mp3Filename, r.mp3Hash, r.duracion, r.conMarca ? 1 : 0
+  );
+  const id = Number(result.lastInsertRowid);
+  db.prepare("INSERT INTO track_licenses (track_id, license_type, price_cup) VALUES (?, 'pack', ?)").run(id, r.precio);
+  return id;
+}
+
+function ponerPrecioPack(id, precio) {
+  db.prepare('UPDATE tracks SET price_label = ?, price_cup = ? WHERE id = ?').run(`${precio} CUP`, precio, id);
+  db.prepare("DELETE FROM track_licenses WHERE track_id = ?").run(id);
+  db.prepare("INSERT INTO track_licenses (track_id, license_type, price_cup) VALUES (?, 'pack', ?)").run(id, precio);
+}
+
+function packParaPanel(t, nombres) {
+  const existe = (f) => { if (!f) return false; try { return fs.statSync(path.join(UPLOADS_MASTERS, f)).isFile(); } catch { return false; } };
+  let peso = Number(t.stems_size) || 0;
+  if (!t.stems_remote) { try { peso = fs.statSync(path.join(UPLOADS_MASTERS, t.stems_filename)).size; } catch { peso = 0; } }
+  return {
+    id: t.id, title: t.title, genre: t.genre, description: t.description, cover_filename: t.cover_filename,
+    price_cup: t.price_cup, price_label: t.price_label, approval_status: t.approval_status, rejection_reason: t.rejection_reason || '',
+    plays: t.plays, duration_seconds: t.duration_seconds, created_at: t.created_at, producer_id: t.producer_id,
+    producer_name: t.producer_id ? ((nombres && nombres[t.producer_id]) || 'Productor eliminado') : '',
+    archivo: Boolean(t.stems_remote) || existe(t.stems_filename), peso,
+    procesando: archivoGrandeEnProceso(t), externo: almacen.activo(),
+    ventas: db.prepare("SELECT COUNT(*) as c FROM orders WHERE track_id = ? AND status = 'approved'").get(t.id).c,
+    registro: (db.prepare('SELECT codigo FROM registros WHERE track_id = ?').get(t.id) || {}).codigo || '',
+  };
+}
+
+async function editarPack(req, res, track, { volverARevision, anotarCambios }) {
+  let d;
+  try { d = JSON.parse((await readBody(req, 16 * 1024)).toString('utf8') || '{}'); }
+  catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
+  const titulo = limpiarTexto(d.title, 120);
+  if (!titulo) return sendJSON(res, 400, { error: 'El nombre no puede quedar vacío' });
+  const precio = parsePrecio(d.price);
+  if (!(precio > 0)) return sendJSON(res, 400, { error: 'Ponle precio al Sample Pack' });
+  const reenviar = volverARevision && track.approval_status === 'rejected';
+  db.prepare(`UPDATE tracks SET title = ?, genre = ?, description = ?,
+              approval_status = CASE WHEN ? THEN 'pending' ELSE approval_status END,
+              rejection_reason = CASE WHEN ? THEN '' ELSE rejection_reason END WHERE id = ?`)
+    .run(titulo, limpiarTexto(d.genre, 60), limpiarTexto(d.description, 1000), reenviar ? 1 : 0, reenviar ? 1 : 0, track.id);
+  ponerPrecioPack(track.id, precio);
+  if (anotarCambios && track.producer_id) {
+    const cambios = [];
+    if (titulo !== track.title) cambios.push(`nombre «${track.title}» → «${titulo}»`);
+    if (precio !== Number(track.price_cup)) cambios.push(`precio ${track.price_cup} → ${precio} CUP`);
+    if (limpiarTexto(d.genre, 60) !== (track.genre || '')) cambios.push('tipo de sonidos');
+    if (limpiarTexto(d.description, 1000) !== (track.description || '')) cambios.push('descripción');
+    if (cambios.length) anotar(track.producer_id, 'Editó tu Sample Pack', `«${track.title}»: ${cambios.join(' · ')}`, track.id);
+  }
+  sendJSON(res, 200, { ok: true, reenviado: reenviar });
+}
+
+// --- productor (solo planes Pro y Studio)
+function productorConPacks(req, res) {
+  const producer = getAuthedProducer(req);
+  if (!producer) { sendJSON(res, 401, { error: 'No autorizado' }); return null; }
+  const full = producerFull(producer.id);
+  const plan = planEfectivo(full);
+  if (!plan.packs) { sendJSON(res, 403, { error: `Tu plan ${plan.label} no permite vender Sample Packs. Sube al plan Pro o Studio.` }); return null; }
+  return full;
+}
+
+route('GET', '/api/producer/packs', (req, res) => {
+  const producer = getAuthedProducer(req);
+  if (!producer) return sendJSON(res, 401, { error: 'No autorizado' });
+  const plan = planEfectivo(producerFull(producer.id));
+  const packs = db.prepare('SELECT * FROM tracks WHERE producer_id = ? AND is_pack = 1 ORDER BY created_at DESC').all(producer.id).map(t => packParaPanel(t));
+  sendJSON(res, 200, { permitido: Boolean(plan.packs), plan: plan.label, packs });
+});
+
+route('POST', '/api/producer/packs', async (req, res) => {
+  const full = productorConPacks(req, res);
+  if (!full) return;
+  const plan = getPlan(full);
+  if (!full.approved) return sendJSON(res, 403, { error: 'Tu cuenta todavía no fue aprobada por el administrador.' });
+  if (!planVigente(full)) return sendJSON(res, 403, { error: `Tu plan ${plan.label} está vencido. Renuévalo para volver a subir.` });
+  if (!full.active) return sendJSON(res, 403, { error: 'Tu cuenta está desactivada. Renueva tu plan o contacta al administrador.' });
+  let d;
+  try { d = JSON.parse((await readBody(req, 64 * 1024)).toString('utf8') || '{}'); }
+  catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
+  if (d.declaraAutoria !== true) {
+    return sendJSON(res, 400, { error: 'Marca la casilla donde declaras que los sonidos del pack son tuyos y que tienes derecho a venderlos.' });
+  }
+  let r;
+  try {
+    r = await crearPackDesdeSubidas(d, `p:${full.id}`, { watermark: plan.watermarkPreview, audioExt: plan.audioExt, planLabel: plan.label });
+  } catch (err) {
+    if (!err || !err.status) console.error(err);
+    return sendJSON(res, (err && err.status) || 500, { error: (err && err.error) || 'Error al procesar el pack' });
+  }
+  const idPack = insertarPack(r, { producerId: full.id, estado: 'pending' });
+  programarArchivo(idPack);
+  const registro = registrarObra(idPack);
+  sendJSON(res, 201, { id: idPack, registro: registro ? registro.codigo : null });
+});
+
+route('POST', '/api/producer/packs/:id', async (req, res, params) => {
+  const full = productorConPacks(req, res);
+  if (!full) return;
+  const track = db.prepare('SELECT * FROM tracks WHERE id = ? AND producer_id = ? AND is_pack = 1').get(params.id, full.id);
+  if (!track) return sendJSON(res, 404, { error: 'Sample Pack no encontrado' });
+  return editarPack(req, res, track, { volverARevision: true });
+});
+
+route('DELETE', '/api/producer/packs/:id', (req, res, params) => {
+  const producer = getAuthedProducer(req);
+  if (!producer) return sendJSON(res, 401, { error: 'No autorizado' });
+  const track = db.prepare('SELECT * FROM tracks WHERE id = ? AND producer_id = ? AND is_pack = 1').get(params.id, producer.id);
+  if (!track) return sendJSON(res, 404, { error: 'Sample Pack no encontrado' });
+  const ventas = db.prepare("SELECT COUNT(*) as c FROM orders WHERE track_id = ? AND status IN ('approved', 'pending')").get(track.id).c;
+  if (ventas > 0) return sendJSON(res, 409, { error: 'No puedes eliminar un pack que ya tiene compras. Pídele al administrador que lo retire.' });
+  borrarArchivosTrack(track);
+  db.prepare('DELETE FROM track_licenses WHERE track_id = ?').run(track.id);
+  db.prepare('DELETE FROM tracks WHERE id = ?').run(track.id);
+  sendJSON(res, 200, { ok: true });
+});
+
+// --- administrador
+route('GET', '/api/admin/packs', (req, res) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  const nombres = Object.fromEntries(db.prepare('SELECT id, name FROM producers').all().map(p => [p.id, p.name]));
+  const packs = db.prepare(`SELECT * FROM tracks WHERE is_pack = 1
+                            ORDER BY CASE approval_status WHEN 'pending' THEN 0 ELSE 1 END, created_at DESC`).all().map(t => packParaPanel(t, nombres));
+  sendJSON(res, 200, { packs, pendientes: packs.filter(p => p.approval_status === 'pending').length, almacenamiento: almacen.activo() ? 'externo' : 'servidor' });
+});
+
+route('POST', '/api/admin/packs', async (req, res) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  let d;
+  try { d = JSON.parse((await readBody(req, 64 * 1024)).toString('utf8') || '{}'); }
+  catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
+  let r;
+  try { r = await crearPackDesdeSubidas(d, 'admin', { watermark: false }); }
+  catch (err) {
+    if (!err || !err.status) console.error(err);
+    return sendJSON(res, (err && err.status) || 500, { error: (err && err.error) || 'Error al procesar el pack' });
+  }
+  const idPackAdmin = insertarPack(r, { producerId: null, estado: 'approved' });
+  programarArchivo(idPackAdmin);
+  sendJSON(res, 201, { id: idPackAdmin });
+});
+
+route('POST', '/api/admin/packs/:id', async (req, res, params) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  const track = db.prepare('SELECT * FROM tracks WHERE id = ? AND is_pack = 1').get(params.id);
+  if (!track) return sendJSON(res, 404, { error: 'Sample Pack no encontrado' });
+  return editarPack(req, res, track, { volverARevision: false, anotarCambios: true });
+});
+
 route('POST', '/api/admin/tracks', async (req, res) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   let d;
@@ -2580,6 +3128,7 @@ route('POST', '/api/admin/tracks', async (req, res) => {
     return sendJSON(res, (err && err.status) || 500, { error: (err && err.error) || 'Error al procesar la pista' });
   }
   const id = insertarPista(r, { producerId: null, estado: 'approved' });
+  if (r.stemsFilename) programarArchivo(id);
   sendJSON(res, 201, { id });
 });
 
@@ -2591,7 +3140,7 @@ route('POST', '/api/producer/tracks', async (req, res) => {
   if (!full.approved) return sendJSON(res, 403, { error: 'Tu cuenta todavía no fue aprobada por el administrador.' });
   if (!planVigente(full)) return sendJSON(res, 403, { error: `Tu plan ${plan.label} está vencido. Renuévalo para volver a subir beats.` });
   if (!full.active) return sendJSON(res, 403, { error: 'Tu cuenta está desactivada. Renueva tu plan o contacta al administrador.' });
-  const activos = db.prepare("SELECT COUNT(*) as c FROM tracks WHERE producer_id = ? AND approval_status != 'rejected' AND sold = 0").get(producer.id).c;
+  const activos = db.prepare("SELECT COUNT(*) as c FROM tracks WHERE producer_id = ? AND approval_status != 'rejected' AND sold = 0 AND is_pack = 0").get(producer.id).c;
   if (plan.maxBeats !== Infinity && activos >= plan.maxBeats) {
     return sendJSON(res, 403, { error: `Tu plan ${plan.label} permite ${plan.maxBeats} beats activos y ya tienes ${activos}. Elimina alguno o sube de plan para publicar más.` });
   }
@@ -2618,14 +3167,16 @@ route('POST', '/api/producer/tracks', async (req, res) => {
     return sendJSON(res, (err && err.status) || 500, { error: (err && err.error) || 'Error al procesar el beat' });
   }
   // se vuelve a contar: mientras se procesaba el audio pudo entrar otro beat (subidas en paralelo)
-  const activosAhora = db.prepare("SELECT COUNT(*) as c FROM tracks WHERE producer_id = ? AND approval_status != 'rejected' AND sold = 0").get(producer.id).c;
+  const activosAhora = db.prepare("SELECT COUNT(*) as c FROM tracks WHERE producer_id = ? AND approval_status != 'rejected' AND sold = 0 AND is_pack = 0").get(producer.id).c;
   if (plan.maxBeats !== Infinity && activosAhora >= plan.maxBeats) {
     try { r.deshacer(); } catch { /* nada */ }
     return sendJSON(res, 403, { error: `Tu plan ${plan.label} permite ${plan.maxBeats} beats activos y ya tienes ${activosAhora}. Elimina alguno o sube de plan para publicar más.` });
   }
   const id = insertarPista(r, { producerId: producer.id, estado: 'pending' });
   db.prepare("UPDATE tracks SET authorship_declared_at = datetime('now') WHERE id = ?").run(id);
-  sendJSON(res, 201, { id });
+  const registro = registrarObra(id);
+  if (r.stemsFilename) programarArchivo(id);
+  sendJSON(res, 201, { id, registro: registro ? registro.codigo : null });
 });
 
 route('GET', '/api/admin/tracks', (req, res, params, query) => {
@@ -2636,9 +3187,9 @@ route('GET', '/api/admin/tracks', (req, res, params, query) => {
   if (type === 'playlist') {
     tracks = db.prepare('SELECT * FROM tracks WHERE is_playlist = 1 ORDER BY created_at DESC').all();
   } else if (type === 'vip') {
-    tracks = db.prepare('SELECT * FROM tracks WHERE is_playlist = 0 AND is_exclusive = 1 AND sold = 1 ORDER BY created_at DESC').all();
+    tracks = db.prepare('SELECT * FROM tracks WHERE is_playlist = 0 AND is_pack = 0 AND is_exclusive = 1 AND sold = 1 ORDER BY created_at DESC').all();
   } else {
-    tracks = db.prepare('SELECT * FROM tracks WHERE is_playlist = 0 ORDER BY created_at DESC').all();
+    tracks = db.prepare('SELECT * FROM tracks WHERE is_playlist = 0 AND is_pack = 0 ORDER BY created_at DESC').all();
   }
 
   const nombres = Object.fromEntries(db.prepare('SELECT id, name FROM producers').all().map(p => [p.id, p.name]));
@@ -2657,6 +3208,7 @@ route('POST', '/api/admin/tracks/:id/price', async (req, res, params) => {
   const track = db.prepare('SELECT * FROM tracks WHERE id = ?').get(params.id);
   if (!track) return sendJSON(res, 404, { error: 'No encontrada' });
   if (track.is_playlist) return sendJSON(res, 400, { error: 'Las pistas de Playlist no tienen precio' });
+  if (track.is_pack) return sendJSON(res, 400, { error: 'Los Sample Packs se editan desde su panel.' });
   if (track.sold) return sendJSON(res, 409, { error: 'Esta pista ya se vendió con licencia única: ya no se le pueden cambiar los precios.' });
 
   try {
@@ -2688,7 +3240,10 @@ route('POST', '/api/admin/tracks/:id/price', async (req, res, params) => {
       }
     }
 
+    const antes = getTrackLicenses(track.id).map(l => `${LICENSE_LABELS[l.license_type] || l.license_type} ${l.price_cup}`).join(', ') || 'sin precio';
     aplicarPrecios(track.id, prices, validation);
+    const despues = getTrackLicenses(track.id).map(l => `${LICENSE_LABELS[l.license_type] || l.license_type} ${l.price_cup}`).join(', ') || 'sin precio';
+    if (antes !== despues) anotar(track.producer_id, 'Cambió los precios de un beat', `«${track.title}»: antes ${antes} CUP · ahora ${despues} CUP`, track.id);
     sendJSON(res, 200, { ok: true });
   } catch {
     sendJSON(res, 400, { error: 'Solicitud inválida' });
@@ -2697,13 +3252,18 @@ route('POST', '/api/admin/tracks/:id/price', async (req, res, params) => {
 
 route('POST', '/api/admin/tracks/:id/info', async (req, res, params) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
-  const track = db.prepare('SELECT id, is_playlist FROM tracks WHERE id = ?').get(params.id);
+  const track = db.prepare('SELECT id, is_playlist, title, genre, description, producer_id FROM tracks WHERE id = ?').get(params.id);
   if (!track) return sendJSON(res, 404, { error: 'No encontrada' });
   let d;
   try { d = JSON.parse((await readBody(req, 8192)).toString('utf8')); }
   catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   const titulo = limpiarTexto(d.title, 120);
   if (!titulo) return sendJSON(res, 400, { error: 'El título no puede quedar vacío' });
+  const cambios = [];
+  if (titulo !== track.title) cambios.push(`título «${track.title}» → «${titulo}»`);
+  if (limpiarTexto(d.genre, 60) !== (track.genre || '')) cambios.push(`género «${track.genre || ''}» → «${limpiarTexto(d.genre, 60)}»`);
+  if (limpiarTexto(d.description, 1000) !== (track.description || '')) cambios.push('descripción');
+  if (cambios.length) anotar(track.producer_id, 'Editó los datos de un beat', `«${track.title}»: ${cambios.join(' · ')}`, track.id);
   db.prepare('UPDATE tracks SET title = ?, genre = ?, description = ?, artist_credit = ? WHERE id = ?')
     .run(titulo, limpiarTexto(d.genre, 60), limpiarTexto(d.description, 1000), track.is_playlist ? limpiarTexto(d.artistCredit, 120) : '', track.id);
   sendJSON(res, 200, { ok: true });
@@ -2726,6 +3286,8 @@ route('DELETE', '/api/admin/tracks/:id', (req, res, params, query) => {
   borrarArchivosTrack(track);
   db.prepare('DELETE FROM track_licenses WHERE track_id = ?').run(params.id);
   db.prepare('DELETE FROM tracks WHERE id = ?').run(params.id);
+  anotar(track.producer_id, track.is_pack ? 'Eliminó tu Sample Pack' : 'Eliminó tu beat', `«${track.title}»` +
+    (ventasAprobadas ? ` · tenía ${ventasAprobadas} venta(s) aprobada(s); tu registro de autoría sigue vigente` : ' · tu registro de autoría sigue vigente'), track.id);
   sendJSON(res, 200, { ok: true });
 });
 
@@ -2998,6 +3560,7 @@ route('POST', '/api/admin/producers/:id/approve', (req, res, params) => {
   const p = db.prepare('SELECT id, referred_by FROM producers WHERE id = ?').get(params.id);
   if (!p) return sendJSON(res, 404, { error: 'Productor no encontrado' });
   db.prepare('UPDATE producers SET approved = 1 WHERE id = ?').run(params.id);
+  anotar(p.id, 'Aprobó tu cuenta', 'Ya puedes subir beats');
   if (p.referred_by) { try { acreditarBonos(p.referred_by); } catch (e) { console.error(e); } }
   sendJSON(res, 200, { ok: true });
 });
@@ -3014,6 +3577,7 @@ route('POST', '/api/admin/producers/:id/password', async (req, res, params) => {
   const { hash, salt } = producerAuth.hashPassword(password);
   db.prepare('UPDATE producers SET password_hash = ?, password_salt = ? WHERE id = ?').run(hash, salt, p.id);
   db.prepare('DELETE FROM producer_sessions WHERE producer_id = ?').run(p.id);
+  anotar(p.id, 'Cambió tu contraseña', 'Se cerraron tus sesiones abiertas. Si no lo pediste, escríbele al administrador.');
   sendJSON(res, 200, { ok: true });
 });
 
@@ -3040,6 +3604,7 @@ route('POST', '/api/admin/producers/:id/plan', async (req, res, params) => {
                 disabled_reason = CASE WHEN ? AND disabled_reason = 'plan_vencido' THEN '' ELSE disabled_reason END
                 WHERE id = ?`).run(plan, fecha, plan !== 'free' ? 1 : 0, plan !== 'free' ? 1 : 0, params.id);
     const previewsLimpios = quitarMarcaDePreviews(Number(params.id));
+    anotar(Number(params.id), 'Cambió tu plan', `Plan ${PRODUCER_PLANS[plan].label}` + (fecha ? ` pagado hasta el ${fecha}` : ''));
     sendJSON(res, 200, { ok: true, previewsSinMarca: previewsLimpios });
   } catch {
     sendJSON(res, 400, { error: 'Solicitud inválida' });
@@ -3154,7 +3719,7 @@ function referidosAprobados(producerId, cfg) {
 // Lo que el productor ganó vendiendo sus beats (ventas aprobadas, en CUP, ya sin la comisión)
 // Beats que el productor tiene subidos y aprobados (a la venta o ya vendidos; la Playlist no cuenta)
 function beatsSubidos(producerId) {
-  return db.prepare("SELECT COUNT(*) as c FROM tracks WHERE producer_id = ? AND is_playlist = 0 AND approval_status = 'approved'").get(producerId).c;
+  return db.prepare("SELECT COUNT(*) as c FROM tracks WHERE producer_id = ? AND is_playlist = 0 AND is_pack = 0 AND approval_status = 'approved'").get(producerId).c;
 }
 // ¿Ya puede cobrar sus referidos? Tiene que haber ganado el mínimo vendiendo y tener el mínimo de beats subidos.
 function cobraReferidos(producerId, cfg) {
@@ -3384,6 +3949,8 @@ function movimientosProductor(producerId) {
         (w.fee_units ? ` (fee ${w.fee_units})` : '') + ` · ${w.account_text}` + (w.note ? ` · ${w.note}` : ''),
       moneda, label: etiquetaMoneda(moneda), unidades: w.status === 'cancelled' ? 0 : -u, montoOriginal: -u,
       estado: estados[w.status] || w.status,
+      comprobanteUrl: w.proof_filename ? `/api/producer/withdrawals/${w.id}/comprobante` : '',
+      fueraDePlazo: w.due_at ? (w.status === 'paid' ? fechaUtc(w.resolved_at) > fechaUtc(w.due_at) : w.status === 'pending' && Date.now() > fechaUtc(w.due_at).getTime()) : false,
     });
   }
   for (const pgo of db.prepare('SELECT * FROM producer_payouts WHERE producer_id = ?').all(producerId)) {
@@ -3655,12 +4222,23 @@ route('GET', '/api/admin/withdrawals', (req, res) => {
 route('POST', '/api/admin/withdrawals/:id/paid', async (req, res, params) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   let note = '';
-  try { const b = await readBody(req, 2048); if (b.length) note = String(JSON.parse(b.toString('utf8')).note || '').slice(0, 300).trim(); }
-  catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
+  let comprobante = '';
+  try {
+    const b = await readBody(req, Math.ceil(MAX_RECEIPT_BYTES * 1.4) + 4096);
+    if (b.length) { const d = JSON.parse(b.toString('utf8')); note = String(d.note || '').slice(0, 300).trim(); comprobante = String(d.comprobante || ''); }
+  } catch { return sendJSON(res, 400, { error: 'Solicitud inválida o imagen demasiado grande' }); }
   const w = db.prepare('SELECT * FROM producer_withdrawals WHERE id = ?').get(params.id);
   if (!w) return sendJSON(res, 404, { error: 'Retiro no encontrado' });
   if (w.status !== 'pending') return sendJSON(res, 409, { error: 'Este retiro ya fue resuelto' });
-  db.prepare("UPDATE producer_withdrawals SET status = 'paid', note = ?, resolved_at = datetime('now') WHERE id = ?").run(note, w.id);
+  let proof = '';
+  if (comprobante) {
+    proof = guardarImagenDataUrl(comprobante, 'pago-') || '';
+    if (!proof) return sendJSON(res, 400, { error: 'La captura del pago debe ser una imagen JPG, PNG o WEBP de menos de 12 MB.' });
+  }
+  db.prepare("UPDATE producer_withdrawals SET status = 'paid', note = ?, proof_filename = ?, resolved_at = datetime('now') WHERE id = ?").run(note, proof, w.id);
+  const tarde = Date.now() > fechaUtc(w.due_at).getTime();
+  anotar(w.producer_id, 'Te pagó un retiro', `${w.net_units} ${w.currency_label || w.currency} a ${w.account_text}` +
+    (proof ? ' · con captura del pago' : ' · sin captura del pago') + (tarde ? ' · fuera del plazo de tu plan' : '') + (note ? ` · nota: ${note}` : ''));
   db.prepare('UPDATE orders SET producer_paid = 1 WHERE withdrawal_id = ?').run(w.id);
   db.prepare('UPDATE producer_credits SET paid = 1 WHERE withdrawal_id = ?').run(w.id);
   sendJSON(res, 200, { ok: true });
@@ -3675,6 +4253,7 @@ route('POST', '/api/admin/withdrawals/:id/cancel', async (req, res, params) => {
   if (!w) return sendJSON(res, 404, { error: 'Retiro no encontrado' });
   if (w.status !== 'pending') return sendJSON(res, 409, { error: 'Este retiro ya fue resuelto' });
   db.prepare("UPDATE producer_withdrawals SET status = 'cancelled', note = ?, resolved_at = datetime('now') WHERE id = ?").run(note, w.id);
+  anotar(w.producer_id, 'Canceló un retiro', `${w.net_units} ${w.currency_label || w.currency} (el dinero volvió a tu saldo)` + (note ? ` · motivo: ${note}` : ''));
   db.prepare('UPDATE orders SET withdrawal_id = NULL WHERE withdrawal_id = ?').run(w.id);
   db.prepare('UPDATE producer_credits SET withdrawal_id = NULL WHERE withdrawal_id = ?').run(w.id);
   sendJSON(res, 200, { ok: true });
@@ -3760,6 +4339,7 @@ route('POST', '/api/admin/producers/:id/toggle-exclusive', (req, res, params) =>
   if (!producer) return sendJSON(res, 404, { error: 'Productor no encontrado' });
   const next = producer.exclusive_enabled ? 0 : 1;
   db.prepare('UPDATE producers SET exclusive_enabled = ? WHERE id = ?').run(next, params.id);
+  anotar(Number(params.id), next ? 'Te habilitó la licencia Exclusiva' : 'Te quitó la licencia Exclusiva', '');
   sendJSON(res, 200, { ok: true, exclusiveEnabled: Boolean(next) });
 });
 
@@ -3768,6 +4348,7 @@ route('POST', '/api/admin/producers/:id/toggle', (req, res, params) => {
   const producer = db.prepare('SELECT active FROM producers WHERE id = ?').get(params.id);
   if (!producer) return sendJSON(res, 404, { error: 'Productor no encontrado' });
   db.prepare("UPDATE producers SET active = ?, disabled_reason = '' WHERE id = ?").run(producer.active ? 0 : 1, params.id);
+  anotar(Number(params.id), producer.active ? 'Desactivó tu cuenta' : 'Activó tu cuenta', producer.active ? 'Tus beats dejan de verse en la tienda' : 'Tus beats vuelven a la tienda');
   sendJSON(res, 200, { ok: true, active: !producer.active });
 });
 
@@ -3820,11 +4401,21 @@ route('GET', '/api/admin/preview-audio/:id', (req, res, params) => {
 // El admin puede bajar los archivos que subió un productor para revisarlos antes de aprobar.
 route('GET', '/api/admin/tracks/:id/file', (req, res, params, query) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
-  const t = db.prepare('SELECT title, master_filename, mp3_filename, wav_filename, stems_filename FROM tracks WHERE id = ?').get(params.id);
+  const t = db.prepare('SELECT title, master_filename, mp3_filename, wav_filename, stems_filename, stems_remote, producer_id, is_pack FROM tracks WHERE id = ?').get(params.id);
   if (!t) return sendJSON(res, 404, { error: 'Pista no encontrada' });
-  const mapa = { master: t.master_filename, mp3: t.mp3_filename || t.master_filename, wav: t.wav_filename, stems: t.stems_filename };
+  const mapa = { master: t.master_filename, mp3: t.mp3_filename || t.master_filename, wav: t.wav_filename, stems: t.stems_remote || t.stems_filename };
   const nombre = mapa[String(query.get('f') || 'master')];
   if (!nombre) return sendJSON(res, 404, { error: 'Ese archivo no existe' });
+  const rango = String(req.headers.range || '');
+  if (t.producer_id && (!rango || /^bytes=0-/.test(rango))) {
+    const que = { master: 'el audio original', mp3: 'el MP3', wav: 'el WAV', stems: t.is_pack ? 'el archivo del pack' : 'los STEMS' }[String(query.get('f') || 'master')];
+    anotar(t.producer_id, 'Descargó un archivo tuyo', `${que} de «${t.title}»`, Number(params.id), 30);
+  }
+  if (String(query.get('f')) === 'stems' && t.stems_remote) {
+    if (!almacen.activo()) return sendJSON(res, 503, { error: 'Faltan las credenciales del almacenamiento externo.' });
+    res.writeHead(302, { Location: almacen.enlaceFirmado(t.stems_remote, { nombre: `${t.title} - ${t.is_pack ? 'PACK' : 'STEMS'}${path.extname(t.stems_remote)}`, segundos: 3600 }), 'Cache-Control': 'no-store' });
+    return res.end();
+  }
   const ext = path.extname(nombre).toLowerCase();
   enviarArchivo(req, res, path.join(UPLOADS_MASTERS, nombre), contentTypeDescarga(ext), {
     'Content-Disposition': dispositionAdjunto(`${t.title} - ${String(query.get('f') || 'master').toUpperCase()}${ext}`),
@@ -3838,7 +4429,7 @@ route('GET', '/api/admin/pending-tracks', (req, res) => {
     SELECT t.*, p.name as producer_name, p.email as producer_email, p.plan as producer_plan
     FROM tracks t
     LEFT JOIN producers p ON p.id = t.producer_id
-    WHERE t.approval_status = 'pending'
+    WHERE t.approval_status = 'pending' AND t.is_pack = 0
     ORDER BY t.created_at ASC
   `).all().map(t => ({ ...t, licenses: getTrackLicenses(t.id), archivos: archivosDePista(t) }));
   sendJSON(res, 200, { tracks });
@@ -3846,15 +4437,16 @@ route('GET', '/api/admin/pending-tracks', (req, res) => {
 
 route('POST', '/api/admin/tracks/:id/approve', (req, res, params) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
-  const track = db.prepare('SELECT id FROM tracks WHERE id = ?').get(params.id);
+  const track = db.prepare('SELECT id, title, producer_id, is_pack, approval_status FROM tracks WHERE id = ?').get(params.id);
   if (!track) return sendJSON(res, 404, { error: 'Pista no encontrada' });
   db.prepare("UPDATE tracks SET approval_status = 'approved' WHERE id = ?").run(params.id);
+  if (track.approval_status !== 'approved') anotar(track.producer_id, track.is_pack ? 'Aprobó tu Sample Pack' : 'Aprobó tu beat', `«${track.title}» ya está en la tienda`, track.id);
   sendJSON(res, 200, { ok: true });
 });
 
 route('POST', '/api/admin/tracks/:id/reject', async (req, res, params) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
-  const track = db.prepare('SELECT id FROM tracks WHERE id = ?').get(params.id);
+  const track = db.prepare('SELECT id, title, producer_id, is_pack FROM tracks WHERE id = ?').get(params.id);
   if (!track) return sendJSON(res, 404, { error: 'Pista no encontrada' });
   let reason = '';
   try {
@@ -3862,6 +4454,7 @@ route('POST', '/api/admin/tracks/:id/reject', async (req, res, params) => {
     if (body.length) reason = (JSON.parse(body.toString('utf8')).reason || '').slice(0, 300).trim();
   } catch { /* rechazo sin motivo también es válido */ }
   db.prepare("UPDATE tracks SET approval_status = 'rejected', rejection_reason = ? WHERE id = ?").run(reason, params.id);
+  anotar(track.producer_id, track.is_pack ? 'Rechazó tu Sample Pack' : 'Rechazó tu beat', `«${track.title}»` + (reason ? ` · motivo: ${reason}` : ''), track.id);
   sendJSON(res, 200, { ok: true });
 });
 
@@ -3999,7 +4592,9 @@ route('GET', '/api/admin/summary', (req, res, params, query) => {
     contadorDesde: reinicio ? normalizarFecha(reinicio) : '',
     pendientes: {
       pedidos: db.prepare("SELECT COUNT(*) as c FROM orders WHERE status = 'pending'").get().c,
-      beats: db.prepare("SELECT COUNT(*) as c FROM tracks WHERE approval_status = 'pending'").get().c,
+      reclamos: db.prepare("SELECT COUNT(*) as c FROM orders WHERE reclamo_at != '' AND reclamo_atendido = 0 AND status != 'approved'").get().c,
+      beats: db.prepare("SELECT COUNT(*) as c FROM tracks WHERE approval_status = 'pending' AND is_pack = 0").get().c,
+      packs: db.prepare("SELECT COUNT(*) as c FROM tracks WHERE approval_status = 'pending' AND is_pack = 1").get().c,
       productores: db.prepare('SELECT COUNT(*) as c FROM producers WHERE approved = 0').get().c,
       planes: db.prepare("SELECT COUNT(*) as c FROM plan_requests WHERE status = 'pending'").get().c,
       retiros: db.prepare("SELECT COUNT(*) as c FROM producer_withdrawals WHERE status = 'pending'").get().c,
@@ -4031,7 +4626,11 @@ route('POST', '/api/admin/ventas/borrar-todo', async (req, res) => {
   const copia = path.join(DATA_ROOT, 'db', `respaldo-antes-de-borrar-ventas-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.db`);
   try { db.exec(`VACUUM INTO '${copia.replace(/'/g, "''")}'`); }
   catch (e) { return sendJSON(res, 500, { error: 'No se pudo hacer la copia de seguridad; no se borró nada.' }); }
-  const ordenes = db.prepare('SELECT track_id, license_type, status, receipt_filename FROM orders').all();
+  const ordenes = db.prepare('SELECT track_id, license_type, status, receipt_filename, producer_id FROM orders').all();
+  const porProductor = {};
+  for (const o of ordenes) if (o.producer_id && o.status === 'approved') porProductor[o.producer_id] = (porProductor[o.producer_id] || 0) + 1;
+  const pruebasPago = db.prepare("SELECT proof_filename FROM producer_withdrawals WHERE proof_filename != ''").all();
+  const retirosDe = Object.fromEntries(db.prepare('SELECT producer_id, COUNT(*) as c FROM producer_withdrawals GROUP BY producer_id').all().map(r => [r.producer_id, r.c]));
   const vendidas = [...new Set(ordenes.filter(o => o.status === 'approved' && SINGLE_SALE_LICENSES.includes(o.license_type)).map(o => o.track_id))];
   const cuenta = {};
   db.exec('BEGIN');
@@ -4054,6 +4653,10 @@ route('POST', '/api/admin/ventas/borrar-todo', async (req, res) => {
   for (const o of ordenes) {
     if (o.receipt_filename) fs.promises.unlink(path.join(UPLOADS_RECEIPTS, path.basename(o.receipt_filename))).catch(() => {});
   }
+  for (const w of pruebasPago) fs.promises.unlink(path.join(UPLOADS_RECEIPTS, path.basename(w.proof_filename))).catch(() => {});
+  for (const pid of new Set([...Object.keys(porProductor), ...Object.keys(retirosDe)])) {
+    anotar(Number(pid), 'Borró todas las ventas de la tienda', `Se borraron ${porProductor[pid] || 0} venta(s) aprobada(s) de tus beats, ${retirosDe[pid] || 0} retiro(s) y tus bonos y cargos`);
+  }
   sendJSON(res, 200, { ok: true, ...cuenta, copia: path.basename(copia) });
 });
 
@@ -4062,20 +4665,23 @@ route('GET', '/api/admin/orders', (req, res) => {
   const orders = db.prepare(`
     SELECT o.*, p.name as producer_name, t.sold as track_sold, t.is_exclusive as track_exclusive
     FROM orders o LEFT JOIN producers p ON p.id = o.producer_id LEFT JOIN tracks t ON t.id = o.track_id
-    WHERE o.status = 'pending' ORDER BY o.created_at ASC
-  `).all();
-  sendJSON(res, 200, { orders });
+    WHERE o.status = 'pending' OR (o.status = 'rejected' AND o.reclamo_at != '' AND o.reclamo_atendido = 0)
+    ORDER BY CASE WHEN o.reclamo_at != '' AND o.reclamo_atendido = 0 THEN 0 ELSE 1 END, o.created_at ASC
+  `).all().map(o => ({ ...o, limite: limiteAprobacion(o).toISOString(), vencido: o.status === 'pending' && Date.now() >= limiteAprobacion(o).getTime(),
+                        codigo: codigoPedido(o), conReclamo: Boolean(o.reclamo_at) && !o.reclamo_atendido }));
+  sendJSON(res, 200, { orders, horasAprobacion: confianzaConfig().horas });
 });
 
 route('POST', '/api/admin/orders/:id/reject', async (req, res, params) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
-  const order = db.prepare('SELECT id, status FROM orders WHERE id = ?').get(params.id);
+  const order = db.prepare('SELECT id, status, producer_id, track_id, track_title, price_label, license_type FROM orders WHERE id = ?').get(params.id);
   if (!order) return sendJSON(res, 404, { error: 'Pedido no encontrado' });
   if (order.status !== 'pending') return sendJSON(res, 409, { error: 'Este pedido ya fue respondido' });
   let reason = '';
   try { const b = await readBody(req, 2048); if (b.length) reason = limpiarTexto(JSON.parse(b.toString('utf8')).reason, 300); }
   catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   db.prepare("UPDATE orders SET status = 'rejected', reject_reason = ?, rejected_at = datetime('now') WHERE id = ?").run(reason, order.id);
+  anotar(order.producer_id, 'Rechazó un pago de tu beat', `«${order.track_title}» · ${LICENSE_LABELS[order.license_type] || order.license_type} · ${order.price_label}` + (reason ? ` · motivo: ${reason}` : ''), order.track_id);
   sendJSON(res, 200, { ok: true });
 });
 
@@ -4212,6 +4818,7 @@ route('DELETE', '/api/admin/orders/:id', (req, res, params) => {
   }
 
   db.prepare('DELETE FROM orders WHERE id = ?').run(params.id);
+  anotar(order.producer_id, 'Borró un pedido sin revisar', `«${order.track_title}» · ${order.price_label} · ${order.buyer_name ? 'comprador ' + order.buyer_name : ''}`, order.track_id);
   sendJSON(res, 200, { ok: true, keptLicense: false });
 });
 

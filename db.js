@@ -301,6 +301,9 @@ addPlat('hot_slots', 'INTEGER DEFAULT 8');
 // Legal: cuándo aceptó los términos cada productor, cuándo declaró la autoría de cada beat, y denuncias
 if (!db.prepare("PRAGMA table_info(producers)").all().some(c => c.name === 'terms_accepted_at')) db.exec("ALTER TABLE producers ADD COLUMN terms_accepted_at TEXT DEFAULT ''");
 if (!db.prepare("PRAGMA table_info(tracks)").all().some(c => c.name === 'authorship_declared_at')) db.exec("ALTER TABLE tracks ADD COLUMN authorship_declared_at TEXT DEFAULT ''");
+// Sample Packs: se guardan como pistas con is_pack = 1 (demo para escuchar + ZIP que recibe el comprador)
+if (!db.prepare("PRAGMA table_info(tracks)").all().some(c => c.name === 'is_pack')) db.exec('ALTER TABLE tracks ADD COLUMN is_pack INTEGER DEFAULT 0');
+
 db.exec(`CREATE TABLE IF NOT EXISTS reportes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   beat TEXT NOT NULL,
@@ -532,5 +535,65 @@ const platformConfigExists = db.prepare('SELECT id FROM platform_config WHERE id
 if (!platformConfigExists) {
   db.prepare('INSERT INTO platform_config (id, commission_percent) VALUES (1, 20)').run();
 }
+
+// ---------- Confianza ----------
+const colsDe = (t) => db.prepare(`PRAGMA table_info(${t})`).all().map(c => c.name);
+const agregarCol = (t, col, def) => { if (!colsDe(t).includes(col)) db.exec(`ALTER TABLE ${t} ADD COLUMN ${col} ${def}`); };
+// Registro de autoría: una fila por beat o pack de productor. No se borra aunque se borre el beat:
+// es la prueba del productor de que lo subió él y cuándo.
+db.exec(`CREATE TABLE IF NOT EXISTS registros (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  codigo TEXT UNIQUE NOT NULL,
+  track_id INTEGER,
+  producer_id INTEGER NOT NULL,
+  producer_name TEXT NOT NULL,
+  titulo TEXT NOT NULL,
+  tipo TEXT NOT NULL DEFAULT 'beat',
+  archivos_json TEXT NOT NULL DEFAULT '[]',
+  declarado_at TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now'))
+)`);
+// Lo que el administrador hace con las cosas de cada productor. Solo se agrega: no hay forma de borrarlo.
+db.exec(`CREATE TABLE IF NOT EXISTS actividad (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  producer_id INTEGER NOT NULL,
+  accion TEXT NOT NULL,
+  detalle TEXT DEFAULT '',
+  track_id INTEGER,
+  created_at TEXT DEFAULT (datetime('now'))
+)`);
+db.exec('CREATE INDEX IF NOT EXISTS idx_actividad_productor ON actividad (producer_id, id)');
+db.exec(`CREATE TRIGGER IF NOT EXISTS actividad_sin_cambios BEFORE UPDATE ON actividad
+         BEGIN SELECT RAISE(ABORT, 'el registro de actividad no se modifica'); END`);
+db.exec(`CREATE TRIGGER IF NOT EXISTS registros_sin_cambios BEFORE UPDATE ON registros
+         BEGIN SELECT RAISE(ABORT, 'los registros de autoría no se modifican'); END`);
+// huellas que se agregan después a un registro (la del pack de 20 GB se calcula en segundo plano)
+db.exec(`CREATE TABLE IF NOT EXISTS registro_huellas (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  codigo TEXT NOT NULL,
+  etiqueta TEXT NOT NULL,
+  hash TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+)`);
+db.exec('CREATE INDEX IF NOT EXISTS idx_registro_huellas ON registro_huellas (codigo)');
+db.exec(`CREATE TRIGGER IF NOT EXISTS huellas_sin_cambios BEFORE UPDATE ON registro_huellas
+         BEGIN SELECT RAISE(ABORT, 'los registros de autoría no se modifican'); END`);
+db.exec(`CREATE TRIGGER IF NOT EXISTS huellas_sin_borrar BEFORE DELETE ON registro_huellas
+         BEGIN SELECT RAISE(ABORT, 'los registros de autoría no se borran'); END`);
+db.exec(`CREATE TRIGGER IF NOT EXISTS actividad_sin_borrar BEFORE DELETE ON actividad
+         BEGIN SELECT RAISE(ABORT, 'el registro de actividad no se borra'); END`);
+db.exec(`CREATE TRIGGER IF NOT EXISTS registros_sin_borrar BEFORE DELETE ON registros
+         BEGIN SELECT RAISE(ABORT, 'los registros de autoría no se borran'); END`);
+agregarCol('producer_withdrawals', 'proof_filename', "TEXT DEFAULT ''");
+agregarCol('orders', 'control_code', "TEXT DEFAULT ''");
+agregarCol('orders', 'reclamo_at', "TEXT DEFAULT ''");
+agregarCol('orders', 'reclamo_texto', "TEXT DEFAULT ''");
+agregarCol('orders', 'reclamo_atendido', 'INTEGER DEFAULT 0');
+agregarCol('platform_config', 'titular_nombre', "TEXT DEFAULT ''");
+agregarCol('platform_config', 'titular_figura', "TEXT DEFAULT ''");
+agregarCol('platform_config', 'orden_horas', 'INTEGER DEFAULT 24');
+// archivos grandes (packs y STEMS) que viven en el almacenamiento externo
+agregarCol('tracks', 'stems_remote', "TEXT DEFAULT ''");
+agregarCol('tracks', 'stems_size', 'INTEGER DEFAULT 0');
 
 module.exports = db;

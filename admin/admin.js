@@ -133,6 +133,26 @@
     setB('productores', Object.values(navCounts.productores).reduce((a, b) => a + b, 0));
   }
 
+  async function loadConfianzaAdmin() {
+    const r = await fetch('/api/admin/confianza');
+    if (!r.ok) return;
+    const d = await r.json();
+    document.getElementById('conf-titular').value = d.titular || '';
+    document.getElementById('conf-figura').value = d.figura || '';
+    document.getElementById('conf-horas').value = d.horas || 24;
+  }
+  document.getElementById('conf-save').addEventListener('click', async (ev) => {
+    ev.target.disabled = true;
+    const r = await fetch('/api/admin/confianza', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ titular: document.getElementById('conf-titular').value, figura: document.getElementById('conf-figura').value, horas: document.getElementById('conf-horas').value }),
+    });
+    const d = await r.json().catch(() => ({}));
+    ev.target.disabled = false;
+    showToast(r.ok ? 'Datos guardados. Ya se ven en la tienda.' : (d.error || 'No se pudo guardar.'), !r.ok);
+  });
+
+  let packsUI = null;
   function showApp() {
     loginScreen.style.display = 'none';
     adminShell.style.display = 'block';
@@ -154,6 +174,15 @@
     loadPlanRequests();
     loadHotsAdmin();
     loadDenuncias();
+    loadConfianzaAdmin();
+    if (!packsUI) {
+      packsUI = window.ZBPacks.montar({
+        modo: 'admin', form: document.getElementById('packs-form'), lista: document.getElementById('packs-list'),
+        cuenta: document.getElementById('packs-count'), aviso: (msg, err) => showToast(msg, err), sesionVencida: showLogin,
+        avisoAlmacen: document.getElementById('packs-almacen-aviso'),
+        alCargar: (d) => { const b = document.querySelector('.nav-badge[data-for="packs"]'); if (b) b.textContent = d.pendientes ? String(d.pendientes) : ''; },
+      });
+    } else packsUI.cargar();
     loadPayouts();
     loadSummary();
   }
@@ -687,7 +716,9 @@
     const p = d.pendientes;
     const chips = [
       ['ventas', p.pedidos, 'comprobante', 'comprobantes'],
+      ['ventas', p.reclamos || 0, 'reclamo de comprador', 'reclamos de compradores'],
       ['productores', p.beats, 'beat por revisar', 'beats por revisar'],
+      ['packs', p.packs || 0, 'Sample Pack por revisar', 'Sample Packs por revisar'],
       ['productores', p.productores, 'productor por aprobar', 'productores por aprobar'],
       ['productores', p.planes, 'compra de plan', 'compras de plan'],
       ['productores', p.retiros, 'retiro por pagar', 'retiros por pagar'],
@@ -738,7 +769,7 @@
     return d.toLocaleString('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
   }
 
-  const LIC_NOMBRES = { basic: 'Básica', premium: 'Premium', unlimited: 'Ilimitada', exclusive: 'Exclusiva' };
+  const LIC_NOMBRES = { basic: 'Básica', premium: 'Premium', unlimited: 'Ilimitada', exclusive: 'Exclusiva', pack: 'Sample Pack' };
   const soloDigitos = (t) => String(t || '').replace(/[^0-9]/g, '');
   const etiquetaDe = (code) => { const c = configuredCurrencies.find(x => x.code === code); return (c && c.label) || code || 'CUP'; };
   const unidades = (n, code) => Number(n || 0).toLocaleString('es', { minimumFractionDigits: ZBUI.decimales(code), maximumFractionDigits: ZBUI.decimales(code) }) + ' ' + etiquetaDe(code);
@@ -773,7 +804,11 @@
 
     orders.forEach((order) => {
       const item = document.createElement('div');
-      item.className = 'order-item';
+      item.className = 'order-item' + (order.conReclamo ? ' is-reclamo' : '');
+      const rechazada = order.status === 'rejected';
+      const reclamoHtml = order.conReclamo
+        ? '<div class="order-reclamo"><strong>Reclamo del comprador</strong> (' + formatOrderDate(order.reclamo_at) + '): ' + escapeHtml(order.reclamo_texto) + '</div>' : '';
+      const plazoHtml = order.vencido ? '<div class="order-warning">Pasó el plazo para aprobar este pago: el comprador ya puede reclamar.</div>' : '';
 
       const lic = LIC_NOMBRES[order.license_type] || order.license_type || '';
       const avisoVendida = order.track_sold
@@ -787,16 +822,18 @@
       item.innerHTML = `
         <img class="receipt-thumb" src="/api/admin/orders/${order.id}/receipt" alt="Comprobante de ${escapeHtml(order.buyer_name)}" loading="lazy">
         <div class="info">
-          <div class="buyer">${escapeHtml(order.buyer_name)}</div>
+          <div class="buyer">${escapeHtml(order.buyer_name)}${rechazada ? ' <span class="tag-vencido">rechazada</span>' : ''}</div>
+          ${order.codigo ? `<div class="order-code">Pedido ${escapeHtml(order.codigo)}</div>` : ''}
           <div class="track">${escapeHtml(order.track_title)} · <strong>${escapeHtml(lic)}</strong>${order.price_label ? ` · ${escapeHtml(order.price_label)}` : ''}</div>
           <div class="meta">${escapeHtml(order.buyer_phone)} · ${formatOrderDate(order.created_at)} · pagó ${escapeHtml(unidades(order.wallet_currency ? order.paid_units : order.price_cup_at_sale, order.wallet_currency || 'CUP'))}${order.producer_name ? ' · productor: ' + escapeHtml(order.producer_name) + escapeHtml(paraProductor(order)) : ''}${order.license_type === 'exclusive' ? (order.vip_public ? ' · acepta salir en Beats VIP' : ' · no quiere salir en Beats VIP') : ''}</div>
-          ${avisoVendida}
+          ${avisoVendida}${plazoHtml}${reclamoHtml}
         </div>
         <div class="actions">
           <button class="btn-approve-order" type="button">Aprobar</button>
-          <button class="btn-reject-track btn-reject-order" type="button">Rechazar</button>
+          ${rechazada ? '' : '<button class="btn-reject-track btn-reject-order" type="button">Rechazar</button>'}
+          ${order.conReclamo ? '<button class="btn-toggle-producer btn-reclamo-ok" type="button">Reclamo atendido</button>' : ''}
           ${waRecibido ? `<a class="btn-toggle-producer" href="${waRecibido}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
-          <button class="btn-delete" type="button" title="Borrar sin avisar (spam)">Borrar</button>
+          ${rechazada ? '' : '<button class="btn-delete" type="button" title="Borrar sin avisar (spam)">Borrar</button>'}
         </div>
       `;
 
@@ -805,8 +842,16 @@
         receiptModalOverlay.classList.add('active');
       });
       item.querySelector('.btn-approve-order').addEventListener('click', (ev) => approveOrder(order, item, ev.target));
-      item.querySelector('.btn-reject-order').addEventListener('click', () => rejectOrder(order));
-      item.querySelector('.btn-delete').addEventListener('click', () => deleteOrder(order.id, order.buyer_name, order.certificate_id));
+      const bRech = item.querySelector('.btn-reject-order');
+      if (bRech) bRech.addEventListener('click', () => rejectOrder(order));
+      const bDel = item.querySelector('.btn-delete');
+      if (bDel) bDel.addEventListener('click', () => deleteOrder(order.id, order.buyer_name, order.certificate_id));
+      const bRec = item.querySelector('.btn-reclamo-ok');
+      if (bRec) bRec.addEventListener('click', async () => {
+        const r = await fetch('/api/admin/orders/' + order.id + '/reclamo-atendido', { method: 'POST' });
+        showToast(r.ok ? 'Reclamo marcado como atendido. El comprador lo verá en «Mis compras».' : 'No se pudo marcar.', !r.ok);
+        loadOrders(); loadSummary();
+      });
 
       ordersList.appendChild(item);
     });
@@ -1928,7 +1973,7 @@
   const payoutsHistory = document.getElementById('payouts-history');
   const fmtCup = (n) => Number(n || 0).toLocaleString('es', { maximumFractionDigits: 2 }) + ' CUP';
   const fmtN = (n, d) => Number(n || 0).toLocaleString('es', { minimumFractionDigits: d, maximumFractionDigits: d });
-  const LIC = { basic: 'Básica', premium: 'Premium', unlimited: 'Ilimitada', exclusive: 'Exclusiva' };
+  const LIC = { basic: 'Básica', premium: 'Premium', unlimited: 'Ilimitada', exclusive: 'Exclusiva', pack: 'Sample Pack' };
   let retirosTimer = null;
 
   conectarHistorial('planes', planRequestsList, {
@@ -2181,13 +2226,37 @@
           '<button type="button" class="btn-approve-order btn-mark-paid">Marcar como pagado</button>' +
           '<button type="button" class="btn-reject-track btn-cancel-w">Cancelar</button>' +
           (wa ? '<a class="btn-toggle-producer" href="https://wa.me/' + wa + '?text=' + encodeURIComponent('Hola ' + w.producer_name + ', ya te transferí ' + montoW(w).replace(/<[^>]+>/g, '') + ' de tu retiro en Zona Beats.') + '" target="_blank" rel="noopener">Avisar por WhatsApp</a>' : '') +
+        '</div>' +
+        '<div class="paid-form" hidden>' +
+          '<div class="field"><label for="paid-proof-' + w.id + '">Captura de la transferencia</label>' +
+          '<input type="file" id="paid-proof-' + w.id + '" accept="image/jpeg,image/png,image/webp">' +
+          '<span class="field-hint">El productor la verá en su portal. Es la prueba de que le pagaste.</span></div>' +
+          '<div class="field"><label for="paid-note-' + w.id + '">Nota (opcional)</label><input type="text" id="paid-note-' + w.id + '" maxlength="300" placeholder="Ej: número de transferencia"></div>' +
+          '<div class="paid-form-actions"><button type="button" class="btn-approve-order btn-confirm-paid">Confirmar pago</button>' +
+          '<button type="button" class="btn-toggle-producer btn-cancel-paid">Cancelar</button></div>' +
         '</div>';
-      item.querySelector('.btn-mark-paid').addEventListener('click', async (ev) => {
-        const note = prompt('¿Ya le transferiste ' + montoW(w).replace(/<[^>]+>/g, '') + ' a ' + w.producer_name + '?\n\nNota opcional (ej: número de transferencia):', '');
-        if (note === null) return;
+      const formPago = item.querySelector('.paid-form');
+      item.querySelector('.btn-mark-paid').addEventListener('click', () => { formPago.hidden = false; formPago.querySelector('input[type=file]').focus(); });
+      item.querySelector('.btn-cancel-paid').addEventListener('click', () => { formPago.hidden = true; });
+      item.querySelector('.btn-confirm-paid').addEventListener('click', async (ev) => {
+        const archivo = formPago.querySelector('input[type=file]').files[0];
+        const note = formPago.querySelector('input[type=text]').value;
+        if (!archivo && ev.target.dataset.sinCaptura !== '1') {
+          ev.target.dataset.sinCaptura = '1';
+          ev.target.textContent = 'Confirmar sin captura';
+          showToast('Sin captura, el productor solo verá tu nota. Si igual quieres confirmar, pulsa otra vez.', true);
+          return;
+        }
         ev.target.disabled = true;
-        const r2 = await fetch('/api/admin/withdrawals/' + w.id + '/paid', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note }) });
-        if (r2.ok) { showToast('Retiro marcado como pagado. El productor lo verá en su portal.'); loadPayouts(); loadProducers(); }
+        let comprobante = '';
+        try {
+          if (archivo) {
+            const chica = window.ZBSubidas ? await window.ZBSubidas.comprimirImagen(archivo, 1600, 0.82) : archivo;
+            comprobante = await new Promise((ok, mal) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = mal; fr.readAsDataURL(chica); });
+          }
+        } catch { showToast('No se pudo leer la imagen.', true); ev.target.disabled = false; return; }
+        const r2 = await fetch('/api/admin/withdrawals/' + w.id + '/paid', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note, comprobante }) });
+        if (r2.ok) { showToast('Retiro marcado como pagado. El productor lo verá en su portal' + (comprobante ? ', con la captura.' : '.')); loadPayouts(); loadProducers(); }
         else { const e2 = await r2.json().catch(() => ({})); showToast(e2.error || 'No se pudo marcar.', true); ev.target.disabled = false; }
       });
       item.querySelector('.btn-cancel-w').addEventListener('click', async () => {
@@ -2210,6 +2279,7 @@
       montoHtml: montoW(h), moneda: h.currency_label || h.currency, neto: h.net_units, dec: ZBUI.decimales(h.currency),
       saleDe: unidades(h.debit_units != null ? h.debit_units : h.amount_cup, h.wallet || 'CUP'),
       estado: h.status === 'paid' ? 'pagado' : 'cancelado', cuenta: h.account_text || '', nota: h.note || '',
+      captura: h.proof_filename ? '/api/admin/withdrawals/' + h.id + '/comprobante' : '',
     })).concat(antiguos.map(h => ({
       clave: 'pago:' + h.id, fecha: h.created_at, pedido: h.created_at, productor: h.producer_name,
       montoHtml: fmtCup(h.amount_cup), moneda: 'CUP', neto: h.amount_cup, dec: 0, saleDe: fmtCup(h.amount_cup),
@@ -2218,7 +2288,8 @@
     pintarToolsHist('retiros', ocultos || 0, retirosFilas.length, retirosFilas.length);
     payoutsHistory.innerHTML = retirosFilas.length ? retirosFilas.map(h =>
       '<div class="payout-history-row hist-item"><span>' + fechaHora(h.fecha) + '</span><span>' + escapeHtml(h.productor || '') + '</span><strong>' + h.montoHtml + '</strong>' +
-      '<span class="muted">' + escapeHtml(h.estado) + (h.nota ? ' · ' + escapeHtml(h.nota) : '') + '</span>' + botonBorrarHist(h.clave) + '</div>').join('')
+      '<span class="muted">' + escapeHtml(h.estado) + (h.nota ? ' · ' + escapeHtml(h.nota) : '') +
+      (h.captura ? ' · <a class="proof-link" href="' + h.captura + '" target="_blank" rel="noopener">captura</a>' : '') + '</span>' + botonBorrarHist(h.clave) + '</div>').join('')
       : '<div class="empty-hint">Todavía no hay retiros resueltos.</div>';
 
     clearTimeout(retirosTimer);

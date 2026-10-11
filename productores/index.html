@@ -8,6 +8,7 @@
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/productores/productores.css">
+<link rel="stylesheet" href="/packs.css">
 </head>
 <body>
 
@@ -92,6 +93,8 @@
       <button type="button" class="dash-tab active" data-tab="resumen">Resumen</button>
       <button type="button" class="dash-tab" data-tab="subir">Subir beat</button>
       <button type="button" class="dash-tab" data-tab="beats">Mis beats</button>
+      <button type="button" class="dash-tab" data-tab="packs">Sample Packs</button>
+      <button type="button" class="dash-tab" data-tab="registro">Registro</button>
       <button type="button" class="dash-tab" data-tab="dinero">Dinero</button>
       <button type="button" class="dash-tab" data-tab="stats">Estadísticas</button>
       <button type="button" class="dash-tab" data-tab="plan">Plan</button>
@@ -264,6 +267,50 @@
           </div>
           <p class="panel-hint">Puedes eliminar cualquier beat que no tenga ventas aprobadas.</p>
           <div id="track-list"><div class="skel-wrap skel-filas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div></div></div>
+        </div>
+      </section>
+
+      <!-- ===== SAMPLE PACKS ===== -->
+      <section class="tab-page" data-page="packs">
+        <div class="panel pk-lock" id="packs-lock" hidden>
+          <h2>Sample Packs</h2>
+          <p>Vender paquetes de sonidos (loops, drums, one-shots, vocales) está incluido en los planes <strong>Pro</strong> y <strong>Studio</strong>.</p>
+          <button type="button" class="btn-primary" id="packs-ver-planes">Ver planes</button>
+        </div>
+        <div id="packs-zona" hidden>
+          <div class="panel">
+            <h2>Subir Sample Pack</h2>
+            <p class="panel-hint">Sube tus sonidos en un archivo comprimido, una demo para que se escuche y una portada. El pack entra en revisión y sale en la sección «Sample Packs» de la tienda cuando el administrador lo apruebe. No cuenta para el límite de beats de tu plan.</p>
+            <div id="packs-form"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-header-row-p">
+              <h2>Tus Sample Packs</h2>
+              <span class="plan-chip ghost" id="packs-count"></span>
+            </div>
+            <p class="panel-hint">Puedes eliminar un pack mientras no tenga compras.</p>
+            <div id="packs-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== REGISTRO ===== -->
+      <section class="tab-page" data-page="registro">
+        <div class="panel">
+          <div class="panel-header-row-p">
+            <h2>Certificados de registro</h2>
+            <span class="plan-chip ghost" id="reg-count"></span>
+          </div>
+          <p class="panel-hint">Cada beat y cada pack que subes queda registrado a tu nombre, con la fecha y la huella digital de cada archivo. El certificado es tu prueba de autoría: cualquiera puede comprobarlo en <a href="/verify" target="_blank" rel="noopener">/verify</a>. Tú sigues siendo el dueño de tu música; el registro no se puede cambiar ni borrar, aunque el beat salga de la tienda.</p>
+          <div id="reg-list" tabindex="0" role="region" aria-label="Certificados de registro"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header-row-p">
+            <h2>Lo que hizo el administrador</h2>
+            <button type="button" class="btn-link-p" id="act-download" disabled>Descargar</button>
+          </div>
+          <p class="panel-hint">Cada vez que el administrador descarga tus archivos, cambia tus precios o datos, aprueba o rechaza algo tuyo, borra ventas o te paga, queda anotado aquí con fecha y hora. Este registro no se puede borrar.</p>
+          <div id="act-list" tabindex="0" role="region" aria-label="Lo que hizo el administrador"></div>
         </div>
       </section>
 
@@ -569,6 +616,7 @@
 
   <script src="/subidas.js"></script>
   <script src="/historial.js"></script>
+  <script src="/packs.js"></script>
   <script src="/productores/productores.js"></script>
 </body>
 </html>

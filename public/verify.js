@@ -53,7 +53,7 @@
       }
     }
 
-    const TIPOS = { master: 'Audio original', mp3: 'MP3', wav: 'WAV', stems: 'STEMS' };
+    const TIPOS = { master: 'Audio original', mp3: 'MP3', wav: 'WAV', stems: 'STEMS', pack: 'Sample Pack' };
 
     async function verificarHash(hash, origen) {
       card.className = 'verify-card show';
@@ -72,6 +72,7 @@
         return;
       }
       if (d.type === 'license') { input.value = d.certificateId; verificar(d.certificateId); return; }
+      if (d.type === 'registro') { pintarRegistro(d); return; }
       const lista = Array.isArray(d.licenciasEmitidas) ? d.licenciasEmitidas : [];
       card.innerHTML =
         '<div class="verify-status ok"><span class="verify-status-dot"></span>Archivo original registrado en esta plataforma</div>' +
@@ -86,10 +87,55 @@
           : '<p class="verify-note">Ninguna. Nadie compró una licencia de este beat en la plataforma, así que cualquier uso comercial no está autorizado desde aquí.</p>');
     }
 
+    // Registro de autoría (REG-…) y comprobante de pedido (PED-…)
+    const RE_REG = /^REG-\d{6,}-[A-F0-9]{10}$/i;
+    const RE_PED = /^PED-\d{6,}-[A-F0-9]{10}$/i;
+    function pintarRegistro(d) {
+      card.className = 'verify-card show';
+      card.innerHTML =
+        '<div class="verify-status ok"><span class="verify-status-dot"></span>Registro de autoría válido</div>' +
+        '<div class="verify-row"><span class="verify-key">Código</span><span class="verify-val">' + esc(d.codigo) + '</span></div>' +
+        '<div class="verify-row"><span class="verify-key">' + (d.tipo === 'pack' ? 'Sample Pack' : 'Beat') + '</span><span class="verify-val">' + esc(d.titulo) + '</span></div>' +
+        '<div class="verify-row"><span class="verify-key">Autor</span><span class="verify-val">' + esc(d.productor) + '</span></div>' +
+        '<div class="verify-row"><span class="verify-key">Subido</span><span class="verify-val">' + esc(fecha(d.fecha)) + '</span></div>' +
+        (d.archivos || []).map(a => '<div class="verify-hash"><strong>' + esc(a.etiqueta) + ':</strong><br>' + esc(a.hash) + '</div>').join('') +
+        '<p class="verify-note">Este registro prueba que el autor subió estos archivos en esa fecha. No se puede modificar ni borrar, aunque la obra ya no esté en la tienda.</p>';
+    }
+    async function consultarCodigo(url, pintar) {
+      card.className = 'verify-card show';
+      card.innerHTML = '<div class="verify-status">Consultando…</div>';
+      try {
+        const res = await fetch(url);
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) { card.innerHTML = '<div class="verify-status bad"><span class="verify-status-dot"></span>' + esc(d.error || 'No encontrado') + '</div>'; return; }
+        pintar(d);
+      } catch {
+        card.innerHTML = '<div class="verify-status bad"><span class="verify-status-dot"></span>No se pudo consultar. Revisa tu conexión.</div>';
+      }
+    }
+    function pintarPedido(d) {
+      const ok = d.estado !== 'rejected';
+      card.innerHTML =
+        '<div class="verify-status ' + (ok ? 'ok' : 'warn') + '"><span class="verify-status-dot"></span>Pedido registrado en esta tienda</div>' +
+        '<div class="verify-row"><span class="verify-key">Pedido</span><span class="verify-val">' + esc(d.codigo) + '</span></div>' +
+        '<div class="verify-row"><span class="verify-key">Compra</span><span class="verify-val">' + esc(d.titulo) + '</span></div>' +
+        '<div class="verify-row"><span class="verify-key">Licencia</span><span class="verify-val">' + esc(d.licencia) + '</span></div>' +
+        '<div class="verify-row"><span class="verify-key">Precio</span><span class="verify-val">' + esc(d.precio) + '</span></div>' +
+        '<div class="verify-row"><span class="verify-key">Enviado</span><span class="verify-val">' + esc(fecha(d.fecha)) + '</span></div>' +
+        '<div class="verify-row"><span class="verify-key">Estado</span><span class="verify-val">' + esc(d.estadoTexto) + '</span></div>' +
+        (d.certificateId ? '<p class="verify-note">Licencia emitida: <a href="/verify/' + encodeURIComponent(d.certificateId) + '">' + esc(d.certificateId) + '</a></p>' : '');
+    }
+    function verificarCodigo(v) {
+      const c = v.trim().toUpperCase();
+      if (RE_REG.test(c)) { consultarCodigo('/api/registro/' + encodeURIComponent(c), pintarRegistro); return true; }
+      if (RE_PED.test(c)) { consultarCodigo('/api/pedido/' + encodeURIComponent(c), pintarPedido); return true; }
+      return false;
+    }
+
     function buscar() {
       const v = input.value.trim();
       if (/^[a-fA-F0-9]{64}$/.test(v)) verificarHash(v.toLowerCase(), 'texto');
-      else verificar(v);
+      else if (!verificarCodigo(v)) verificar(v);
     }
 
     document.getElementById('verify-btn').addEventListener('click', buscar);
@@ -205,6 +251,11 @@
         const { lic, hash } = await leerLicenciaPdf(f).catch(() => ({ lic: '', hash: '' }));
         label.textContent = f.name;
         if (!lic) {
+          const bytes = new Uint8Array(await leerTrozo(f.slice(0, 2 * 1024 * 1024)));
+          let texto = '';
+          for (let i = 0; i < bytes.length; i += 8192) texto += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+          const otro = (texto.match(/(?:REG|PED)-\d{6,}-[0-9A-F]{10}/) || [])[0];
+          if (otro) { input.value = otro; verificarCodigo(otro); return; }
           card.innerHTML = '<div class="verify-status bad"><span class="verify-status-dot"></span>Ese PDF no parece una licencia de Zona Beats: no encontramos el número de licencia.</div>';
           return;
         }
@@ -228,6 +279,6 @@
     try { fromUrl = decodeURIComponent(location.pathname.replace(/^\/verify\/?/, '')); } catch { fromUrl = ''; }
     if (fromUrl) {
       input.value = fromUrl.toUpperCase();
-      verificar(fromUrl);
+      if (!verificarCodigo(fromUrl)) verificar(fromUrl);
     }
   

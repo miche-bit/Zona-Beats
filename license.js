@@ -3,6 +3,7 @@ const LICENSE_LABELS = {
   premium: 'Licencia Premium',
   unlimited: 'Licencia Ilimitada',
   exclusive: 'Licencia Exclusiva',
+  pack: 'Licencia de Sample Pack',
 };
 
 const LICENSE_TERMS = {
@@ -38,6 +39,14 @@ const LICENSE_TERMS = {
     'Otorga derechos de uso comercial, masterización y sincronización de la pista.',
     'El beat se publica en la sección Beats VIP a nombre del comprador, si este lo autoriza.',
     'Crédito obligatorio al productor.',
+  ],
+  pack: [
+    'Archivos entregados: el Sample Pack completo (archivo comprimido).',
+    'Puede usar los sonidos dentro de sus propias canciones y producciones, incluso monetizadas, sin pagar regalías.',
+    'NO autoriza revender, regalar ni compartir el pack o los sonidos sueltos.',
+    'NO autoriza incluir los sonidos en otros sample packs, kits o librerías de sonidos.',
+    'Licencia NO exclusiva: el productor puede vender el mismo pack a otras personas.',
+    'No otorga la propiedad de los sonidos.',
   ],
 };
 
@@ -175,7 +184,7 @@ function buildLicensePdf(data) {
     { text: `Número de licencia: ${data.certificateId}`, size: 12, bold: true, gap: 10 },
 
     { text: 'DATOS DE LA COMPRA', size: 9, bold: true, gap: 8, color: '0.45 0.45 0.50' },
-    { text: `Beat: ${data.trackTitle}`, size: 11, gap: 3 },
+    { text: `${data.licenseType === 'pack' ? 'Sample Pack' : 'Beat'}: ${data.trackTitle}`, size: 11, gap: 3 },
     { text: `Productor: ${data.producerName || data.platformName || 'Zona Beats'}`, size: 11, gap: 3 },
     { text: `Comprador: ${data.buyerName}`, size: 11, gap: 3 },
     { text: `Tipo de licencia: ${licenseLabel}`, size: 11, gap: 3 },
@@ -195,7 +204,7 @@ function buildLicensePdf(data) {
 
     { rule: true, gap: 14 },
     {
-      text: 'Este documento acredita los términos otorgados al comprador y el uso autorizado del beat. El hash permite comprobar que no fue alterado. Cualquier uso fuera de lo indicado aquí constituye un incumplimiento de la licencia.',
+      text: 'Este documento acredita los términos otorgados al comprador y el uso autorizado del contenido. El hash permite comprobar que no fue alterado. Cualquier uso fuera de lo indicado aquí constituye un incumplimiento de la licencia.',
       size: 9,
       gap: 6,
       color: '0.35 0.35 0.40',
@@ -205,4 +214,72 @@ function buildLicensePdf(data) {
   return buildPdf(blocks);
 }
 
-module.exports = { buildLicensePdf, LICENSE_LABELS };
+// Certificado de registro: prueba de que un productor subió un beat o un pack en una fecha,
+// con la huella (SHA-256) de cada archivo. Cualquiera puede comprobarlo en /verify con el código.
+function buildRegistroPdf(data) {
+  const archivos = data.archivos || [];
+  const tipo = data.tipo === 'pack' ? 'Sample Pack' : 'Beat';
+  const blocks = [
+    { text: 'CERTIFICADO DE REGISTRO DE AUTORÍA', size: 17, bold: true, gap: 2 },
+    { text: data.platformName || 'Zona Beats', size: 11, gap: 14, color: '0.45 0.45 0.50' },
+    { rule: true, gap: 16 },
+    { text: `Código de registro: ${data.codigo}`, size: 12, bold: true, gap: 10 },
+    { text: 'OBRA REGISTRADA', size: 9, bold: true, gap: 8, color: '0.45 0.45 0.50' },
+    { text: `${tipo}: ${data.titulo}`, size: 11, gap: 3 },
+    { text: `Autor declarado: ${data.productor}`, size: 11, gap: 3 },
+    { text: `Fecha y hora de subida (UTC): ${String(data.fecha || '').replace('T', ' ').slice(0, 19)}`, size: 11, gap: 3 },
+    data.declarado ? { text: `Declaró ser el autor el: ${String(data.declarado).replace('T', ' ').slice(0, 19)} (UTC)`, size: 11, gap: 14 } : { spacer: 11 },
+    { text: 'HUELLA DIGITAL DE CADA ARCHIVO (SHA-256)', size: 9, bold: true, gap: 8, color: '0.45 0.45 0.50' },
+    { text: 'La huella identifica el archivo exacto: si se cambia un solo bit, la huella cambia.', size: 10, gap: 6 },
+    ...archivos.flatMap(a => [
+      { text: `${a.etiqueta}:`, size: 10, bold: true, gap: 2 },
+      { text: String(a.hash || '').slice(0, 32), size: 9, gap: 1, indent: 6 },
+      { text: String(a.hash || '').slice(32), size: 9, gap: 6, indent: 6 },
+    ]),
+    { spacer: 6 },
+    { text: 'VERIFICACIÓN', size: 9, bold: true, gap: 8, color: '0.45 0.45 0.50' },
+    { text: 'Escribe el código de registro, o la huella de uno de los archivos, en:', size: 10, gap: 4 },
+    { text: data.verifyUrl, size: 10, gap: 14, color: '0.10 0.35 0.75' },
+    { rule: true, gap: 14 },
+    {
+      text: 'Este certificado acredita que el autor indicado subió estos archivos a la plataforma en la fecha indicada. El autor conserva la propiedad de su obra; la plataforma solo puede vender licencias de uso mientras la obra esté publicada. El registro no se puede modificar ni borrar desde la plataforma, aunque la obra se elimine de la tienda.',
+      size: 9, gap: 6, color: '0.35 0.35 0.40',
+    },
+  ];
+  return buildPdf(blocks);
+}
+
+// Comprobante de pedido: lo recibe el comprador al enviar su pago.
+function buildPedidoPdf(data) {
+  const blocks = [
+    { text: 'COMPROBANTE DE PEDIDO', size: 18, bold: true, gap: 2 },
+    { text: data.platformName || 'Zona Beats', size: 11, gap: 14, color: '0.45 0.45 0.50' },
+    { rule: true, gap: 16 },
+    { text: `Pedido: ${data.codigo}`, size: 12, bold: true, gap: 10 },
+    { text: 'DATOS DEL PEDIDO', size: 9, bold: true, gap: 8, color: '0.45 0.45 0.50' },
+    { text: `${data.esPack ? 'Sample Pack' : 'Beat'}: ${data.titulo}`, size: 11, gap: 3 },
+    { text: `Licencia: ${data.licencia}`, size: 11, gap: 3 },
+    { text: `Precio: ${data.precio}`, size: 11, gap: 3 },
+    { text: `Comprador: ${data.comprador}`, size: 11, gap: 3 },
+    { text: `Pago enviado el: ${String(data.fecha || '').replace('T', ' ').slice(0, 16)} (UTC)`, size: 11, gap: 3 },
+    { text: `Estado al emitir este comprobante: ${data.estado}`, size: 11, gap: 14 },
+    { text: 'QUÉ PASA AHORA', size: 9, bold: true, gap: 8, color: '0.45 0.45 0.50' },
+    { text: `- El vendedor revisa que tu pago haya llegado. Plazo: ${data.horas} ${Number(data.horas) === 1 ? 'hora' : 'horas'} desde el envío.`, size: 10, gap: 2, indent: 6 },
+    { text: '- Cuando lo apruebe, descargas tus archivos y tu licencia en «Mis compras».', size: 10, gap: 2, indent: 6 },
+    { text: '- Si pasa el plazo sin respuesta, puedes reclamar desde «Mis compras».', size: 10, gap: 2, indent: 6 },
+    { text: '- Si el pago se rechaza por error, escribe al vendedor con este comprobante.', size: 10, gap: 14, indent: 6 },
+    { text: 'VENDEDOR', size: 9, bold: true, gap: 8, color: '0.45 0.45 0.50' },
+    ...(data.titular ? [{ text: `Titular: ${data.titular}`, size: 11, gap: 3 }] : []),
+    ...(data.figura ? [{ text: `Figura legal: ${data.figura}`, size: 11, gap: 3 }] : []),
+    ...(data.contacto ? [{ text: `Contacto (WhatsApp): ${data.contacto}`, size: 11, gap: 3 }] : []),
+    { spacer: 10 },
+    { text: 'VERIFICACIÓN', size: 9, bold: true, gap: 8, color: '0.45 0.45 0.50' },
+    { text: 'Comprueba que este pedido está registrado escribiendo el código de pedido en:', size: 10, gap: 4 },
+    { text: data.verifyUrl, size: 10, gap: 14, color: '0.10 0.35 0.75' },
+    { rule: true, gap: 14 },
+    { text: 'Guarda este comprobante: acredita que enviaste el pago y lo que compraste. No es la licencia; la licencia se emite cuando el pago se aprueba.', size: 9, gap: 6, color: '0.35 0.35 0.40' },
+  ];
+  return buildPdf(blocks);
+}
+
+module.exports = { buildLicensePdf, buildRegistroPdf, buildPedidoPdf, LICENSE_LABELS };

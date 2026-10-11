@@ -1,0 +1,53 @@
+/* Sample Packs: formulario y lista (panel de administración y portal de productores) */
+.pk-progress[hidden], .pk-pausar[hidden] { display: none !important; }
+.pk-form .upload-progress-wrap { margin: var(--s-3) 0; }
+.pk-pausar {
+  background: transparent; border: 1px solid var(--line); color: var(--text-dim); border-radius: var(--r-sm);
+  padding: 5px 11px; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.pk-form .legal-accept { margin: var(--s-3) 0; }
+
+.pk-item {
+  display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: var(--s-3);
+  padding: var(--s-3) 0; border-top: 1px solid var(--line); align-items: start;
+}
+.pk-item:first-child { border-top: 0; }
+.pk-cover { width: 64px; height: 64px; border-radius: var(--r-md); object-fit: cover; background: var(--bg-elevated); display: block; }
+.pk-info { min-width: 0; }
+.pk-title { font-weight: 700; color: var(--text); overflow-wrap: anywhere; }
+.pk-meta { font-size: 13px; color: var(--text-dim); margin-top: 3px; overflow-wrap: anywhere; }
+.pk-warn { color: var(--warn); }
+.pk-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: center; }
+@media (min-width: 720px) {
+  .pk-item { grid-template-columns: 64px minmax(0, 1fr) auto; }
+  .pk-actions { grid-column: auto; justify-content: flex-end; max-width: 360px; }
+}
+.pk-btn {
+  display: inline-flex; align-items: center; min-height: 36px; padding: 6px 12px; border-radius: var(--r-sm);
+  background: transparent; border: 1px solid var(--line); color: var(--text-dim);
+  font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: none; font-family: inherit;
+}
+.pk-btn:hover { color: var(--text); border-color: var(--accent-dim); }
+.pk-btn:disabled { opacity: .6; cursor: default; }
+.pk-btn.pk-ok { color: var(--live); border-color: rgba(var(--live-rgb), .45); }
+.pk-btn.pk-no { color: var(--danger); border-color: rgba(var(--danger-rgb), .45); }
+.pk-extra:empty { display: none; }
+.pk-extra { margin-top: var(--s-2); }
+.pk-extra audio { width: 100%; max-width: 420px; }
+.pk-inline { background: var(--bg-elevated); border: 1px solid var(--line); border-radius: var(--r-md); padding: var(--s-3); }
+.pk-inline > label { display: block; margin-bottom: 6px; }
+.pk-inline-actions { display: flex; gap: var(--s-2); flex-wrap: wrap; margin-top: var(--s-2); }
+
+/* estado (el portal ya lo trae; el panel no) */
+.pk-item .status-badge {
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase;
+  padding: 4px 10px; border-radius: var(--r-pill); white-space: nowrap;
+}
+.pk-item .status-badge.pending { background: rgba(var(--warn-rgb), .12); color: var(--warn); border: 1px solid rgba(var(--warn-rgb), .3); }
+.pk-item .status-badge.approved { background: rgba(var(--live-rgb), .1); color: var(--live); border: 1px solid rgba(var(--live-rgb), .3); }
+.pk-item .status-badge.rejected { background: rgba(var(--danger-rgb), .1); color: var(--danger); border: 1px solid rgba(var(--danger-rgb), .3); }
+
+/* aviso de plan (portal) */
+.pk-lock { text-align: center; padding: var(--s-4) var(--s-3); }
+.pk-lock p { color: var(--text-dim); margin: 8px auto 16px; max-width: 460px; line-height: 1.5; }
+.pk-proc { color: var(--warn); }

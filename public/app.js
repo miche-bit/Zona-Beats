@@ -39,8 +39,8 @@
   const receiptPreview = document.getElementById('receipt-preview');
 
   let currentTrackId = null;
-  let currentSection = 'catalog'; // catalog | playlist | vip | producers
-  let tracksBySection = { catalog: [], playlist: [], vip: [] };
+  let currentSection = 'catalog'; // catalog | playlist | vip | packs | producers
+  let tracksBySection = { catalog: [], playlist: [], vip: [], packs: [] };
   let discountPercent = 0;
   let paymentInfo = { contactPhone: '', accounts: [] };
   let exchangeRates = [];
@@ -248,7 +248,7 @@
 
       document.querySelectorAll('.section-tab').forEach(t => t.classList.toggle('active', t === tab));
 
-      const titles = { catalog: 'Catálogo', playlist: 'Playlist', vip: 'Beats VIP', producers: 'Productores' };
+      const titles = { catalog: 'Catálogo', playlist: 'Playlist', vip: 'Beats VIP', packs: 'Sample Packs', producers: 'Productores' };
       sectionTitle.textContent = titles[section];
 
       const isProducers = section === 'producers';
@@ -262,7 +262,7 @@
 
       searchInput.placeholder = section === 'playlist'
         ? 'Buscar por nombre o género…'
-        : 'Buscar por nombre, género o precio…';
+        : section === 'packs' ? 'Buscar pack por nombre, tipo o productor…' : 'Buscar por nombre, género o precio…';
 
       if (isProducers) {
         // el aviso «Aún no hay…» es de las otras secciones: en Productores no se muestra
@@ -451,7 +451,8 @@
   function renderTracks(tracks, totalBeforeFilter, targetGrid) {
     const grid = targetGrid || trackGrid;
     grid.innerHTML = '';
-    trackCount.textContent = tracks.length ? `${tracks.length} PISTA${tracks.length === 1 ? '' : 'S'}` : '';
+    const esPacks = !targetGrid && currentSection === 'packs';
+    trackCount.textContent = !tracks.length ? '' : esPacks ? `${tracks.length} PACK${tracks.length === 1 ? '' : 'S'}` : `${tracks.length} PISTA${tracks.length === 1 ? '' : 'S'}`;
 
     const hasSearch = Boolean(searchQuery);
     const enDetalleProductor = Boolean(targetGrid);
@@ -461,6 +462,9 @@
     if (currentSection === 'vip') {
       emptyStateTitle.textContent = 'Aún no hay Beats VIP';
       emptyStateText.textContent = 'Cuando se vendan pistas exclusivas, aparecerán aquí.';
+    } else if (currentSection === 'packs') {
+      emptyStateTitle.textContent = 'Aún no hay Sample Packs';
+      emptyStateText.textContent = 'Pronto habrá paquetes de sonidos, loops y drums para tus producciones.';
     } else if (currentSection === 'playlist') {
       emptyStateTitle.textContent = 'Playlist vacía';
       emptyStateText.textContent = 'Todavía no hay colaboraciones gratuitas publicadas.';
@@ -483,15 +487,15 @@
       // Créditos debajo del título: artistas (solo Playlist), género y quién lo produjo (también el admin)
       const creditos = creditosHtml(track, currentSection);
 
-      const exclusiveBadge = track.is_exclusive
-        ? `<div class="track-exclusive-badge">★ Exclusiva</div>`
-        : '';
+      const exclusiveBadge = track.is_pack
+        ? `<div class="track-exclusive-badge track-pack-badge">Sample Pack</div>`
+        : track.is_exclusive ? `<div class="track-exclusive-badge">★ Exclusiva</div>` : '';
       const vipOwner = currentSection === 'vip'
         ? `<div class="track-vip-owner">${track.vip_owner ? 'Dueño: ' + escapeHtml(track.vip_owner) : 'Dueño anónimo'}</div>`
         : '';
 
       let priceChip = '';
-      if (currentSection === 'catalog' && track.for_sale && track.price_cup > 0) {
+      if ((currentSection === 'catalog' || currentSection === 'packs') && track.for_sale && track.price_cup > 0) {
         const priceText = formatPriceInCurrency(track.price_cup, selectedCurrency);
         const multipleLicenses = (track.licenses || []).length > 1;
         const label = multipleLicenses ? `Desde ${priceText}` : priceText;
@@ -603,13 +607,18 @@
     hotsTrack.classList.remove('is-loop');
     hotsTrack.innerHTML = hotsLista.map(t => tarjetaHot(t, false)).join('');
     hotsViewport.scrollLeft = 0;
-    // si no caben todas, se repite la fila para que el carrusel no tenga fin
-    const hayDesborde = hotsTrack.scrollWidth > hotsViewport.clientWidth + 4;
-    hotsPause.hidden = !hayDesborde;
-    if (!hayDesborde) return;
+    // Con una sola pista no hay carrusel. Con dos o más, siempre gira: aunque quepan todas en
+    // la pantalla, la fila se repite las veces necesarias para que el movimiento no tenga fin.
+    const gira = hotsLista.length > 1;
+    hotsPause.hidden = !gira;
+    if (!gira) return;
+    const gap = parseFloat(getComputedStyle(hotsTrack).columnGap) || 0;
+    const anchoUno = hotsTrack.scrollWidth + gap;
+    if (anchoUno <= gap) return;
+    const veces = Math.max(1, Math.ceil((hotsViewport.clientWidth + 50) / anchoUno));
+    hotsMov.anchoSet = anchoUno * veces;
+    hotsTrack.insertAdjacentHTML('beforeend', hotsLista.map(t => tarjetaHot(t, true)).join('').repeat(veces * 2 - 1));
     hotsTrack.classList.add('is-loop');
-    hotsMov.anchoSet = hotsTrack.scrollWidth + parseFloat(getComputedStyle(hotsTrack).columnGap || '0');
-    hotsTrack.insertAdjacentHTML('beforeend', hotsLista.map(t => tarjetaHot(t, true)).join(''));
     hotsViewport.scrollLeft = hotsMov.anchoSet;
     hotsMov.pos = hotsViewport.scrollLeft;
     hotsMov.ultimo = 0;
@@ -618,7 +627,8 @@
 
   // Avanza de izquierda a derecha: las tarjetas se desplazan hacia la derecha
   function moverHots(ts) {
-    const quieto = hotsMov.pausaUsuario || hotsMov.pausaTemporal || reducirMovimiento.matches || document.hidden;
+    // «reducir movimiento» solo hace que empiece en pausa: si la persona pulsa ▶, se mueve
+    const quieto = hotsMov.pausaUsuario || hotsMov.pausaTemporal || document.hidden;
     // si la persona deslizó con el dedo, se sigue desde donde lo dejó
     if (Math.abs(hotsViewport.scrollLeft - hotsMov.pos) > 2) hotsMov.pos = hotsViewport.scrollLeft;
     if (hotsMov.ultimo && !quieto) {
@@ -849,12 +859,16 @@
     let seccion = 'catalog';
     if (!track) {
       try {
-        const r = await fetch('/api/tracks?type=playlist');
-        const d = await r.json();
-        tracksBySection.playlist = d.tracks;
-        seccionesCargadas.add('playlist'); // si no, la pestaña Playlist se quedaba cargando para siempre
-        track = d.tracks.find(t => t.id === id);
-        seccion = 'playlist';
+        // si no está en el Catálogo, se busca en Playlist y después en Sample Packs
+        for (const otra of ['playlist', 'packs']) {
+          const r = await fetch('/api/tracks?type=' + otra);
+          const d = await r.json();
+          tracksBySection[otra] = d.tracks;
+          seccionesCargadas.add(otra); // si no, la pestaña se quedaba cargando para siempre
+          track = d.tracks.find(t => t.id === id);
+          seccion = otra;
+          if (track) break;
+        }
       } catch { /* sin conexión */ }
     }
     if (!track) return;
@@ -954,12 +968,16 @@
       label: 'Ilimitada',
       description: 'Nivel 3 · Recibes MP3 + WAV + STEMS. Permite distribuir y MONETIZAR sin límite. Compra única: el beat se retira del catálogo. No es exclusiva ni va a Beats VIP.',
     },
+    pack: {
+      label: 'Sample Pack',
+      description: 'Recibes el pack completo (archivo comprimido). Puedes usar los sonidos en tus canciones, incluso monetizadas, sin pagar regalías. No puedes revender ni compartir los sonidos. No exclusiva.',
+    },
     exclusive: {
       label: 'Exclusiva',
       description: 'Nivel 4 · Recibes MP3 + WAV + STEMS. Todos los derechos comerciales y exclusividad. El beat se retira para siempre y pasa a Beats VIP (con tu nombre solo si lo autorizas).',
     },
   };
-  const LICENSE_ORDER = ['basic', 'premium', 'unlimited', 'exclusive'];
+  const LICENSE_ORDER = ['basic', 'premium', 'unlimited', 'exclusive', 'pack'];
 
   let selectedLicenseType = null;
 
@@ -1207,8 +1225,15 @@
 
       const orderData = await res.json().catch(() => ({}));
       if (orderData.orderToken) {
-        guardarCompra({ token: orderData.orderToken, title: activeModalTrack.title, license: licenseLabel, createdAt: new Date().toISOString() });
+        guardarCompra({ token: orderData.orderToken, title: activeModalTrack.title, license: licenseLabel, createdAt: new Date().toISOString(), codigo: orderData.codigo || '' });
       }
+      const codigoEl = document.getElementById('modal-order-code');
+      const recibo = document.getElementById('modal-receipt-btn');
+      if (orderData.codigo) {
+        codigoEl.textContent = 'Tu pedido: ' + orderData.codigo + '. El vendedor tiene ' + horasTxt(orderData.horasAprobacion || 24) + ' para aprobarlo.';
+        codigoEl.hidden = false;
+      } else codigoEl.hidden = true;
+      if (orderData.comprobanteUrl) { recibo.href = orderData.comprobanteUrl; recibo.hidden = false; } else recibo.hidden = true;
 
       orderForm.style.display = 'none';
       modalSuccess.style.display = 'block';
@@ -1216,7 +1241,7 @@
       if (paymentInfo.contactPhone) {
         const message = encodeURIComponent(
           `Hola, soy ${buyerName} 👋 Acabo de comprar "${activeModalTrack.title}" (Licencia ${licenseLabel})` +
-          ` (${displayedPrice}). ` +
+          ` (${displayedPrice}). ` + (orderData.codigo ? `Pedido ${orderData.codigo}. ` : '') +
           `Ya te envié el comprobante de mi transferencia a través de la plataforma. ¡Gracias!`
         );
         const phoneDigits = paymentInfo.contactPhone.replace(/[^0-9]/g, '');
@@ -1335,7 +1360,16 @@
       const fecha = new Date(c.createdAt || d.createdAt || Date.now()).toLocaleDateString('es', { day: '2-digit', month: 'short', year: 'numeric' });
       let estado = '<span class="purchase-status pending">Comprobando…</span>';
       let acciones = '';
-      if (d.status === 'pending') estado = '<span class="purchase-status pending">Esperando que el vendedor apruebe tu pago</span>';
+      if (d.status === 'pending') {
+        estado = '<span class="purchase-status pending">Esperando que el vendedor apruebe tu pago</span>';
+        if (d.limiteAprobacion) {
+          const lim = new Date(d.limiteAprobacion);
+          const txtLim = lim.toLocaleString('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+          estado += d.puedeReclamar
+            ? '<span class="purchase-plazo vencido">Pasó el plazo de ' + horasTxt(d.horasAprobacion || 24) + ' (' + txtLim + ') sin aprobar tu pago.</span>'
+            : '<span class="purchase-plazo">El vendedor tiene hasta el ' + txtLim + ' para aprobarlo.</span>';
+        }
+      }
       if (d.status === 'missing') estado = '<span class="purchase-status missing">No encontramos esta compra. Escríbele al vendedor por WhatsApp.</span>';
       if (d.status === 'rejected') {
         estado = '<span class="purchase-status missing">Pago no aprobado</span>' +
@@ -1350,15 +1384,48 @@
             : '<span class="purchase-meta">El vendedor te enviará el archivo por WhatsApp.</span>') +
           (d.pdfUrl ? '<a class="purchase-pdf" href="' + escapeHtml(d.pdfUrl) + '" target="_blank" rel="noopener">Licencia en PDF</a>' : '') +
           '</div>' +
-          (archivos.length > 1 ? '<span class="purchase-meta">Los archivos grandes (WAV, STEMS) descárgalos con wifi o buenos datos: si se corta, vuelve a tocar el botón.</span>' : '');
+          ((archivos.length > 1 || archivos.some(f => f.f === 'pack')) ? '<span class="purchase-meta">Los archivos grandes (WAV, STEMS, Sample Packs) descárgalos con wifi o buenos datos: si se corta, vuelve a tocar el botón.</span>' : '');
       }
+      // reclamo: si pasó el plazo sin aprobar, o si rechazaron el pago
+      let reclamo = '';
+      if (d.reclamo) {
+        const fr = new Date(String(d.reclamo.fecha).replace(' ', 'T') + 'Z').toLocaleString('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+        reclamo = '<span class="purchase-reclamo-ok">' + (d.reclamo.atendido ? 'Tu reclamo del ' + fr + ' fue atendido por el vendedor.' : 'Reclamo enviado el ' + fr + '. El vendedor lo ve marcado en rojo.') + '</span>';
+      }
+      if (d.puedeReclamar && !(d.reclamo && !d.reclamo.atendido)) {
+        const idR = 'reclamo-' + c.token.slice(0, 8);
+        reclamo += '<div class="purchase-reclamo">' +
+          '<label for="' + idR + '">' + (d.status === 'rejected' ? '¿Crees que es un error? Reclama' : 'Reclamar al vendedor') + '</label>' +
+          '<textarea id="' + idR + '" maxlength="600" placeholder="Ej: pagué el día 10 por transferencia desde BANDEC, adjunté la captura…"></textarea>' +
+          '<button type="button" class="purchase-reclamar" data-token="' + c.token + '">Enviar reclamo</button></div>';
+      }
+      const codigo = d.codigo || c.codigo || '';
+      const comprobante = d.comprobanteUrl ? '<a class="purchase-pdf" href="' + escapeHtml(d.comprobanteUrl) + '" target="_blank" rel="noopener">Comprobante del pedido</a>' : '';
+      if (comprobante && d.status !== 'approved') acciones = '<div class="purchase-actions">' + comprobante + '</div>';
+      else if (comprobante) acciones = acciones.replace('</div>', comprobante + '</div>');
       return '<div class="purchase-card' + (d.status === 'approved' ? ' is-approved' : (d.status === 'rejected' ? ' is-rejected' : '')) + '">' +
         '<div class="purchase-title">' + escapeHtml(c.title || d.trackTitle || 'Beat') + '</div>' +
-        '<div class="purchase-meta">Licencia ' + escapeHtml(c.license || d.licenseLabel || '') + ' · ' + fecha + '</div>' +
-        estado + acciones +
+        '<div class="purchase-meta">Licencia ' + escapeHtml(String(c.license || d.licenseLabel || '').replace(/^Licencia (de )?/i, '')) + ' · ' + fecha + '</div>' +
+        (codigo ? '<div class="purchase-code">Pedido ' + escapeHtml(codigo) + '</div>' : '') +
+        estado + acciones + reclamo +
         '<button type="button" class="purchase-forget" data-token="' + c.token + '">Quitar de este dispositivo</button>' +
         '</div>';
     }).join('');
+    purchasesList.querySelectorAll('.purchase-reclamar').forEach((b) => b.addEventListener('click', async () => {
+      const caja = b.closest('.purchase-reclamo');
+      const texto = caja.querySelector('textarea').value.trim();
+      if (texto.length < 5) { caja.querySelector('textarea').focus(); return; }
+      b.disabled = true;
+      try {
+        const r = await fetch('/api/purchase/' + b.dataset.token + '/reclamo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ texto }) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { alert(d.error || 'No se pudo enviar el reclamo.'); b.disabled = false; return; }
+        const tel = String(d.adminPhone || '').replace(/[^0-9]/g, '');
+        if (tel) window.open('https://wa.me/' + tel + '?text=' + encodeURIComponent('Hola, hice un reclamo por mi pedido ' + (d.codigo || '') + ': ' + texto), '_blank', 'noopener');
+        await revisarCompras();
+        pintarCompras();
+      } catch { alert('No hay conexión. Intenta de nuevo.'); b.disabled = false; }
+    }));
     purchasesList.querySelectorAll('.purchase-forget').forEach((b) => b.addEventListener('click', () => {
       if (!confirm('¿Quitar esta compra de este dispositivo? Si no guardaste el link que te mandó el vendedor, no podrás volver a verla aquí.')) return;
       escribirCompras(compras().filter(x => x.token !== b.dataset.token));
@@ -1390,7 +1457,44 @@
     }
   })();
 
+  // ---------- Compra con confianza: quién vende y cifras reales ----------
+  const horasTxt = (h) => h + (Number(h) === 1 ? ' hora' : ' horas');
+  function duracionTexto(min) {
+    if (min < 1) return 'menos de 1 min';
+    if (min < 60) return Math.round(min) + ' min';
+    if (min < 48 * 60) { const h = Math.floor(min / 60), m = Math.round(min % 60); return h + ' h' + (m ? ' ' + m + ' min' : ''); }
+    return Math.round(min / 1440) + ' días';
+  }
+  async function loadConfianza() {
+    let d;
+    try { const r = await fetch('/api/confianza'); if (!r.ok) return; d = await r.json(); } catch { return; }
+    const $t = (id) => document.getElementById(id);
+    $t('trust').hidden = false;
+    if (d.titular) {
+      $t('trust-titular').textContent = d.titular;
+      $t('trust-figura').textContent = d.figura || '';
+      $t('trust-vende').hidden = false;
+    }
+    $t('trust-plazo').textContent = 'Revisamos tu pago en menos de ' + horasTxt(d.horasAprobacion) + '. Si no, puedes reclamar desde «Mis compras».';
+    const c = d.cifras || {};
+    const items = [];
+    if (c.entregadas > 0) items.push(['' + c.entregadas.toLocaleString('es'), c.entregadas === 1 ? 'compra entregada' : 'compras entregadas']);
+    if (c.aprobacion && c.aprobacion.muestras >= 3) items.push([duracionTexto(c.aprobacion.mediana), 'tarda normalmente en aprobarse un pago (últimos 90 días)']);
+    if (c.productores > 0) items.push(['' + c.productores, c.productores === 1 ? 'productor activo' : 'productores activos']);
+    if (items.length) {
+      $t('trust-cifras').innerHTML = items.map(i => '<li><strong>' + escapeHtml(i[0]) + '</strong><span>' + escapeHtml(i[1]) + '</span></li>').join('');
+      $t('trust-cifras-card').hidden = false;
+    }
+    const tel = String(d.contacto || '').replace(/[^0-9]/g, '');
+    if (tel) {
+      $t('trust-wa').href = 'https://wa.me/' + tel;
+      $t('trust-wa').textContent = 'WhatsApp +' + tel;
+      $t('trust-contacto-card').hidden = false;
+    }
+  }
+
   async function init() {
+    loadConfianza();
     await loadExchangeRates();
     loadProfile();
     loadSiteConfig();

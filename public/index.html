@@ -70,6 +70,7 @@
     <button class="section-tab active" data-section="catalog">Catálogo</button>
     <button class="section-tab" data-section="playlist">Playlist</button>
     <button class="section-tab" data-section="vip">Beats VIP</button>
+    <button class="section-tab" data-section="packs">Sample Packs</button>
     <button class="section-tab" data-section="producers">Productores</button>
   </div>
 
@@ -106,6 +107,36 @@
       </div>
     </div>
   </div>
+
+  <section class="trust" id="trust" aria-labelledby="trust-title" hidden>
+    <h2 class="trust-title" id="trust-title">Compra con confianza</h2>
+    <div class="trust-grid">
+      <div class="trust-card" id="trust-vende" hidden>
+        <h3>Quién vende</h3>
+        <p id="trust-titular"></p>
+        <p class="trust-muted" id="trust-figura"></p>
+      </div>
+      <div class="trust-card" id="trust-cifras-card" hidden>
+        <h3>En números reales</h3>
+        <ul class="trust-cifras" id="trust-cifras"></ul>
+      </div>
+      <div class="trust-card">
+        <h3>Lo que te garantizamos</h3>
+        <ul class="trust-list">
+          <li id="trust-plazo">Revisamos tu pago dentro del plazo indicado. Si no, puedes reclamar desde «Mis compras».</li>
+          <li>Al pagar recibes un <strong>comprobante del pedido</strong> en PDF con un código propio.</li>
+          <li>Cada compra aprobada trae una <strong>licencia con código</strong> que cualquiera puede <a href="/verify">comprobar aquí</a>.</li>
+          <li>Los productores firman que cada beat es suyo, y cada obra tiene un registro de autoría con fecha.</li>
+          <li>Devoluciones y condiciones: <a href="/terminos">Términos y condiciones</a>.</li>
+        </ul>
+      </div>
+      <div class="trust-card" id="trust-contacto-card" hidden>
+        <h3>¿Dudas antes de comprar?</h3>
+        <p>Escríbenos y te respondemos personalmente.</p>
+        <a class="trust-wa" id="trust-wa" href="#" target="_blank" rel="noopener">WhatsApp</a>
+      </div>
+    </div>
+  </section>
 
   <footer class="footer-note">
     <div>PREVIEWS PROTEGIDOS · COMPRA TU LICENCIA · CONTENIDO ORIGINAL</div>
@@ -251,10 +282,12 @@
         <div class="modal-success-icon">✓</div>
         <div class="modal-success-title">Comprobante enviado</div>
         <p class="modal-success-text">Ya quedó registrado. Ahora confírmalo por WhatsApp con un solo toque:</p>
+        <p class="modal-success-text modal-order-code" id="modal-order-code" hidden></p>
         <a class="modal-whatsapp-btn" id="modal-whatsapp-btn" href="#" target="_blank" rel="noopener">
           Avisar por WhatsApp
         </a>
         <p class="modal-success-text modal-success-note">Cuando el vendedor apruebe tu pago, tu beat y tu licencia en PDF se descargan <strong>aquí mismo</strong>, en «Mis compras». No cierres la página o vuelve a entrar desde este mismo teléfono.</p>
+        <a class="btn-outline-wide btn-outline-link" id="modal-receipt-btn" href="#" target="_blank" rel="noopener" hidden>Descargar comprobante del pedido (PDF)</a>
         <button type="button" class="btn-outline-wide" id="modal-see-purchases-btn">Ver mis compras</button>
       </div>
     </div>
@@ -296,12 +329,16 @@
         <p>Para mantener la transparencia y dar visibilidad a los compradores de licencias exclusivas, todos los beats vendidos bajo esta modalidad aparecerán listados en nuestra sección "Beats VIP".</p>
         <p>En este espacio se exhibirá el nombre del artista o comprador (previa autorización expresa del mismo) junto con el beat adquirido, con el fin de acreditar su propiedad exclusiva, generar confianza en la comunidad y evitar cualquier disputa sobre la autoría del uso del instrumental. Si el comprador prefiere mantenerse en el anonimato, su información no será publicada, pero el beat igualmente quedará retirado del mercado de forma permanente.</p>
 
-        <h4>4. Política de devoluciones y cancelaciones</h4>
+        <h4>4. Sample Packs</h4>
+        <p>Un Sample Pack es un paquete de sonidos (loops, drums, one-shots, voces u otros) que se entrega como archivo comprimido. Al comprarlo recibes una licencia no exclusiva: puedes usar los sonidos dentro de tus propias canciones y producciones, incluso monetizadas, sin pagar regalías.</p>
+        <p><strong>No está permitido</strong> revender, regalar o compartir el pack ni los sonidos sueltos, ni incluirlos en otros sample packs, kits o librerías. La licencia no otorga la propiedad de los sonidos y el mismo pack puede venderse a otras personas.</p>
+
+        <h4>5. Política de devoluciones y cancelaciones</h4>
         <p>Una vez realizada la compra, no se aceptan devoluciones ni reembolsos bajo ningún concepto.</p>
         <p>El comprador tiene a su disposición la vista previa completa del beat (con marca de agua o en calidad de demostración) antes de efectuar el pago, así como toda la información sobre los tipos de licencia aquí detallados. Por lo tanto, se entiende que el cliente escuchó, interpretó y evaluó el producto antes de adquirirlo, tomando una decisión informada y voluntaria.</p>
         <p>Al tratarse de productos digitales descargables, una vez entregado el archivo de audio en alta calidad, se considera la transacción consumada de forma irrevocable. No se tramitarán reembolsos por errores en la elección del comprador (como confundir licencia estándar con exclusiva) ni por cambios de opinión posteriores.</p>
 
-        <h4>5. Cláusula general</h4>
+        <h4>6. Cláusula general</h4>
         <p>El productor se reserva la propiedad intelectual de la composición subyacente del beat. La compra (tanto estándar como exclusiva) otorga derechos de uso sobre la grabación maestra (audio), pero no transfiere automáticamente los derechos de publicación o composición (créditos de producción) a menos que se negocie explícitamente por escrito. Para los beats exclusivos, se incluye un contrato de cesión de derechos que detalla todos los alcances legales.</p>
         <p>Asimismo, si el creador de la obra original (productor/beatmaker) no cumple con los términos de licenciamiento establecidos, será expulsado permanentemente de la app. Las pruebas de dicho incumplimiento se verificarán mediante los <strong>hashes de los archivos y las licencias en PDF</strong> entregadas a los compradores, que acreditan los términos otorgados y el uso autorizado. La expulsión será definitiva y sin derecho a reembolso, apelación o reinscripción, sin perjuicio de las acciones legales que correspondan.</p>
         <p>Cualquier persona puede comprobar una licencia o un archivo en la página <a href="/verify" style="color:var(--live);">Verificar licencia</a>, con el número de licencia, el hash o el propio archivo de audio.</p>

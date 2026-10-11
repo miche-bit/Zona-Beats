@@ -81,17 +81,17 @@
 
   <div class="verify-wrap">
     <div class="verify-badge">VERIFICACIÓN DE LICENCIA</div>
-    <h1 class="verify-title">Comprobar una licencia</h1>
-    <p class="verify-sub">Escribe el número que aparece en el certificado (por ejemplo, LIC-2026-0001) para confirmar que la compra existe y ver qué autoriza.</p>
+    <h1 class="verify-title">Comprobar un documento</h1>
+    <p class="verify-sub">Escribe el código que aparece en el documento: una licencia (LIC-…), un registro de autoría (REG-…) o un comprobante de pedido (PED-…). También sirve la huella SHA-256 de un archivo.</p>
 
     <div class="verify-search">
-      <input type="text" id="cert-input" placeholder="LIC-2026-0001 o un hash SHA-256" autocomplete="off">
+      <input type="text" id="cert-input" placeholder="LIC-…, REG-…, PED-… o una huella SHA-256" autocomplete="off">
       <button type="button" id="verify-btn">Verificar</button>
     </div>
 
     <div class="verify-file">
       <div class="verify-file-title">¿Tienes un archivo y quieres saber si salió de aquí?</div>
-      <p class="verify-sub" style="margin:4px 0 12px;">Sirve el audio (MP3 o WAV), los STEMS o el <strong>PDF de la licencia</strong>. La huella se calcula en tu propio dispositivo: el archivo no se sube a ningún lado.</p>
+      <p class="verify-sub" style="margin:4px 0 12px;">Sirve el audio (MP3 o WAV), los STEMS o el <strong>PDF de la licencia, del registro o del pedido</strong>. La huella se calcula en tu propio dispositivo: el archivo no se sube a ningún lado.</p>
       <label class="verify-file-drop">
         <span id="file-label">Elegir archivo</span>
         <input type="file" id="file-input" accept="audio/*,.wav,.mp3,.flac,.m4a,.ogg,.zip,.rar,.7z,.pdf,application/pdf">

@@ -77,9 +77,69 @@
     try { sessionStorage.setItem('zb_prod_tab', nombre); } catch { /* sin almacenamiento */ }
     if (nombre === 'stats') loadStats();
     if (nombre === 'dinero') { loadWithdrawals(); loadEarnings(); }
+    if (nombre === 'packs') abrirPacks();
+    if (nombre === 'registro') loadRegistro();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
   tabs.forEach(t => t.addEventListener('click', () => abrirPestana(t.dataset.tab)));
+
+  // ---------- Sample Packs (solo planes Pro y Studio) ----------
+  let packsUI = null;
+  async function abrirPacks() {
+    let d = null;
+    try {
+      const res = await fetch('/api/producer/packs', { cache: 'no-store' });
+      if (res.status === 401) return showLogin();
+      d = await res.json();
+    } catch { return; }
+    $('packs-lock').hidden = d.permitido;
+    $('packs-zona').hidden = !d.permitido;
+    if (!d.permitido) return;
+    if (packsUI) { packsUI.cargar(); return; }
+    packsUI = window.ZBPacks.montar({
+      modo: 'productor', form: $('packs-form'), lista: $('packs-list'), cuenta: $('packs-count'),
+      aviso: (msg, err) => showToast(msg, err), sesionVencida: showLogin,
+    });
+  }
+  $('packs-ver-planes').addEventListener('click', () => abrirPestana('plan'));
+
+  // ---------- Registro: certificados de autoría y actividad del administrador ----------
+  let actividad = [];
+  async function loadRegistro() {
+    ZBUI.mostrarSkeleton($('reg-list'), 'lineas', 2);
+    ZBUI.mostrarSkeleton($('act-list'), 'lineas', 3);
+    let reg, act;
+    try {
+      const [r1, r2] = await Promise.all([fetch('/api/producer/registros', { cache: 'no-store' }), fetch('/api/producer/actividad', { cache: 'no-store' })]);
+      if (r1.status === 401 || r2.status === 401) return showLogin();
+      reg = (await r1.json()).registros || [];
+      act = (await r2.json()).actividad || [];
+    } catch {
+      $('reg-list').innerHTML = $('act-list').innerHTML = '<div class="empty-hint">No se pudo cargar. Revisa tu conexión.</div>';
+      return;
+    }
+    $('reg-count').textContent = reg.length ? reg.length + ' obra' + (reg.length === 1 ? '' : 's') : '';
+    $('reg-list').innerHTML = reg.length ? reg.map(r =>
+      '<div class="reg-item">' +
+        '<div class="info"><div class="t">' + escapeHtml(r.titulo) + ' <span class="mini-tag">' + (r.tipo === 'pack' ? 'Sample Pack' : 'Beat') + '</span>' + (r.sigue ? '' : ' <span class="mini-tag ghost">ya no está en la tienda</span>') + '</div>' +
+        '<div class="m">' + escapeHtml(r.codigo) + ' · registrado el ' + ZBHistorial.fechaHora(r.fecha) + ' · ' + (r.archivos.length ? r.archivos.length + ' archivo' + (r.archivos.length === 1 ? '' : 's') + ' con huella' : 'sin huellas guardadas (solo fecha)') + '</div></div>' +
+        '<a class="btn-link-p" href="/api/producer/registros/' + encodeURIComponent(r.codigo) + '/pdf" download>Certificado</a>' +
+      '</div>').join('')
+      : '<div class="empty-hint">Cuando subas tu primer beat o pack, aquí tendrás su certificado.</div>';
+    actividad = act;
+    $('act-download').disabled = !act.length;
+    $('act-list').innerHTML = act.length ? act.map(a =>
+      '<div class="act-item"><div class="act-when">' + ZBHistorial.fechaHora(a.created_at) + '</div>' +
+      '<div class="act-what"><strong>' + escapeHtml(a.accion) + '</strong>' + (a.detalle ? '<span>' + escapeHtml(a.detalle) + '</span>' : '') + '</div></div>').join('')
+      : '<div class="empty-hint">Todavía no hay nada anotado. Aquí verás todo lo que el administrador haga con tus beats, packs y dinero.</div>';
+  }
+  $('act-download').addEventListener('click', () => {
+    ZBHistorial.descargarCSV('actividad-administrador', [
+      { titulo: 'Fecha y hora', valor: a => ZBHistorial.fechaHora(a.created_at) },
+      { titulo: 'Acción', valor: a => a.accion },
+      { titulo: 'Detalle', valor: a => a.detalle || '' },
+    ], actividad);
+  });
 
   // ---------- Sesión ----------
   function showApp(name) {
@@ -209,7 +269,7 @@
     perfil = await res.json();
 
     $('plan-chip').textContent = perfil.planLabel;
-    const nombresLic = { basic: 'Básica', premium: 'Premium', unlimited: 'Ilimitada', exclusive: 'Exclusiva' };
+    const nombresLic = { basic: 'Básica', premium: 'Premium', unlimited: 'Ilimitada', exclusive: 'Exclusiva', pack: 'Sample Pack' };
     $('plan-facts').innerHTML =
       fact('Comisión de la plataforma', perfil.planCommission + '%') +
       fact('Beats activos', perfil.beatsUsados + (perfil.planMaxBeats ? ' / ' + perfil.planMaxBeats : ' / ilimitados')) +
@@ -359,7 +419,7 @@
     audioDefault = p.soloMp3 ? 'MP3 320 kbps · máx 250 MB' : 'MP3 320 kbps o WAV · máx 250 MB';
     if (!audioInput.files.length) $('audio-drop-label').textContent = audioDefault;
 
-    const nombres = { basic: 'Básica', premium: 'Premium', unlimited: 'Ilimitada', exclusive: 'Exclusiva' };
+    const nombres = { basic: 'Básica', premium: 'Premium', unlimited: 'Ilimitada', exclusive: 'Exclusiva', pack: 'Sample Pack' };
     const reglas = [
       'Plan ' + p.planLabel + ': puedes vender ' + lic.map(l => nombres[l]).join(', ') + '.',
       p.soloMp3 ? 'Audio solo en MP3 de 320 kbps.' : 'Audio en MP3 de 320 kbps o WAV.',
@@ -636,6 +696,7 @@
         '<div class="track-actions">' +
           '<span class="status-badge ' + statusInfo.className + '">' + statusInfo.text + '</span>' +
           (puedeHot && !hotRevision ? '<button type="button" class="btn-hot-track">' + (hotHasta ? 'Extender Hot' : '<span aria-hidden="true">🔥</span> Poner en Hots') + '</button>' : '') +
+          (t.registro ? '<a class="btn-cert-track" href="/api/producer/registros/' + encodeURIComponent(t.registro) + '/pdf" download>Certificado</a>' : '') +
           (!t.sold ? '<button type="button" class="btn-edit-track">Editar</button>' : '') +
           (!t.sold ? '<button type="button" class="btn-delete-track">Eliminar</button>' : '') +
         '</div>';
@@ -723,7 +784,7 @@
   }
 
   // ---------- Ventas ----------
-  const LICENSE_LABELS = { basic: 'Básica', premium: 'Premium', unlimited: 'Ilimitada', exclusive: 'Exclusiva' };
+  const LICENSE_LABELS = { basic: 'Básica', premium: 'Premium', unlimited: 'Ilimitada', exclusive: 'Exclusiva', pack: 'Sample Pack' };
   async function loadEarnings() {
     const res = await fetch('/api/producer/earnings');
     if (!res.ok) return;
@@ -779,7 +840,8 @@
       cur.innerHTML = '';
       const ultimo = retiros.historial.find(w => w.status !== 'pending');
       if (ultimo && ultimo.status === 'paid' && Date.now() - parseFecha(ultimo.resolved_at).getTime() < 3 * 86400000) {
-        notice.innerHTML = '<div class="w-card paid"><strong>Te pagamos ' + montoRetiro(ultimo) + '.</strong> Revisa tu cuenta.' + (ultimo.note ? ' Nota: ' + escapeHtml(ultimo.note) : '') + '</div>';
+        notice.innerHTML = '<div class="w-card paid"><strong>Te pagamos ' + montoRetiro(ultimo) + '.</strong> Revisa tu cuenta.' + (ultimo.note ? ' Nota: ' + escapeHtml(ultimo.note) : '') +
+          (ultimo.proof_filename ? ' <a class="mov-proof" href="/api/producer/withdrawals/' + ultimo.id + '/comprobante" target="_blank" rel="noopener">Ver captura del pago</a>' : '') + '</div>';
         notice.style.display = 'block';
       } else {
         notice.style.display = 'none';
@@ -797,7 +859,13 @@
     const due = parseFecha(w.due_at).getTime();
     const falta = due - Date.now();
     let tiempo;
-    if (falta <= 0) tiempo = 'El plazo ya se cumplió: el administrador debe pagarte hoy.';
+    if (falta <= 0) {
+      const atraso = -falta;
+      const dA = Math.floor(atraso / 86400000), hA = Math.floor((atraso % 86400000) / 3600000);
+      const tel = String((retiros && retiros.adminPhone) || '').replace(/[^0-9]/g, '');
+      tiempo = '<span class="w-late">El plazo de tu plan venció hace ' + (dA ? dA + ' d ' : '') + hA + ' h.</span> El administrador ya debía pagarte; queda anotado en tu Registro cuando lo haga.' +
+        (tel ? ' <a class="mov-proof" href="https://wa.me/' + tel + '?text=' + encodeURIComponent('Hola, mi retiro de ' + montoRetiro(w).replace(/<[^>]+>/g, '') + ' en Zona Beats pasó el plazo de mi plan. ¿Me confirmas cuándo me pagas?') + '" target="_blank" rel="noopener">Recordárselo por WhatsApp</a>' : '');
+    }
     else {
       const d = Math.floor(falta / 86400000), h = Math.floor((falta % 86400000) / 3600000), m = Math.floor((falta % 3600000) / 60000);
       tiempo = 'Te pagamos en <strong>' + (d ? d + ' d ' : '') + h + ' h ' + (d ? '' : m + ' min') + '</strong>' +
@@ -952,7 +1020,9 @@
       '<div class="earning-item mov-item mov-' + m.tipo + '">' +
         '<div class="mov-icon" aria-hidden="true">' + (MOV_ICONOS[m.tipo] || '•') + '</div>' +
         '<div class="info"><div class="t">' + escapeHtml(m.titulo) + '</div>' +
-        '<div class="m"><span class="mov-when">' + ZBHistorial.fechaHora(m.fecha) + '</span>' + (m.detalle ? ' · ' + escapeHtml(m.detalle) : '') + '</div></div>' +
+        '<div class="m"><span class="mov-when">' + ZBHistorial.fechaHora(m.fecha) + '</span>' + (m.detalle ? ' · ' + escapeHtml(m.detalle) : '') +
+          (m.comprobanteUrl ? ' · <a class="mov-proof" href="' + escapeHtml(m.comprobanteUrl) + '" target="_blank" rel="noopener">Ver captura del pago</a>' : '') +
+          (m.fueraDePlazo ? ' · <span class="mov-late">fuera del plazo de tu plan</span>' : '') + '</div></div>' +
         '<div class="amount">' + montoMovimiento(m) +
           (m.estado ? '<span class="paid-tag ' + (/pagado|aprobado/.test(m.estado) ? 'is-paid' : '') + '">' + escapeHtml(m.estado) + '</span>' : '') +
         '</div>' +
