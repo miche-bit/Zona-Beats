@@ -91,6 +91,21 @@ function comparar(a, b) {
   return mejor;
 }
 
+// Duración en segundos (ffprobe)
+async function duracion(archivo) {
+  try {
+    const txt = await ejecutar('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', archivo], { limite: 30000 });
+    return Math.max(0, Number(String(txt).trim()) || 0);
+  } catch { return 0; }
+}
+// AudD cobra 1 consulta por cada trozo de 12 s que analiza. Con every=1 y skip=2 analiza 1 de cada 3.
+const CADA = 1, SALTO = 2, LIMITE = 25;
+function consultasPara(segundos, limite = LIMITE, cada = CADA, salto = SALTO) {
+  const trozos = Math.max(1, Math.ceil((Number(segundos) || 0) / 12));
+  const analizados = Math.ceil(trozos / (cada + salto)) * cada;
+  return Math.min(limite, analizados);
+}
+
 // Muestra liviana para el servicio externo: mono, 64 kbps, hasta 10 minutos.
 async function muestra(archivo) {
   const salida = path.join(os.tmpdir(), `zb-muestra-${crypto.randomUUID()}.mp3`);
@@ -100,6 +115,14 @@ async function muestra(archivo) {
 
 function externoActivo() { return Boolean(AUDD_TOKEN()); }
 
+// "01:24" o "1:02:03" → segundos
+function aSegundos(t) {
+  if (typeof t === 'number') return Math.max(0, Math.round(t));
+  const partes = String(t || '').split(':').map(Number);
+  if (!partes.length || partes.some(n => !Number.isFinite(n))) return 0;
+  return partes.reduce((acc, n) => acc * 60 + n, 0);
+}
+
 // Reconocimiento externo con AudD: revisa 12 s de cada 36 s del audio (unas 5 consultas por beat
 // de 3 minutos). Devuelve las canciones publicadas que coinciden.
 async function reconocerExterno(archivo) {
@@ -108,9 +131,9 @@ async function reconocerExterno(archivo) {
   try {
     const fd = new FormData();
     fd.append('api_token', AUDD_TOKEN());
-    fd.append('every', '1');
-    fd.append('skip', '2');
-    fd.append('limit', '25');
+    fd.append('every', String(CADA));
+    fd.append('skip', String(SALTO));
+    fd.append('limit', String(LIMITE));
     fd.append('accurate_offsets', 'true');
     fd.append('file', new Blob([fs.readFileSync(tmp)], { type: 'audio/mpeg' }), 'muestra.mp3');
     const ctrl = new AbortController();
@@ -131,11 +154,14 @@ async function reconocerExterno(archivo) {
         vistos.set(clave, {
           titulo: String(s.title || ''), artista: String(s.artist || ''), album: String(s.album || ''),
           sello: String(s.label || ''), fecha: String(s.release_date || ''), enlace: String(s.song_link || ''),
-          segundo: Number(trozo.offset) || 0, score: Number(s.score) || 0, veces: 1,
+          segundo: aSegundos(trozo.offset) + Math.round((Number(s.start_offset) || 0) / 1000),
+          enOriginal: String(s.timecode || ''), score: Number(s.score) || 0, veces: 1,
         });
       }
     }
-    return [...vistos.values()].slice(0, 15);
+    const lista = [...vistos.values()].slice(0, 15);
+    lista.consultas = consultasPara(await duracion(tmp));
+    return lista;
   } finally {
     fs.promises.unlink(tmp).catch(() => {});
   }
@@ -163,10 +189,10 @@ async function probarExterno() {
     if (d.status !== 'success') return { ok: false, error: (d.error && (d.error.error_message || d.error.message)) || `respuesta ${res.status}` };
     const canciones = [];
     for (const t of (Array.isArray(d.result) ? d.result : [])) for (const c of (t.songs || [])) canciones.push(`${c.artist} — ${c.title}`);
-    return { ok: true, canciones: [...new Set(canciones)] };
+    return { ok: true, canciones: [...new Set(canciones)], consultas: Math.max(1, Math.min(2, (Array.isArray(d.result) ? d.result.length : 1))) };
   } catch (e) {
     return { ok: false, error: e.name === 'AbortError' ? 'AudD no respondió a tiempo' : e.message };
   }
 }
 
-module.exports = { huella, comparar, aTexto, deTexto, reconocerExterno, externoActivo, probarExterno };
+module.exports = { huella, comparar, aTexto, deTexto, reconocerExterno, externoActivo, probarExterno, consultasPara };

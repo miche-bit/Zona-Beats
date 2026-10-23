@@ -178,6 +178,7 @@
     loadResenasAdmin();
     loadConfianzaAdmin();
     loadOrigEstado();
+    loadCoincidencias();
     if (!packsUI) {
       packsUI = window.ZBPacks.montar({
         modo: 'admin', form: document.getElementById('packs-form'), lista: document.getElementById('packs-list'),
@@ -638,6 +639,133 @@
     return '<div class="m orig-mini warn"><strong>Coincide con:</strong> ' + lista.join(' · ') + '</div>';
   }
 
+  // ---------- Coincidencias de originalidad (prioridad máxima) ----------
+  const mmss = (n) => { n = Math.max(0, Math.round(Number(n) || 0)); return Math.floor(n / 60) + ':' + String(n % 60).padStart(2, '0'); };
+  async function loadCoincidencias() {
+    const r = await fetch('/api/admin/coincidencias');
+    if (!r.ok) return;
+    const d = await r.json();
+    const n = d.obras.length;
+    const panel = document.getElementById('coincidencias-panel');
+    const alerta = document.getElementById('orig-alerta');
+    panel.hidden = !n;
+    alerta.hidden = !n;
+    if (!n) { document.getElementById('coincidencias-list').innerHTML = ''; return; }
+    document.getElementById('orig-alerta-n').textContent = n === 1 ? '1 obra con coincidencias.' : n + ' obras con coincidencias.';
+    document.getElementById('coincidencias-count').textContent = n;
+    document.getElementById('coincidencias-hint').textContent = d.autoRetiro
+      ? 'Las que coinciden con canciones publicadas se retiran solas de la tienda. Escucha y decide: retirarla definitivamente o mantenerla si es original.'
+      : 'Escucha y decide: retirarla de la tienda o mantenerla si es original.';
+    const estadoTxt = (o) => o.retiradaAuto ? '<span class="tag-vencido">retirada automáticamente</span>'
+      : o.estado === 'approved' ? '<span class="tag-vencido">a la venta</span>' : '<span class="tag-pending">en revisión</span>';
+    document.getElementById('coincidencias-list').innerHTML = d.obras.map(o => `
+      <div class="coin-item" data-id="${o.id}">
+        <div class="coin-head">
+          ${o.portada ? `<img src="/api/cover/${o.id}?s=160" alt="" loading="lazy">` : ''}
+          <div class="coin-info">
+            <div class="coin-title">${escapeHtml(o.titulo)} ${estadoTxt(o)}</div>
+            <div class="coin-meta">${o.productor ? 'Productor: ' + escapeHtml(o.productor) : 'Tuya'} · subida ${escapeHtml(fechaHora(o.subida))}${o.ventas ? ` · <strong class="coin-ventas">${o.ventas} licencia${o.ventas === 1 ? '' : 's'} vendida${o.ventas === 1 ? '' : 's'}</strong>` : ''}</div>
+          </div>
+        </div>
+        <div class="coin-player">
+          <span class="coin-label">En Zona Beats</span>
+          <audio controls preload="none" src="/api/admin/preview-audio/${o.id}" aria-label="Escuchar ${escapeHtml(o.titulo)}"></audio>
+        </div>
+        ${o.externas.map(x => `
+          <div class="coin-match ext">
+            <div class="coin-label">Canción publicada</div>
+            <div class="coin-song"><strong>${escapeHtml(x.titulo)}</strong> — ${escapeHtml(x.artista)}${x.sello ? ' · ' + escapeHtml(x.sello) : ''}${x.fecha ? ' · ' + escapeHtml(x.fecha) : ''}</div>
+            <div class="coin-meta">Suena en tu pista en el ${mmss(x.segundo)}${x.enOriginal ? ' · en la original, en el ' + escapeHtml(x.enOriginal) : ''}</div>
+            <div class="coin-actions-row">
+              <button type="button" class="btn-secondary coin-ir" data-seg="${Number(x.segundo) || 0}">Escuchar tu pista desde el ${mmss(x.segundo)}</button>
+              ${x.enlace ? `<a class="btn-secondary coin-link" href="${escapeHtml(x.enlace)}" target="_blank" rel="noopener noreferrer">Escuchar la original</a>` : ''}
+            </div>
+          </div>`).join('')}
+        ${o.internas.map(x => `
+          <div class="coin-match int">
+            <div class="coin-label">Otra obra de la tienda</div>
+            <div class="coin-song"><strong>${escapeHtml(x.titulo)}</strong> — ${escapeHtml(x.productor)}${x.mismoProductor ? ' (mismo productor)' : ''}</div>
+            <div class="coin-meta">${x.similitud} % igual en ${x.segundos} s</div>
+            ${x.existe ? `<audio controls preload="none" src="/api/admin/preview-audio/${x.trackId}" aria-label="Escuchar ${escapeHtml(x.titulo)}"></audio>` : '<div class="coin-meta">Esa obra ya fue eliminada.</div>'}
+          </div>`).join('')}
+        <div class="coin-decision">
+          <button type="button" class="btn-delete coin-retirar">${o.retiradaAuto ? 'Confirmar retiro' : o.estado === 'approved' ? 'Retirar de la tienda' : 'Rechazar'}</button>
+          <div class="coin-mantener">
+            <label>Es original: <input type="text" class="coin-motivo" maxlength="300" placeholder="Motivo (mínimo 10 caracteres)"></label>
+            <button type="button" class="btn-secondary coin-ok">Mantener${o.retiradaAuto ? ' y devolver a la tienda' : ''}</button>
+          </div>
+          <button type="button" class="btn-secondary coin-reverif">Verificar de nuevo</button>
+          ${o.productorTel ? `<a class="btn-secondary coin-link" href="https://wa.me/${soloDigitos(o.productorTel)}?text=${encodeURIComponent('Hola ' + o.productor + ', tu obra «' + o.titulo + '» en Zona Beats coincide con ' + (o.externas[0] ? '«' + o.externas[0].titulo + '» de ' + o.externas[0].artista : 'otra obra de la tienda') + '. ¿Puedes aclararlo?')}" target="_blank" rel="noopener">Escribir al productor</a>` : ''}
+        </div>
+      </div>`).join('');
+  }
+  document.getElementById('coincidencias-list').addEventListener('click', async (e) => {
+    const item = e.target.closest('.coin-item');
+    if (!item) return;
+    const id = item.dataset.id;
+    if (e.target.classList.contains('coin-ir')) {
+      const a = item.querySelector('.coin-player audio');
+      a.currentTime = Number(e.target.dataset.seg) || 0;
+      a.play().catch(() => {});
+      return;
+    }
+    const recargar = () => { loadCoincidencias(); loadTracks(); loadPendingTracks(); loadSummary(); loadOrigEstado(); };
+    if (e.target.classList.contains('coin-retirar')) {
+      e.target.disabled = true;
+      const r = await fetch('/api/admin/coincidencias/' + id + '/retirar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      e.target.disabled = false;
+      if (r.ok) { showToast('Obra retirada de la tienda.'); recargar(); } else if (r.status !== 401) showToast('No se pudo retirar.', true);
+    }
+    if (e.target.classList.contains('coin-ok')) {
+      const motivo = item.querySelector('.coin-motivo').value.trim();
+      if (motivo.length < 10) { showToast('Indica el motivo (mínimo 10 caracteres).', true); item.querySelector('.coin-motivo').focus(); return; }
+      e.target.disabled = true;
+      const r = await fetch('/api/admin/coincidencias/' + id + '/mantener', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ motivo }) });
+      const d = await r.json().catch(() => ({}));
+      e.target.disabled = false;
+      if (r.ok) { showToast(d.vuelveATienda ? 'Obra mantenida y de vuelta en la tienda.' : 'Obra mantenida.'); recargar(); } else if (r.status !== 401) showToast(d.error || 'No se pudo guardar.', true);
+    }
+    if (e.target.classList.contains('coin-reverif')) {
+      e.target.disabled = true;
+      const r = await fetch('/api/admin/tracks/' + id + '/originalidad', { method: 'POST' });
+      if (r.ok) { showToast('Verificando de nuevo…'); setTimeout(recargar, 6000); } else { e.target.disabled = false; showToast('No se pudo verificar.', true); }
+    }
+  });
+  document.getElementById('orig-alerta-btn').addEventListener('click', () => {
+    abrirCategoria('musica');
+    setTimeout(() => document.getElementById('coincidencias-panel').scrollIntoView({ behavior: 'smooth', block: 'start' }), 350);
+  });
+  document.getElementById('orig-auto-retiro').addEventListener('change', async (ev) => {
+    const r = await fetch('/api/admin/originalidad/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ autoRetiro: ev.target.checked }) });
+    if (r.ok) { showToast(ev.target.checked ? 'Retiro automático activado.' : 'Retiro automático desactivado.'); loadCoincidencias(); }
+    else { ev.target.checked = !ev.target.checked; showToast('No se pudo guardar.', true); }
+  });
+
+  function pintarConsumoAudd(c, activo) {
+    const box = document.getElementById('audd-uso');
+    box.hidden = !activo || !c;
+    if (box.hidden) return;
+    const pct = c.incluidas ? Math.min(100, Math.round(c.usadas / c.incluidas * 100)) : 100;
+    document.getElementById('audd-quedan-canciones').textContent = c.alcanzaPara + ' de ' + c.cancionesPlan;
+    document.getElementById('audd-quedan-txt').textContent = 'Quedan ' + c.quedan.toLocaleString('es') + ' de ' + c.incluidas.toLocaleString('es') + ' consultas · usadas ' + c.usadas.toLocaleString('es') + ' · unas ' + c.porCancion + ' por canción';
+    const barra = document.getElementById('audd-barra');
+    barra.style.width = pct + '%';
+    box.classList.toggle('poco', c.alcanzaPara <= 5);
+    const inc = document.getElementById('audd-incluidas');
+    if (document.activeElement !== inc) inc.value = c.incluidas;
+  }
+  document.getElementById('audd-guardar').addEventListener('click', async (ev) => {
+    ev.target.disabled = true;
+    const r = await fetch('/api/admin/originalidad/consumo', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ incluidas: Number(document.getElementById('audd-incluidas').value), usadas: document.getElementById('audd-usadas').value.trim() }) });
+    const d = await r.json().catch(() => ({}));
+    ev.target.disabled = false;
+    if (!r.ok) { if (r.status !== 401) showToast(d.error || 'No se pudo guardar.', true); return; }
+    document.getElementById('audd-usadas').value = '';
+    showToast('Contador de AudD actualizado.');
+    pintarConsumoAudd(d.consumo, true); loadSummary();
+  });
+
   async function loadOrigEstado() {
     const r = await fetch('/api/admin/originalidad/estado');
     if (!r.ok) return;
@@ -647,6 +775,8 @@
       '<br>Verificados: ' + d.limpio + ' sin coincidencias · ' + d.coincidencias + ' con coincidencias · ' + d.pendiente + ' en curso · ' + d.error + ' con error' +
       (d.ultimoError ? '<br>Último error: ' + escapeHtml(d.ultimoError) : '');
     document.getElementById('orig-probar').hidden = !d.servicioExterno;
+    pintarConsumoAudd(d.consumo, d.servicioExterno);
+    document.getElementById('orig-auto-retiro').checked = d.autoRetiro !== false;
   }
   document.getElementById('orig-probar').addEventListener('click', async (ev) => {
     const out = document.getElementById('orig-probar-res');
@@ -658,6 +788,7 @@
     out.textContent = d.ok
       ? (d.canciones.length ? 'Conexión correcta. AudD reconoció la canción de prueba: ' + d.canciones.join(', ') + '.' : 'AudD respondió, pero no reconoció la canción de prueba.')
       : 'AudD respondió con un error: ' + d.error;
+    loadOrigEstado();
   });
 
   async function loadProfile() {
@@ -753,6 +884,8 @@
     document.getElementById('reset-deshacer').hidden = !d.contadorDesde;
     const p = d.pendientes;
     const chips = [
+      ['musica', p.coincidencias || 0, 'obra con coincidencias', 'obras con coincidencias', 'prioridad'],
+      ['ajustes', (p.auddPocas !== undefined && p.auddPocas >= 0) ? 1 : 0, 'AudD: ' + (p.auddPocas === 0 ? 'sin consultas disponibles' : 'quedan ' + p.auddPocas + ' canciones por verificar'), '', 'prioridad', true],
       ['ventas', p.pedidos, 'comprobante', 'comprobantes'],
       ['ventas', p.reclamos || 0, 'reclamo de comprador', 'reclamos de compradores'],
       ['productores', p.contentId || 0, 'reclamo de Content ID', 'reclamos de Content ID'],
@@ -764,7 +897,7 @@
     ].filter(c => c[1] > 0);
     const cont = document.getElementById('admin-pending');
     cont.innerHTML = chips.length
-      ? chips.map(c => '<button type="button" class="pending-chip" data-cat="' + c[0] + '">' + c[1] + ' ' + (c[1] === 1 ? c[2] : c[3]) + '</button>').join('')
+      ? chips.map(c => '<button type="button" class="pending-chip' + (c[4] ? ' chip-prioridad' : '') + '" data-cat="' + c[0] + '">' + (c[5] ? c[2] : c[1] + ' ' + (c[1] === 1 ? c[2] : c[3])) + '</button>').join('')
       : '<span class="all-done">Todo al día: no hay nada pendiente.</span>';
     cont.querySelectorAll('.pending-chip').forEach(b => b.addEventListener('click', () => abrirCategoria(b.dataset.cat)));
   }

@@ -612,6 +612,18 @@ agregarCol('orders', 'qvapay_url', "TEXT DEFAULT ''");
 agregarCol('orders', 'qvapay_pagado_at', "TEXT DEFAULT ''");
 agregarCol('orders', 'qvapay_monto', 'REAL DEFAULT 0');
 agregarCol('orders', 'qvapay_error', "TEXT DEFAULT ''");
+agregarCol('platform_config', 'orig_auto_retiro', 'INTEGER DEFAULT 1');
+// consumo de AudD: consultas incluidas en el plan y punto de partida sincronizado con su panel
+agregarCol('platform_config', 'audd_incluidas', 'INTEGER DEFAULT 300');
+agregarCol('platform_config', 'audd_base', 'INTEGER DEFAULT 0');
+agregarCol('platform_config', 'audd_base_fecha', "TEXT DEFAULT ''");
+db.exec(`CREATE TABLE IF NOT EXISTS audd_uso (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  creado TEXT DEFAULT (datetime('now')),
+  consultas INTEGER NOT NULL,
+  track_id INTEGER,
+  tipo TEXT DEFAULT 'verificacion'
+)`);
 db.exec(`CREATE TABLE IF NOT EXISTS resenas (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   order_id INTEGER UNIQUE NOT NULL,
@@ -642,6 +654,9 @@ db.exec(`CREATE TABLE IF NOT EXISTS originalidad (
   override_motivo TEXT DEFAULT '',
   override_at TEXT DEFAULT ''
 )`);
+// coincidencias de originalidad: retiro automático y estado anterior para poder devolverla
+agregarCol('originalidad', 'retirada_auto', 'INTEGER DEFAULT 0');
+agregarCol('originalidad', 'estado_previo', "TEXT DEFAULT ''");
 // reclamos de Content ID que reportan los compradores
 db.exec(`CREATE TABLE IF NOT EXISTS reclamos_cid (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

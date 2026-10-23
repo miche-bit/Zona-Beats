@@ -50,7 +50,21 @@
       <button type="button" class="admin-nav-btn" data-cat="ajustes">Ajustes</button>
     </nav>
 
+    <div class="orig-alerta" id="orig-alerta" role="alert" hidden>
+      <div class="orig-alerta-txt"><strong id="orig-alerta-n"></strong><span>Coinciden con canciones publicadas u otras obras de la tienda. Un artista que las licencie puede recibir reclamos de Content ID.</span></div>
+      <button type="button" class="orig-alerta-btn" id="orig-alerta-btn">Revisar ahora</button>
+    </div>
+
     <main class="admin-main">
+
+      <div class="panel panel-prioridad" data-cat="musica" id="coincidencias-panel" hidden>
+        <div class="panel-header-row">
+          <h2>Coincidencias de originalidad</h2>
+          <span class="badge-count show" id="coincidencias-count"></span>
+        </div>
+        <p class="panel-hint" id="coincidencias-hint"></p>
+        <div id="coincidencias-list"></div>
+      </div>
 
       <div class="panel" data-cat="musica">
         <h2>Subir nueva pista</h2>
@@ -512,7 +526,30 @@
 
       <div class="panel" data-cat="ajustes" id="originalidad-panel">
         <h2>Verificación de originalidad</h2>
+        <div class="audd-uso" id="audd-uso" hidden>
+          <div class="audd-uso-top">
+            <div><strong id="audd-quedan-canciones">—</strong><span>canciones disponibles para verificar</span></div>
+            <div class="audd-uso-sub" id="audd-quedan-txt"></div>
+          </div>
+          <div class="bar"><div class="bar-fill" id="audd-barra"></div></div>
+          <details class="audd-ajustes">
+            <summary>Plan de AudD y sincronización</summary>
+            <div class="cfg-grid">
+              <div class="field">
+                <label for="audd-incluidas">Consultas que incluye tu plan</label>
+                <input type="number" id="audd-incluidas" min="1" step="1" inputmode="numeric" placeholder="300">
+              </div>
+              <div class="field">
+                <label for="audd-usadas">Consultas usadas según el panel de AudD</label>
+                <input type="number" id="audd-usadas" min="0" step="1" inputmode="numeric" placeholder="Opcional">
+              </div>
+            </div>
+            <p class="panel-hint compact">Cada canción gasta una consulta por cada 36 segundos de audio (unas 5 en un beat de 3 minutos). Al renovar el plan, o si el número no coincide con el de dashboard.audd.io, escribe ahí las usadas y guarda.</p>
+            <button type="button" class="btn-primary btn-inline" id="audd-guardar">Guardar</button>
+          </details>
+        </div>
         <p class="panel-hint" id="orig-estado">Cargando…</p>
+        <label class="orig-auto"><input type="checkbox" id="orig-auto-retiro"> Retirar automáticamente de la tienda las obras que coincidan con canciones publicadas</label>
         <button type="button" class="btn-secondary" id="orig-probar" hidden>Probar conexión con AudD</button>
         <p class="panel-hint compact" id="orig-probar-res" role="status"></p>
       </div>

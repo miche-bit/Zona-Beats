@@ -3341,7 +3341,11 @@ async function verificarOriginalidad(id) {
   // 2. contra las canciones publicadas (si el servicio está conectado)
   let externas = [];
   let servicio = '';
-  if (originalidad.externoActivo()) { externas = await originalidad.reconocerExterno(archivo) || []; servicio = 'AudD'; }
+  if (originalidad.externoActivo()) {
+    externas = await originalidad.reconocerExterno(archivo) || [];
+    servicio = 'AudD';
+    if (externas.consultas) anotarConsumoAudd(externas.consultas, id, 'verificacion');
+  }
   const estado = internas.length || externas.length ? 'coincidencias' : 'limpio';
   db.prepare(`UPDATE originalidad SET estado = ?, huella = ?, internas_json = ?, externas_json = ?, servicio = ?, error = '', checked_at = datetime('now') WHERE track_id = ?`)
     .run(estado, originalidad.aTexto(h), JSON.stringify(internas), JSON.stringify(externas), servicio, id);
@@ -3349,6 +3353,27 @@ async function verificarOriginalidad(id) {
     anotar(t.producer_id, 'Verificación de originalidad: coincidencias', `«${t.title}»: ` +
       [...internas.map(x => `se parece ${x.similitud} % a «${x.titulo}» de ${x.productor}`), ...externas.map(x => `coincide con «${x.titulo}» de ${x.artista}`)].join(' · ').slice(0, 400), id);
   }
+  // si se había retirado sola y al verificar de nuevo ya no coincide con nada, vuelve a la tienda
+  const prev = db.prepare('SELECT retirada_auto, estado_previo FROM originalidad WHERE track_id = ?').get(id);
+  if (estado === 'limpio' && prev && prev.retirada_auto && t.approval_status === 'rejected') {
+    db.prepare("UPDATE tracks SET approval_status = ?, rejection_reason = '' WHERE id = ?").run(prev.estado_previo || 'approved', id);
+    db.prepare('UPDATE originalidad SET retirada_auto = 0 WHERE track_id = ?').run(id);
+    anotar(t.producer_id, 'Tu obra volvió a la tienda', `«${t.title}» · la nueva verificación de originalidad no encontró coincidencias`, id);
+    return;
+  }
+  // Prioridad máxima: si ya estaba a la venta y coincide con una canción publicada, sale de la tienda
+  // (salvo que el administrador ya la haya revisado y la haya dejado publicada a propósito)
+  const rev = db.prepare('SELECT override_motivo FROM originalidad WHERE track_id = ?').get(id);
+  if (externas.length && t.approval_status === 'approved' && autoRetiroActivo() && !(rev && rev.override_motivo)) {
+    const motivo = `Retirado automáticamente: coincide con «${externas[0].titulo}» de ${externas[0].artista}`;
+    db.prepare("UPDATE tracks SET approval_status = 'rejected', rejection_reason = ? WHERE id = ?").run(motivo.slice(0, 300), id);
+    db.prepare("UPDATE originalidad SET retirada_auto = 1, estado_previo = 'approved' WHERE track_id = ?").run(id);
+    anotar(t.producer_id, t.is_pack ? 'Retiró tu Sample Pack de la tienda' : 'Retiró tu beat de la tienda', `«${t.title}» · ${motivo}`, id);
+  }
+}
+function autoRetiroActivo() {
+  const c = db.prepare('SELECT orig_auto_retiro FROM platform_config WHERE id = 1').get();
+  return !c || c.orig_auto_retiro !== 0;
 }
 function originalidadPublica(trackId, completa) {
   const v = db.prepare('SELECT * FROM originalidad WHERE track_id = ?').get(trackId);
@@ -3684,13 +3709,119 @@ route('GET', '/api/admin/tracks', (req, res, params, query) => {
 route('GET', '/api/admin/originalidad/estado', (req, res) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   const cuenta = (e) => db.prepare('SELECT COUNT(*) as c FROM originalidad WHERE estado = ?').get(e).c;
-  sendJSON(res, 200, { servicioExterno: originalidad.externoActivo(), limpio: cuenta('limpio'), coincidencias: cuenta('coincidencias'), pendiente: cuenta('pendiente'), error: cuenta('error'),
+  sendJSON(res, 200, { servicioExterno: originalidad.externoActivo(), autoRetiro: autoRetiroActivo(), sinDecidir: contarCoincidencias(), consumo: consumoAudd(), limpio: cuenta('limpio'), coincidencias: cuenta('coincidencias'), pendiente: cuenta('pendiente'), error: cuenta('error'),
     ultimoError: (db.prepare("SELECT error FROM originalidad WHERE estado = 'error' ORDER BY checked_at DESC LIMIT 1").get() || {}).error || '' });
 });
+// ---------- Coincidencias de originalidad: lo que el administrador tiene que decidir ----------
+// coincidencias sin revisar: las que siguen a la venta o en revisión, y las retiradas automáticamente
+const sinDecidir = "(o.estado = 'coincidencias' AND COALESCE(o.override_motivo, '') = '' AND (t.approval_status != 'rejected' OR o.retirada_auto = 1))";
+function contarCoincidencias() {
+  return db.prepare(`SELECT COUNT(*) as c FROM originalidad o JOIN tracks t ON t.id = o.track_id WHERE ${sinDecidir}`).get().c;
+}
+route('GET', '/api/admin/coincidencias', (req, res) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  const filas = db.prepare(`SELECT t.id, t.title, t.producer_id, t.approval_status, t.rejection_reason, t.is_pack, t.is_playlist, t.cover_filename, t.created_at,
+      o.internas_json, o.externas_json, o.servicio, o.checked_at, o.retirada_auto, p.name as producer_name, p.contact_phone as producer_phone
+    FROM originalidad o JOIN tracks t ON t.id = o.track_id LEFT JOIN producers p ON p.id = t.producer_id
+    WHERE ${sinDecidir} ORDER BY (o.externas_json != '[]') DESC, o.checked_at DESC`).all();
+  const existe = db.prepare('SELECT id, approval_status FROM tracks WHERE id = ?');
+  sendJSON(res, 200, {
+    autoRetiro: autoRetiroActivo(),
+    obras: filas.map(f => {
+      let internas = [], externas = [];
+      try { internas = JSON.parse(f.internas_json || '[]'); } catch { internas = []; }
+      try { externas = JSON.parse(f.externas_json || '[]'); } catch { externas = []; }
+      return {
+        id: f.id, titulo: f.title, productor: f.producer_id ? (f.producer_name || 'Productor eliminado') : '', productorTel: f.producer_phone || '',
+        tipo: f.is_pack ? 'pack' : (f.is_playlist ? 'playlist' : 'beat'), estado: f.approval_status, motivo: f.rejection_reason || '',
+        retiradaAuto: Boolean(f.retirada_auto), portada: Boolean(f.cover_filename), subida: f.created_at, verificada: f.checked_at, servicio: f.servicio,
+        ventas: db.prepare("SELECT COUNT(*) as c FROM orders WHERE track_id = ? AND status = 'approved'").get(f.id).c,
+        externas,
+        internas: internas.map(x => ({ ...x, existe: Boolean(existe.get(x.trackId)) })),
+      };
+    }),
+  });
+});
+route('POST', '/api/admin/coincidencias/:id/retirar', async (req, res, params) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  const t = db.prepare('SELECT id, title, producer_id, is_pack FROM tracks WHERE id = ?').get(params.id);
+  if (!t) return sendJSON(res, 404, { error: 'No encontrada' });
+  let d = {};
+  try { d = JSON.parse((await readBody(req, 2048)).toString('utf8') || '{}'); } catch { /* sin cuerpo */ }
+  const motivo = limpiarTexto(d.motivo, 300) || 'Coincide con otra obra (verificación de originalidad)';
+  db.prepare("UPDATE tracks SET approval_status = 'rejected', rejection_reason = ? WHERE id = ?").run(motivo, t.id);
+  // decidido: deja de figurar como pendiente de revisión
+  db.prepare("UPDATE originalidad SET retirada_auto = 0, override_motivo = '', estado_previo = '' WHERE track_id = ?").run(t.id);
+  anotar(t.producer_id, t.is_pack ? 'Retiró tu Sample Pack de la tienda' : 'Retiró tu beat de la tienda', `«${t.title}» · ${motivo}`, t.id);
+  sendJSON(res, 200, { ok: true });
+});
+route('POST', '/api/admin/coincidencias/:id/mantener', async (req, res, params) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  const t = db.prepare('SELECT id, title, producer_id, approval_status FROM tracks WHERE id = ?').get(params.id);
+  const v = db.prepare('SELECT * FROM originalidad WHERE track_id = ?').get(params.id);
+  if (!t || !v) return sendJSON(res, 404, { error: 'No encontrada' });
+  let d = {};
+  try { d = JSON.parse((await readBody(req, 2048)).toString('utf8') || '{}'); } catch { /* sin cuerpo */ }
+  const motivo = limpiarTexto(d.motivo, 300);
+  if (motivo.length < 10) return sendJSON(res, 400, { error: 'Indica el motivo (mínimo 10 caracteres).' });
+  db.prepare("UPDATE originalidad SET override_motivo = ?, override_at = datetime('now') WHERE track_id = ?").run(motivo, t.id);
+  let vuelve = false;
+  if (v.retirada_auto && t.approval_status === 'rejected') {
+    db.prepare("UPDATE tracks SET approval_status = ?, rejection_reason = '' WHERE id = ?").run(v.estado_previo || 'approved', t.id);
+    db.prepare("UPDATE originalidad SET retirada_auto = 0 WHERE track_id = ?").run(t.id);
+    vuelve = true;
+  }
+  anotar(t.producer_id, 'Revisó las coincidencias de originalidad de tu obra', `«${t.title}» · se mantiene${vuelve ? ' y vuelve a la tienda' : ''} · motivo: ${motivo}`, t.id);
+  sendJSON(res, 200, { ok: true, vuelveATienda: vuelve, estado: db.prepare('SELECT approval_status FROM tracks WHERE id = ?').get(t.id).approval_status });
+});
+route('POST', '/api/admin/originalidad/config', async (req, res) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  let d = {};
+  try { d = JSON.parse((await readBody(req, 1024)).toString('utf8') || '{}'); } catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
+  db.prepare('UPDATE platform_config SET orig_auto_retiro = ? WHERE id = 1').run(d.autoRetiro === false ? 0 : 1);
+  sendJSON(res, 200, { ok: true, autoRetiro: autoRetiroActivo() });
+});
+
 route('POST', '/api/admin/originalidad/probar', async (req, res) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   if (!rateLimit(req, 'audd-probar', 5, 60 * 60 * 1000)) return sendJSON(res, 429, { error: 'Espera un rato antes de volver a probar.' });
-  sendJSON(res, 200, await originalidad.probarExterno());
+  const r = await originalidad.probarExterno();
+  if (r.ok && r.consultas) anotarConsumoAudd(r.consultas, null, 'prueba');
+  sendJSON(res, 200, r);
+});
+
+// ---------- Consumo de AudD ----------
+// AudD no informa el saldo con el token (solo en su panel, con sesión), así que la app cuenta lo que gasta.
+function anotarConsumoAudd(consultas, trackId, tipo) {
+  try { db.prepare('INSERT INTO audd_uso (consultas, track_id, tipo) VALUES (?, ?, ?)').run(Math.max(0, Math.round(consultas)), trackId || null, tipo); } catch { /* nada */ }
+}
+function consumoAudd() {
+  const c = db.prepare('SELECT audd_incluidas, audd_base, audd_base_fecha FROM platform_config WHERE id = 1').get() || {};
+  const desde = c.audd_base_fecha || '';
+  const gastadas = db.prepare(`SELECT COALESCE(SUM(consultas), 0) as n FROM audd_uso ${desde ? 'WHERE creado > ?' : ''}`).get(...(desde ? [desde] : [])).n;
+  const incluidas = Math.max(0, Number(c.audd_incluidas) || 0);
+  const usadas = (Number(c.audd_base) || 0) + gastadas;
+  const quedan = Math.max(0, incluidas - usadas);
+  // promedio real de las últimas 20 verificaciones (5 si todavía no hay datos: un beat de 3 minutos)
+  const ult = db.prepare("SELECT consultas FROM audd_uso WHERE tipo = 'verificacion' ORDER BY id DESC LIMIT 20").all().map(r => r.consultas);
+  const porCancion = ult.length ? Math.max(1, Math.round(ult.reduce((a, b) => a + b, 0) / ult.length)) : 5;
+  return { incluidas, usadas, quedan, porCancion, cancionesPlan: Math.floor(incluidas / porCancion), alcanzaPara: Math.floor(quedan / porCancion),
+    desde, verificaciones: db.prepare(`SELECT COUNT(*) as n FROM audd_uso WHERE tipo = 'verificacion' ${desde ? 'AND creado > ?' : ''}`).get(...(desde ? [desde] : [])).n };
+}
+route('POST', '/api/admin/originalidad/consumo', async (req, res) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  let d;
+  try { d = JSON.parse((await readBody(req, 1024)).toString('utf8') || '{}'); } catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
+  const incluidas = Number(d.incluidas);
+  if (!Number.isInteger(incluidas) || incluidas < 1 || incluidas > 10000000) return sendJSON(res, 400, { error: 'Indica las consultas que incluye tu plan de AudD.' });
+  db.prepare('UPDATE platform_config SET audd_incluidas = ? WHERE id = 1').run(incluidas);
+  if (d.usadas !== undefined && String(d.usadas).trim() !== '') {
+    const usadas = Number(d.usadas);
+    if (!Number.isInteger(usadas) || usadas < 0) return sendJSON(res, 400, { error: 'Las consultas usadas deben ser un número entero.' });
+    // a partir de ahora se cuenta desde el número que muestra el panel de AudD
+    db.prepare("UPDATE platform_config SET audd_base = ?, audd_base_fecha = datetime('now') WHERE id = 1").run(usadas);
+  }
+  sendJSON(res, 200, { ok: true, consumo: consumoAudd() });
 });
 
 route('POST', '/api/admin/tracks/:id/price', async (req, res, params) => {
@@ -4969,7 +5100,7 @@ route('POST', '/api/admin/tracks/:id/approve', async (req, res, params) => {
     if (v.estado === 'error') {
       return sendJSON(res, 409, { verificacion: 'error', error: 'La verificación de originalidad falló: ' + (v.error || 'error desconocido') + '. Pulsa «Verificar de nuevo».' });
     }
-    if (v.estado === 'coincidencias') {
+    if (v.estado === 'coincidencias' && !v.override_motivo) {
       const motivo = limpiarTexto(d.motivo, 300);
       if (d.forzar !== true || motivo.length < 10) {
         return sendJSON(res, 409, { verificacion: 'coincidencias', error: 'Hay coincidencias de originalidad. Para publicar, indica el motivo (mínimo 10 caracteres).' });
@@ -5133,6 +5264,8 @@ route('GET', '/api/admin/summary', (req, res, params, query) => {
       pedidos: db.prepare("SELECT COUNT(*) as c FROM orders WHERE status = 'pending'").get().c,
       reclamos: db.prepare("SELECT COUNT(*) as c FROM orders WHERE reclamo_at != '' AND reclamo_atendido = 0 AND status != 'approved'").get().c,
       contentId: db.prepare("SELECT COUNT(*) as c FROM reclamos_cid WHERE estado = 'abierto'").get().c,
+      coincidencias: contarCoincidencias(),
+      auddPocas: originalidad.externoActivo() ? (() => { const c = consumoAudd(); return c.alcanzaPara <= 5 ? c.alcanzaPara : -1; })() : -1,
       beats: db.prepare("SELECT COUNT(*) as c FROM tracks WHERE approval_status = 'pending' AND is_pack = 0").get().c,
       packs: db.prepare("SELECT COUNT(*) as c FROM tracks WHERE approval_status = 'pending' AND is_pack = 1").get().c,
       productores: db.prepare('SELECT COUNT(*) as c FROM producers WHERE approved = 0').get().c,
