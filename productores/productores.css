@@ -959,3 +959,22 @@ label {
 .mov-late, .w-late { color: var(--danger); font-weight: 700; }
 
 #act-download { white-space: nowrap; flex-shrink: 0; min-height: 36px; }
+
+/* Preguntas de Content ID al subir */
+.cid-preguntas { border: 1px solid var(--line); border-radius: var(--r-md); padding: 12px 14px; margin: var(--s-3) 0; min-width: 0; }
+.cid-preguntas legend { font-weight: 700; font-size: 13px; padding: 0 6px; color: var(--text); }
+.cid-q { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--text); }
+.cid-opts { display: flex; gap: 18px; flex-wrap: wrap; }
+.cid-opts label { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--text-dim); text-transform: none; letter-spacing: 0; font-family: inherit; font-weight: 500; min-height: 36px; }
+.cid-opts input { width: 18px; height: 18px; accent-color: var(--accent); }
+#publicado-donde[hidden], #cid-aviso[hidden] { display: none; }
+/* originalidad y reseñas en Mis beats */
+.orig-line { font-size: 12.5px; }
+.orig-line.ok { color: var(--live); }
+.orig-line.warn { color: var(--warn); }
+.rev-p-item { padding: 10px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.rev-p-item:first-child { border-top: 0; }
+.rev-p-item .estrellas { color: var(--warn); }
+.rev-p-item p { margin: 4px 0; overflow-wrap: anywhere; }
+.rev-p-form { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.rev-p-form input { flex: 1 1 220px; }

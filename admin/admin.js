@@ -174,7 +174,10 @@
     loadPlanRequests();
     loadHotsAdmin();
     loadDenuncias();
+    loadReclamosCid();
+    loadResenasAdmin();
     loadConfianzaAdmin();
+    loadOrigEstado();
     if (!packsUI) {
       packsUI = window.ZBPacks.montar({
         modo: 'admin', form: document.getElementById('packs-form'), lista: document.getElementById('packs-list'),
@@ -262,7 +265,7 @@
     if (prev.src && prev.src.startsWith('blob:')) URL.revokeObjectURL(prev.src);
     prev.src = m.url;
     prev.style.display = 'block';
-    if (Math.abs(m.w - m.h) > Math.max(m.w, m.h) * 0.02) aviso.textContent = 'La portada mide ' + m.w + 'x' + m.h + ' px: no es cuadrada, en la tienda se verá recortada al centro.';
+    if (Math.abs(m.w - m.h) > Math.max(m.w, m.h) * 0.02) aviso.textContent = 'La portada mide ' + m.w + 'x' + m.h + ' px: no es cuadrada y se mostrará recortada.';
     else if (m.w < 1000) aviso.textContent = 'La portada mide ' + m.w + 'x' + m.h + ' px: se verá borrosa. Lo ideal es 3000x3000 px.';
   });
 
@@ -278,7 +281,7 @@
     document.getElementById('admin-wav-field').style.display = pl ? 'none' : '';
     document.getElementById('admin-stems-field').style.display = pl ? 'none' : '';
     document.getElementById('admin-wav-req').style.display = wav ? '' : 'none';
-    document.getElementById('admin-wav-note').textContent = audioEsWav && !pl ? 'El audio principal ya es WAV: se entrega ese mismo, no hace falta subirlo otra vez.' : '';
+    document.getElementById('admin-wav-note').textContent = audioEsWav && !pl ? 'El audio principal ya es WAV y se usará para la entrega.' : '';
     document.getElementById('admin-stems-req').style.display = stems ? '' : 'none';
     document.getElementById('admin-wav-drop').classList.toggle('required', wav && !adminWavInput.files.length);
     document.getElementById('admin-stems-drop').classList.toggle('required', stems && !adminStemsInput.files.length);
@@ -346,7 +349,7 @@
     e.preventDefault();
     if (subiendo) return;
     const Z = window.ZBSubidas;
-    if (!Z) { showToast('No se pudo cargar el sistema de subidas. Recarga la página.', true); return; }
+    if (!Z) { showToast('Error al iniciar la subida. Recarga la página.', true); return; }
     if (!titleInput.value.trim()) { showToast('Ponle título a la pista.', true); return; }
     const audio = audioInput.files[0];
     const cover = coverInput.files[0];
@@ -378,11 +381,11 @@
       }
       const hayWav = Boolean(wav) || extDe(audio) === '.wav';
       if ((numPos(prices.premium) || numPos(prices.unlimited) || numPos(prices.exclusive)) && !hayWav) {
-        showToast('Esa licencia exige el archivo WAV. Súbelo para continuar.', true);
+        showToast('Esta licencia requiere el archivo WAV.', true);
         return;
       }
       if ((numPos(prices.unlimited) || numPos(prices.exclusive)) && !stems) {
-        showToast('Esa licencia exige los STEMS (ZIP). Súbelos para continuar.', true);
+        showToast('Esta licencia requiere los STEMS.', true);
         return;
       }
     }
@@ -428,7 +431,7 @@
         showToast(d.error || 'Error al guardar la pista (código ' + res.status + ').', true);
       }
     } catch (err) {
-      if (err && err.status === -1) showToast('Subida pausada. Si eliges los mismos archivos y pulsas «Publicar», sigue donde quedó.');
+      if (err && err.status === -1) showToast('Subida en pausa. Puedes reanudarla con los mismos archivos.');
       else if (err && err.status === 401) showLogin();
       else showToast((err && err.message) || 'No se pudo subir. Intenta de nuevo.', true);
     } finally {
@@ -466,9 +469,9 @@
     trackList.innerHTML = '';
     if (!tracks.length) {
       const hints = {
-        catalog: 'Todavía no has subido ninguna pista al catálogo.',
-        playlist: 'Todavía no has subido ninguna colaboración gratuita.',
-        vip: 'Todavía no se ha vendido ninguna pista exclusiva.',
+        catalog: 'Aún no hay pistas en el catálogo.',
+        playlist: 'Aún no hay colaboraciones.',
+        vip: 'Aún no hay ventas exclusivas.',
       };
       trackList.innerHTML = `<div class="empty-hint">${hints[currentAdminListSection]}</div>`;
       return;
@@ -510,6 +513,7 @@
           <div class="t">${escapeHtml(track.title)}${estado}</div>
           <div class="m">${escapeHtml(track.genre || 'Sin género')}${metaExtra} · ${track.plays} repr. · ${track.likes || 0} me gusta${archivosTxt}</div>
           <div class="m">${track.producer_id ? 'Productor: ' + escapeHtml(track.producer_name || '') : 'Tuya'}</div>
+          ${lineaOrigAdmin(track.originalidad)}
         </div>
         ${priceEditHtml}
         <div class="track-row-actions">
@@ -599,7 +603,7 @@
   }
 
   async function deleteTrack(id, title) {
-    if (!confirm(`¿Eliminar "${title}"? Se borran el audio, la portada, el WAV y los STEMS. Esta acción no se puede deshacer.`)) return;
+    if (!confirm(`¿Eliminar "${title}"? Se eliminarán todos sus archivos. Esta acción es definitiva.`)) return;
     let res = await fetch(`/api/admin/tracks/${id}`, { method: 'DELETE' });
     if (res.status === 409) {
       const err = await res.json().catch(() => ({}));
@@ -621,6 +625,40 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
+
+  // Resultado de la verificación de originalidad en «Mi música»
+  let origTracksTimer = null;
+  function lineaOrigAdmin(o) {
+    if (!o) return '';
+    if (o.estado === 'pendiente') { if (!origTracksTimer) origTracksTimer = setTimeout(() => { origTracksTimer = null; if (document.visibilityState === 'visible') loadTracks(); }, 8000); return '<div class="m orig-mini proc">Verificando originalidad…</div>'; }
+    if (o.estado === 'error') return '<div class="m orig-mini warn">La verificación de originalidad falló' + (o.error ? ': ' + escapeHtml(o.error) : '') + '</div>';
+    if (o.estado === 'limpio') return '<div class="m orig-mini ok">✓ Sin coincidencias' + (o.servicio ? ' (catálogo y ' + escapeHtml(o.servicio) + ')' : ' en el catálogo') + '</div>';
+    const lista = (o.externas || []).map(x => '«' + escapeHtml(x.titulo) + '» de ' + escapeHtml(x.artista))
+      .concat((o.internas || []).map(x => '«' + escapeHtml(x.titulo) + '» (' + x.similitud + ' %)'));
+    return '<div class="m orig-mini warn"><strong>Coincide con:</strong> ' + lista.join(' · ') + '</div>';
+  }
+
+  async function loadOrigEstado() {
+    const r = await fetch('/api/admin/originalidad/estado');
+    if (!r.ok) return;
+    const d = await r.json();
+    document.getElementById('orig-estado').innerHTML =
+      (d.servicioExterno ? 'Reconocimiento externo (AudD): <strong>configurado</strong>.' : 'Reconocimiento externo (AudD): <strong>sin configurar</strong>. Solo se compara con el catálogo de la tienda.') +
+      '<br>Verificados: ' + d.limpio + ' sin coincidencias · ' + d.coincidencias + ' con coincidencias · ' + d.pendiente + ' en curso · ' + d.error + ' con error' +
+      (d.ultimoError ? '<br>Último error: ' + escapeHtml(d.ultimoError) : '');
+    document.getElementById('orig-probar').hidden = !d.servicioExterno;
+  }
+  document.getElementById('orig-probar').addEventListener('click', async (ev) => {
+    const out = document.getElementById('orig-probar-res');
+    ev.target.disabled = true; out.textContent = 'Probando…';
+    const r = await fetch('/api/admin/originalidad/probar', { method: 'POST' });
+    const d = await r.json().catch(() => ({}));
+    ev.target.disabled = false;
+    if (!r.ok) { out.textContent = d.error || 'No se pudo probar.'; return; }
+    out.textContent = d.ok
+      ? (d.canciones.length ? 'Conexión correcta. AudD reconoció la canción de prueba: ' + d.canciones.join(', ') + '.' : 'AudD respondió, pero no reconoció la canción de prueba.')
+      : 'AudD respondió con un error: ' + d.error;
+  });
 
   async function loadProfile() {
     const res = await fetch('/api/profile');
@@ -717,6 +755,7 @@
     const chips = [
       ['ventas', p.pedidos, 'comprobante', 'comprobantes'],
       ['ventas', p.reclamos || 0, 'reclamo de comprador', 'reclamos de compradores'],
+      ['productores', p.contentId || 0, 'reclamo de Content ID', 'reclamos de Content ID'],
       ['productores', p.beats, 'beat por revisar', 'beats por revisar'],
       ['packs', p.packs || 0, 'Sample Pack por revisar', 'Sample Packs por revisar'],
       ['productores', p.productores, 'productor por aprobar', 'productores por aprobar'],
@@ -734,7 +773,7 @@
   // ---------- Reiniciar ventas ----------
   async function reiniciarContador(deshacer) {
     const r = await fetch('/api/admin/ventas/reiniciar-contador', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deshacer: Boolean(deshacer) }) });
-    if (r.ok) { showToast(deshacer ? 'El Resumen vuelve a contar todas las ventas.' : 'Contador reiniciado: desde ahora cuenta de cero.'); loadSummary(true); }
+    if (r.ok) { showToast(deshacer ? 'El Resumen vuelve a contar todas las ventas.' : 'Totales reiniciados.'); loadSummary(true); }
     else showToast('No se pudo cambiar el contador.', true);
   }
   document.getElementById('reset-contador').addEventListener('click', () => {
@@ -742,7 +781,7 @@
   });
   document.getElementById('reset-deshacer').addEventListener('click', () => reiniciarContador(true));
   document.getElementById('reset-borrar').addEventListener('click', async (ev) => {
-    const txt = prompt('Esto BORRA todas las ventas e ingresos (licencias, bonos, retiros y pagos a productores) y no se puede deshacer desde el panel.\n\nSi fueron de prueba, escribe BORRAR para confirmar:');
+    const txt = prompt('Se eliminarán todas las ventas, licencias, bonos y retiros. Esta acción es definitiva.\n\nEscribe BORRAR para confirmar:');
     if (txt === null) return;
     if (txt.trim().toUpperCase() !== 'BORRAR') { showToast('No se borró nada: hay que escribir BORRAR.', true); return; }
     ev.target.disabled = true;
@@ -785,7 +824,7 @@
 
   function mensajeLinkCompra(o, linkCompra, certificado) {
     return 'Hola ' + o.buyer_name + ' \u{1F44B} Tu compra de "' + o.track_title + '" (licencia ' + (LIC_NOMBRES[o.license_type] || o.license_type) + ') está aprobada.\n\n' +
-      (linkCompra ? 'Descarga tu beat y tu licencia aquí (este link es solo tuyo, no lo compartas):\n' + linkCompra + '\n\n' : '') +
+      (linkCompra ? 'Tu beat y tu licencia (enlace privado):\n' + linkCompra + '\n\n' : '') +
       (certificado ? 'Número de licencia: ' + certificado + '\nCualquiera puede verificarla en: ' + location.origin + '/verify/' + certificado + '\n\n' : '') +
       '¡Gracias por tu compra!';
   }
@@ -794,7 +833,7 @@
     ordersList.innerHTML = '';
 
     if (!orders.length) {
-      ordersList.innerHTML = '<div class="empty-hint">No hay comprobantes pendientes por revisar.</div>';
+      ordersList.innerHTML = '<div class="empty-hint">No hay pagos pendientes.</div>';
       ordersCount.classList.remove('show');
       return;
     }
@@ -804,11 +843,13 @@
 
     orders.forEach((order) => {
       const item = document.createElement('div');
-      item.className = 'order-item' + (order.conReclamo ? ' is-reclamo' : '');
+      item.className = 'order-item' + (order.conReclamo || (order.repetidos || []).length ? ' is-reclamo' : '');
       const rechazada = order.status === 'rejected';
       const reclamoHtml = order.conReclamo
         ? '<div class="order-reclamo"><strong>Reclamo del comprador</strong> (' + formatOrderDate(order.reclamo_at) + '): ' + escapeHtml(order.reclamo_texto) + '</div>' : '';
-      const plazoHtml = order.vencido ? '<div class="order-warning">Pasó el plazo para aprobar este pago: el comprador ya puede reclamar.</div>' : '';
+      const plazoHtml = order.vencido ? '<div class="order-warning">Plazo de confirmación vencido.</div>' : '';
+      const repetidoHtml = (order.repetidos || []).length
+        ? '<div class="order-reclamo"><strong>Pago posiblemente repetido.</strong> ' + order.repetidos.map(r => escapeHtml((r.codigo || 'Pedido ' + r.id) + ' de ' + r.comprador + ' (' + r.estado + '): ' + r.motivo)).join(' · ') + '. Comprueba en tu cuenta que entraron los dos pagos.</div>' : '';
 
       const lic = LIC_NOMBRES[order.license_type] || order.license_type || '';
       const avisoVendida = order.track_sold
@@ -820,13 +861,18 @@
         : '';
 
       item.innerHTML = `
-        <img class="receipt-thumb" src="/api/admin/orders/${order.id}/receipt" alt="Comprobante de ${escapeHtml(order.buyer_name)}" loading="lazy">
+        ${order.pago_metodo === 'qvapay'
+          ? '<div class="receipt-thumb receipt-qvapay" aria-hidden="true">QvaPay</div>'
+          : `<img class="receipt-thumb" src="/api/admin/orders/${order.id}/receipt" alt="Comprobante de ${escapeHtml(order.buyer_name)}" loading="lazy">`}
         <div class="info">
           <div class="buyer">${escapeHtml(order.buyer_name)}${rechazada ? ' <span class="tag-vencido">rechazada</span>' : ''}</div>
           ${order.codigo ? `<div class="order-code">Pedido ${escapeHtml(order.codigo)}</div>` : ''}
           <div class="track">${escapeHtml(order.track_title)} · <strong>${escapeHtml(lic)}</strong>${order.price_label ? ` · ${escapeHtml(order.price_label)}` : ''}</div>
           <div class="meta">${escapeHtml(order.buyer_phone)} · ${formatOrderDate(order.created_at)} · pagó ${escapeHtml(unidades(order.wallet_currency ? order.paid_units : order.price_cup_at_sale, order.wallet_currency || 'CUP'))}${order.producer_name ? ' · productor: ' + escapeHtml(order.producer_name) + escapeHtml(paraProductor(order)) : ''}${order.license_type === 'exclusive' ? (order.vip_public ? ' · acepta salir en Beats VIP' : ' · no quiere salir en Beats VIP') : ''}</div>
-          ${avisoVendida}${plazoHtml}${reclamoHtml}
+          ${order.pago_metodo === 'qvapay'
+            ? `<div class="order-reclamo"><strong>Pagado con QvaPay</strong> (${escapeHtml(order.transaction_ref || order.qvapay_uuid || '')}). No se entregó automáticamente: ${escapeHtml(order.qvapay_error || 'revísalo')}</div>`
+            : (order.transaction_ref ? `<div class="order-code">Transacción: ${escapeHtml(order.transaction_ref)}</div>` : '<div class="order-code">Sin número de transacción</div>')}
+          ${avisoVendida}${repetidoHtml}${plazoHtml}${reclamoHtml}
         </div>
         <div class="actions">
           <button class="btn-approve-order" type="button">Aprobar</button>
@@ -837,7 +883,8 @@
         </div>
       `;
 
-      item.querySelector('.receipt-thumb').addEventListener('click', () => {
+      const thumbOrden = item.querySelector('img.receipt-thumb');
+      if (thumbOrden) thumbOrden.addEventListener('click', () => {
         receiptModalImg.src = `/api/admin/orders/${order.id}/receipt`;
         receiptModalOverlay.classList.add('active');
       });
@@ -849,7 +896,7 @@
       const bRec = item.querySelector('.btn-reclamo-ok');
       if (bRec) bRec.addEventListener('click', async () => {
         const r = await fetch('/api/admin/orders/' + order.id + '/reclamo-atendido', { method: 'POST' });
-        showToast(r.ok ? 'Reclamo marcado como atendido. El comprador lo verá en «Mis compras».' : 'No se pudo marcar.', !r.ok);
+        showToast(r.ok ? 'Reclamo atendido.' : 'No se pudo marcar.', !r.ok);
         loadOrders(); loadSummary();
       });
 
@@ -863,8 +910,8 @@
     if (res.ok) {
       const result = await res.json();
       let msg = 'Pedido aprobado.';
-      if (result.wentToVip) msg = 'Aprobado — la pista exclusiva se retiró del catálogo y pasó a Beats VIP.';
-      else if (result.trackMarkedSold) msg = 'Aprobado — licencia Ilimitada: la pista se retiró del catálogo.';
+      if (result.wentToVip) msg = 'Aprobado. La pista pasó a Beats VIP.';
+      else if (result.trackMarkedSold) msg = 'Aprobado. La pista salió del catálogo.';
       if (result.billetera) msg += ' Se sumaron ' + unidades(result.billetera.unidades, result.billetera.moneda) + ' a la billetera del productor.';
       showToast(msg + ' Ahora mándale su link de descarga.');
       if (result.warning) alert(result.warning);
@@ -873,7 +920,7 @@
       const texto = mensajeLinkCompra(order, result.purchaseUrl, result.certificateId);
       item.classList.add('order-done');
       item.querySelector('.actions').innerHTML =
-        (tel ? '<a class="btn-whatsapp-order" href="https://wa.me/' + tel + '?text=' + encodeURIComponent(texto) + '" target="_blank" rel="noopener">Enviar link por WhatsApp</a>' : '') +
+        (tel ? '<a class="btn-whatsapp-order" href="https://wa.me/' + tel + '?text=' + encodeURIComponent(texto) + '" target="_blank" rel="noopener">Enviar por WhatsApp</a>' : '') +
         '<button type="button" class="btn-toggle-producer btn-copy-now">Copiar link</button>' +
         '<button type="button" class="btn-toggle-producer btn-done-now">Listo</button>';
       const listo = () => { loadOrders(); };
@@ -881,7 +928,7 @@
       if (wa) wa.addEventListener('click', () => setTimeout(listo, 800));
       item.querySelector('.btn-done-now').addEventListener('click', listo);
       item.querySelector('.btn-copy-now').addEventListener('click', async () => {
-        try { await navigator.clipboard.writeText(result.purchaseUrl); showToast('Link copiado. Es privado: solo mándaselo al comprador.'); }
+        try { await navigator.clipboard.writeText(result.purchaseUrl); showToast('Enlace privado copiado.'); }
         catch { prompt('Copia este link y mándaselo al comprador:', result.purchaseUrl); }
       });
       loadTracks(); loadProducers(); loadHistory(); loadSummary(); loadPayouts();
@@ -894,13 +941,13 @@
   }
 
   async function rejectOrder(order) {
-    const reason = prompt('¿Por qué rechazas la compra de ' + order.buyer_name + '? Lo verá en «Mis compras».\n\nEj: el pago no llegó, el monto no coincide, la foto no se ve.', 'El pago no llegó a la cuenta.');
+    const reason = prompt('¿Por qué rechazas la compra de ' + order.buyer_name + '?', 'El pago no llegó a la cuenta.');
     if (reason === null) return;
     const res = await fetch('/api/admin/orders/' + order.id + '/reject', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }),
     });
     if (res.ok) {
-      showToast('Compra rechazada. El comprador ve el motivo en «Mis compras».');
+      showToast('Compra rechazada.');
       const tel = soloDigitos(order.buyer_phone);
       if (tel && confirm('¿Avisarle también por WhatsApp?')) {
         window.open('https://wa.me/' + tel + '?text=' + encodeURIComponent('Hola ' + order.buyer_name + ', no pude aprobar tu compra de "' + order.track_title + '"' + (reason ? ': ' + reason : '.') + ' Escríbeme si tienes dudas.'), '_blank', 'noopener');
@@ -915,10 +962,10 @@
 
   async function deleteOrder(id, buyerName, certificateId, rechazado) {
     const aviso = certificateId
-      ? '¿Borrar la foto del comprobante de "' + buyerName + '"?\n\nLa licencia ' + certificateId + ' se conserva: el comprador sigue pudiendo verificarla y descargar. Solo se borra la imagen para liberar espacio.'
+      ? '¿Borrar la foto del comprobante de "' + buyerName + '"?\n\nLa licencia ' + certificateId + ' se mantiene vigente.'
       : rechazado
         ? '¿Borrar la foto del comprobante rechazado de "' + buyerName + '"? El pedido sigue apareciendo como rechazado.'
-        : '¿Borrar el pedido de "' + buyerName + '" sin avisarle? Úsalo solo para spam. Si el pago no llegó, mejor usa «Rechazar» para que vea el motivo.';
+        : '¿Borrar el pedido de "' + buyerName + '"? Para pagos no recibidos, usa «Rechazar».';
     if (!confirm(aviso)) return;
     const res = await fetch('/api/admin/orders/' + id, { method: 'DELETE' });
     if (res.ok) {
@@ -968,7 +1015,7 @@
       watermarkStatusBadge.classList.remove('badge-inactive');
       watermarkPreviewBtn.style.display = 'inline-block';
       watermarkRemoveBtn.style.display = 'inline-block';
-      watermarkVoiceDropLabel.textContent = 'Ya hay un audio configurado — sube otro para reemplazarlo';
+      watermarkVoiceDropLabel.textContent = 'Tag configurado. Sube otro para reemplazarlo.';
     } else {
       watermarkStatusBadge.textContent = 'INACTIVA';
       watermarkStatusBadge.classList.add('show', 'badge-inactive');
@@ -985,7 +1032,7 @@
     const volume = parseFloat(watermarkVolumeInput.value);
 
     if (!watermarkPendingFile && !watermarkHasVoice) {
-      showToast('Sube un audio de voz para activar la marca de agua.', true);
+      showToast('Sube el tag de voz para activar la marca de agua.', true);
       return;
     }
     if (isNaN(interval) || interval < 5 || interval > 600) {
@@ -1011,7 +1058,7 @@
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || 'No se pudo guardar la configuración');
       }
-      showToast('Protección de audio guardada. Se aplicará a las próximas pistas que subas.');
+      showToast('Marca de agua guardada.');
       watermarkPendingFile = null;
       watermarkVoiceInput.value = '';
       watermarkVoiceDrop.classList.remove('has-file');
@@ -1034,7 +1081,7 @@
   });
 
   watermarkRemoveBtn.addEventListener('click', async () => {
-    if (!confirm('¿Quitar la marca de agua? Las pistas que subas después de esto ya no la incluirán. Las que ya están publicadas no cambian.')) return;
+    if (!confirm('¿Quitar la marca de agua de las próximas publicaciones?')) return;
     const res = await fetch('/api/admin/watermark', { method: 'DELETE' });
     if (res.ok) {
       showToast('Marca de agua desactivada.');
@@ -1130,7 +1177,7 @@
     `;
     const rm = row.querySelector('.rate-remove');
     if (rm) rm.addEventListener('click', () => {
-      if (confirm('¿Quitar "' + rate.label + '"? Pulsa «Guardar tasas» después para confirmarlo. Las cuentas en esa moneda dejarán de mostrarse.')) row.remove();
+      if (confirm('¿Quitar "' + rate.label + '"? Las cuentas en esa moneda dejarán de mostrarse.')) row.remove();
     });
     exchangeRatesList.appendChild(row);
   }
@@ -1140,7 +1187,14 @@
   async function loadExchangeRates() {
     const res = await fetch('/api/admin/exchange-rates');
     if (!res.ok) return;
-    const { rates, planUsdRate } = await res.json();
+    const { rates, planUsdRate, qvapay } = await res.json();
+    const qvEl = document.getElementById('qvapay-estado');
+    if (qvapay && qvapay.claves) {
+      qvEl.hidden = false;
+      qvEl.textContent = qvapay.moneda
+        ? 'QvaPay: cobro automático activo. Los pagos con QvaPay se aprueban solos.'
+        : 'QvaPay: claves configuradas. Agrega el método «QvaPay» con su tasa (CUP por 1 USD) para activarlo en la tienda.';
+    } else qvEl.hidden = true;
     const planIn = document.getElementById('plan-usd-rate');
     if (document.activeElement !== planIn) planIn.value = planUsdRate ? String(planUsdRate) : '';
     const byCode = Object.fromEntries(rates.map(r => [r.code, r]));
@@ -1174,13 +1228,13 @@
     const labelEl = document.getElementById('new-currency-label');
     const rateEl = document.getElementById('new-currency-rate');
     const label = labelEl.value.trim();
-    if (!label) { showToast('Escribe el nombre del método o moneda (ej: Zelle, USD efectivo, Bizum).', true); return; }
+    if (!label) { showToast('Indica el método o la moneda.', true); return; }
     const code = label.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 30);
     if (!code) { showToast('Nombre no válido.', true); return; }
     if (exchangeRatesList.querySelector(`[data-code="${code}"]`) || code === 'CUP') { showToast('Ese método ya existe.', true); return; }
     appendRateRow({ code, label, cupPerUnit: parseFloat(rateEl.value.replace(',', '.')) || 0, custom: true });
     labelEl.value = ''; rateEl.value = '';
-    showToast('Agregado. Pulsa «Guardar tasas» para que se vea en la tienda.');
+    showToast('Agregado. Guarda las tasas para publicarlo.');
   });
 
   exchangeRatesForm.addEventListener('submit', async (e) => {
@@ -1233,7 +1287,7 @@
     });
 
     if (res.ok) {
-      showToast('Promoción guardada. Los precios del catálogo ya reflejan el descuento.');
+      showToast('Promoción guardada.');
       loadTracks();
     } else {
       const err = await res.json().catch(() => ({}));
@@ -1259,15 +1313,15 @@
         if (r.ok) { window.location.reload(); return; }
       } catch { /* todavía reiniciando */ }
     }
-    estadoRestauracion(100, 'El servidor tarda en volver. Recarga la página en un minuto.');
+    estadoRestauracion(100, 'Recarga la página en un minuto.');
   }
   restoreInput.addEventListener('change', async () => {
     const file = restoreInput.files[0];
     if (!file) return;
     const Z = window.ZBSubidas;
-    if (!Z) { showToast('No se pudo cargar el sistema de subidas. Recarga la página.', true); return; }
+    if (!Z) { showToast('Error al iniciar la subida. Recarga la página.', true); return; }
     if (!/\.zip$/i.test(file.name)) { showToast('El backup es un archivo .zip.', true); restoreInput.value = ''; return; }
-    if (!confirm(`¿Restaurar el backup "${file.name}" (${Z.tamano(file.size)})?\n\nSe REEMPLAZAN las ventas, licencias, productores, saldos, portadas y comprobantes actuales por los del backup. Todo lo que pasó después de esa copia se pierde.`)) {
+    if (!confirm(`¿Restaurar el backup "${file.name}" (${Z.tamano(file.size)})?\n\nLa información actual se reemplazará por la de esta copia.`)) {
       restoreInput.value = '';
       return;
     }
@@ -1289,8 +1343,8 @@
       if (!res.ok) throw new Error(d.error || 'No se pudo restaurar el backup');
       Z.olvidar('backup', file);
       subiendo = false;
-      estadoRestauracion(100, 'Backup restaurado (' + d.restoredCount + ' archivos). El servidor se está reiniciando…');
-      showToast('Backup restaurado. Esperando a que el servidor vuelva…');
+      estadoRestauracion(100, 'Copia restaurada (' + d.restoredCount + ' archivos). Recargando…');
+      showToast('Copia restaurada. Recargando…');
       esperarReinicio();
     } catch (err) {
       subiendo = false;
@@ -1319,8 +1373,19 @@
     const res = await fetch('/api/admin/producers');
     if (!res.ok) return;
     const { producers } = await res.json();
+    ultimosProductores = producers;
     renderProducers(producers);
   }
+
+  // Dos vistas: los que esperan aprobación y los ya aprobados (activos o desactivados)
+  let ultimosProductores = [];
+  let filtroProd = '';
+  try { filtroProd = sessionStorage.getItem('zb_admin_filtro_prod') || ''; } catch { /* nada */ }
+  document.querySelectorAll('.prod-filtro').forEach((b) => b.addEventListener('click', () => {
+    filtroProd = b.dataset.filtro;
+    try { sessionStorage.setItem('zb_admin_filtro_prod', filtroProd); } catch { /* nada */ }
+    renderProducers(ultimosProductores);
+  }));
 
   const PLAN_INFO = {
     free:   { label: 'Free',   com: 30, beats: '5 beats' },
@@ -1335,12 +1400,27 @@
     producersCount.textContent = pendientes ? pendientes + ' por aprobar' : (producers.length || '');
     producersCount.classList.toggle('show', producers.length > 0);
 
+    const nAct = producers.length - pendientes;
+    document.getElementById('prod-n-pend').textContent = '(' + pendientes + ')';
+    document.getElementById('prod-n-act').textContent = '(' + nAct + ')';
+    const filtro = filtroProd || (pendientes ? 'pendientes' : 'activos');
+    document.querySelectorAll('.prod-filtro').forEach((b) => {
+      const on = b.dataset.filtro === filtro;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+
     if (!producers.length) {
-      producersList.innerHTML = '<div class="empty-hint">Todavía no hay productores registrados.</div>';
+      producersList.innerHTML = '<div class="empty-hint">Aún no hay productores.</div>';
+      return;
+    }
+    const visibles = producers.filter(p => filtro === 'pendientes' ? !p.approved : p.approved);
+    if (!visibles.length) {
+      producersList.innerHTML = '<div class="empty-hint">' + (filtro === 'pendientes' ? 'No hay productores esperando aprobación.' : 'Todavía no hay productores aprobados.') + '</div>';
       return;
     }
 
-    producers.forEach((p) => {
+    visibles.forEach((p) => {
       const plan = PLAN_INFO[p.plan] || PLAN_INFO.free;
       const vencido = p.plan !== 'free' && p.plan_paid_until && new Date(p.plan_paid_until + 'T23:59:59') < new Date();
       const item = document.createElement('div');
@@ -1348,11 +1428,13 @@
       item.innerHTML =
         '<span class="status-dot ' + (p.active ? 'active' : 'inactive') + '"></span>' +
         '<div class="info">' +
-          '<div class="name">' + escapeHtml(p.name) + (p.approved ? '' : ' <span class="tag-pending">por aprobar</span>') + '</div>' +
+          '<div class="name">' + escapeHtml(p.name) + (p.approved ? '' : ' <span class="tag-pending">por aprobar</span>') +
+            (p.approved && !p.active ? ' <span class="tag-vencido">desactivado</span>' : '') +
+            (p.identidad_verificada_at ? ' <span class="tag-verif">✓ Identidad verificada</span>' : '') + '</div>' +
           '<div class="email">' + escapeHtml(p.email) +
             (p.contact_phone ? ' · <a class="wa-link" href="https://wa.me/' + String(p.contact_phone).replace(/[^0-9]/g, '') + '" target="_blank" rel="noopener">WhatsApp ' + escapeHtml(p.contact_phone) + '</a>' : ' · <span class="muted">sin teléfono</span>') +
           '</div>' +
-          (p.disabled_reason === 'plan_vencido' ? '<div class="stats"><span class="tag-vencido">DESACTIVADO POR FALTA DE PAGO</span> — pasaron 15 días sin renovar. Puedes eliminarlo o esperar a que pague.</div>' : '') +
+          (p.disabled_reason === 'plan_vencido' ? '<div class="stats"><span class="tag-vencido">DESACTIVADO POR FALTA DE PAGO</span> — 15 días sin renovar.</div>' : '') +
           '<div class="stats">Plan <strong>' + plan.label + '</strong> · ' + plan.com + '% comisión · ' + plan.beats +
             (p.plan_paid_until ? ' · paga hasta ' + escapeHtml(p.plan_paid_until) : '') +
             (vencido ? ' <span class="tag-vencido">VENCIDO</span>' : '') + '</div>' +
@@ -1375,6 +1457,7 @@
             '<div class="more-actions-menu">' +
               '<button type="button" class="btn-toggle-exclusive ' + (p.exclusive_enabled ? 'is-on' : '') + '">' + (p.exclusive_enabled ? 'Quitar Exclusiva' : 'Habilitar Exclusiva') + '</button>' +
               '<button type="button" class="btn-toggle-producer btn-active-prod ' + (p.active ? 'is-active' : '') + '">' + (p.active ? 'Desactivar' : 'Activar') + '</button>' +
+              '<button type="button" class="btn-toggle-producer btn-identidad-prod">' + (p.identidad_verificada_at ? 'Quitar identidad verificada' : 'Marcar identidad verificada') + '</button>' +
               '<button type="button" class="btn-toggle-producer btn-pass-prod">Nueva contraseña</button>' +
               '<button type="button" class="btn-delete">Eliminar</button>' +
             '</div>' +
@@ -1403,7 +1486,7 @@
         if (telProd) {
           // se avisa con un toque para que el navegador no bloquee WhatsApp
           apr.outerHTML = '<a class="btn-whatsapp-order btn-wa-aprobado" href="https://wa.me/' + telProd + '?text=' +
-            encodeURIComponent('Hola ' + p.name + ' \u{1F44B} Tu cuenta de productor en Zona Beats ya está aprobada. Entra en ' + location.origin + '/productores con tu correo y contraseña para subir tus beats.') +
+            encodeURIComponent('Hola ' + p.name + ' \u{1F44B} Tu cuenta de productor en Zona Beats ya está aprobada. Entra en ' + location.origin + '/productores para publicar tus beats.') +
             '" target="_blank" rel="noopener">Avisarle por WhatsApp</a>';
           const wa = item.querySelector('.btn-wa-aprobado');
           wa.addEventListener('click', () => setTimeout(loadProducers, 800));
@@ -1413,8 +1496,18 @@
         loadSummary();
       });
 
+      item.querySelector('.btn-identidad-prod').addEventListener('click', async () => {
+        const marcar = !p.identidad_verificada_at;
+        if (marcar && !confirm('¿Marcar a ' + p.name + ' con «Identidad verificada»?\n\nConfírmalo solo tras verificar su documento de identidad.')) return;
+        const r = await fetch('/api/admin/producers/' + p.id + '/identidad', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ verificada: marcar }),
+        });
+        if (r.ok) { showToast(marcar ? 'Identidad verificada.' : 'Se quitó la insignia.'); loadProducers(); }
+        else if (r.status !== 401) showToast('No se pudo cambiar.', true);
+      });
+
       item.querySelector('.btn-pass-prod').addEventListener('click', async () => {
-        const nueva = prompt('Nueva contraseña para ' + p.name + ' (mínimo 6 caracteres).\n\nSe cierra su sesión en todos lados. Mándasela por WhatsApp y pídele que la cambie en su Perfil.', '');
+        const nueva = prompt('Nueva contraseña para ' + p.name + ' (mínimo 6 caracteres).', '');
         if (nueva === null) return;
         if (nueva.length < 6) { showToast('La contraseña debe tener al menos 6 caracteres.', true); return; }
         const r = await fetch('/api/admin/producers/' + p.id + '/password', {
@@ -1461,9 +1554,9 @@
       item.querySelector('.btn-delete').addEventListener('click', async () => {
         const deuda = Number(p.pendingPayoutCup || 0);
         const pend = Number(p.pendingOrders || 0);
-        if (!confirm('¿Eliminar a ' + p.name + '?\n\nSe borran TODOS sus beats y archivos de la app. Las ventas ya aprobadas y sus licencias se conservan. Esto no se puede deshacer.' +
-          (pend > 0 ? '\n\nOJO: tiene ' + pend + ' compra(s) esperando aprobación. Se rechazan solas y tendrás que devolverles el dinero a esos compradores.' : '') +
-          (deuda > 0 ? '\n\nATENCIÓN: todavía le debes ' + deuda.toLocaleString('es') + ' CUP. Si lo eliminas, esa deuda desaparece del panel de retiros.' : ''))) return;
+        if (!confirm('¿Eliminar a ' + p.name + '?\n\nSe eliminarán sus beats y archivos; las licencias vendidas se conservan. Esta acción es definitiva.' +
+          (pend > 0 ? '\n\nOJO: tiene ' + pend + ' compra(s) pendiente(s), que se rechazarán y deberán reembolsarse.' : '') +
+          (deuda > 0 ? '\n\nATENCIÓN: todavía le debes ' + deuda.toLocaleString('es') + ' CUP pendientes de pago.' : ''))) return;
         const r = await fetch('/api/admin/producers/' + p.id, { method: 'DELETE' });
         if (r.ok) {
           const d = await r.json();
@@ -1495,7 +1588,7 @@
     });
 
     if (res.ok) {
-      showToast('Productor creado. Ya puede entrar en /productores con ese correo y contraseña.');
+      showToast('Productor creado.');
       createProducerForm.reset();
       loadProducers();
     } else {
@@ -1507,11 +1600,43 @@
   const pendingTracksList = document.getElementById('pending-tracks-list');
   const pendingTracksCount = document.getElementById('pending-tracks-count');
 
+  // refresco automático: no se repinta si el admin está escribiendo un motivo
+  function loadPendingTracksAuto() {
+    if ([...document.querySelectorAll('.forzar-motivo')].some(i => i.value.trim() || i === document.activeElement)) {
+      clearTimeout(origTimer); origTimer = setTimeout(loadPendingTracksAuto, 5000); return;
+    }
+    loadPendingTracks();
+  }
   async function loadPendingTracks() {
     const res = await fetch('/api/admin/pending-tracks');
     if (!res.ok) return;
-    const { tracks } = await res.json();
+    const { tracks, servicioExterno } = await res.json();
+    servicioExternoActivo = Boolean(servicioExterno);
     renderPendingTracks(tracks);
+    // mientras haya verificaciones en curso se refresca solo
+    clearTimeout(origTimer);
+    if (tracks.some(t => t.originalidad && t.originalidad.estado === 'pendiente')) origTimer = setTimeout(loadPendingTracksAuto, 5000);
+  }
+  let servicioExternoActivo = false;
+  let origTimer = null;
+
+  function bloqueOriginalidad(t) {
+    const o = t.originalidad || { estado: 'pendiente' };
+    const declarado = t.prelanzado
+      ? '<div class="orig-decl warn">Publicado antes en: <strong>' + escapeHtml(t.prelanzado) + '</strong></div>'
+      : (t.authorship_declared_at ? '<div class="orig-decl">Declarado inédito y sin Content ID.</div>' : '');
+    const sinExterno = servicioExternoActivo ? '' : '<div class="orig-decl muted">Verificado solo contra el catálogo de la tienda.</div>';
+    let cuerpo;
+    if (o.estado === 'pendiente') cuerpo = '<div class="orig-estado proc">Verificando originalidad…</div>';
+    else if (o.estado === 'error') cuerpo = '<div class="orig-estado warn">La verificación falló' + (o.error ? ': ' + escapeHtml(o.error) : '') + '.</div>';
+    else if (o.estado === 'limpio') cuerpo = '<div class="orig-estado ok">✓ Sin coincidencias' + (o.servicio ? ' (catálogo de la tienda y ' + escapeHtml(o.servicio) + ')' : ' en el catálogo de la tienda') + (o.error ? ' · ' + escapeHtml(o.error) : '') + '</div>';
+    else {
+      const filas = (o.internas || []).map(x => '<li>Se parece un <strong>' + x.similitud + ' %</strong> (' + x.segundos + ' s) a «' + escapeHtml(x.titulo) + '» de ' + escapeHtml(x.productor) + (x.mismoProductor ? ' (del mismo productor)' : '') + '</li>')
+        .concat((o.externas || []).map(x => '<li>Coincide con «' + escapeHtml(x.titulo) + '» de <strong>' + escapeHtml(x.artista) + '</strong>' + (x.sello ? ' · ' + escapeHtml(x.sello) : '') + (x.fecha ? ' · ' + escapeHtml(x.fecha) : '') + ' · en el segundo ' + x.segundo + (x.enlace ? ' · <a href="' + escapeHtml(x.enlace) + '" target="_blank" rel="noopener">escuchar</a>' : '') + '</li>'));
+      cuerpo = '<div class="orig-estado warn">Coincidencias encontradas</div><ul class="orig-lista">' + filas.join('') + '</ul>';
+    }
+    const reverif = o.estado === 'pendiente' ? '' : '<button type="button" class="btn-secondary btn-reverif">Verificar de nuevo</button>';
+    return '<div class="orig-box"><div class="orig-title">Originalidad / Content ID</div>' + cuerpo + declarado + sinExterno + reverif + '</div>';
   }
 
   function renderPendingTracks(tracks) {
@@ -1521,7 +1646,7 @@
     pendingTracksCount.classList.toggle('show', tracks.length > 0);
 
     if (!tracks.length) {
-      pendingTracksList.innerHTML = '<div class="empty-hint">No hay beats pendientes por revisar.</div>';
+      pendingTracksList.innerHTML = '<div class="empty-hint">No hay beats pendientes.</div>';
       return;
     }
 
@@ -1543,27 +1668,59 @@
           <div class="producer">${escapeHtml(t.producer_name || 'Sin productor')} · plan ${escapeHtml(PLAN_INFO[t.producer_plan] ? PLAN_INFO[t.producer_plan].label : (t.producer_plan || 'Free'))} · ${escapeHtml(t.producer_email || '')}</div>
           ${t.description ? `<div class="m desc">${escapeHtml(t.description)}</div>` : ''}
           ${archivos}
+          ${t.is_playlist ? '' : bloqueOriginalidad(t)}
+          <div class="forzar-box" hidden>
+            <label>Hay coincidencias. Si igual lo publicas, escribe por qué (queda en el registro del productor):
+              <input type="text" class="forzar-motivo" maxlength="300" placeholder="Ej: el productor mostró el proyecto original; el otro beat es suyo">
+            </label>
+            <button type="button" class="btn-forzar">Publicar igual</button>
+          </div>
         </div>
         <audio controls preload="none" src="/api/admin/preview-audio/${t.id}"></audio>
         <div class="actions">
-          <button type="button" class="btn-approve-order">Aprobar</button>
+          <button type="button" class="btn-approve-order btn-approve-track">Aprobar</button>
           <button type="button" class="btn-reject-track">Rechazar</button>
         </div>
       `;
-      item.querySelector('.btn-approve-order').addEventListener('click', async (ev) => {
-        ev.target.disabled = true;
-        const res = await fetch(`/api/admin/tracks/${t.id}/approve`, { method: 'POST' });
+      const aprobar = async (boton, cuerpo) => {
+        boton.disabled = true;
+        const viejo = boton.textContent;
+        boton.textContent = 'Verificando…';
+        const res = await fetch(`/api/admin/tracks/${t.id}/approve`, cuerpo
+          ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo) }
+          : { method: 'POST' });
+        boton.textContent = viejo;
         if (res.ok) {
           showToast('Beat aprobado, ya está visible en la tienda.');
           loadPendingTracks(); loadTracks(); loadSummary();
-        } else if (res.status !== 401) {
-          const e2 = await res.json().catch(() => ({}));
-          showToast(e2.error || 'No se pudo aprobar.', true);
-          ev.target.disabled = false;
+          return;
         }
+        boton.disabled = false;
+        if (res.status === 401) return;
+        const e2 = await res.json().catch(() => ({}));
+        showToast(e2.error || 'No se pudo aprobar.', true);
+        if (e2.verificacion === 'coincidencias') {
+          const box = item.querySelector('.forzar-box');
+          box.hidden = false;
+          box.querySelector('.forzar-motivo').focus();
+        }
+        if (e2.verificacion === 'pendiente' || e2.verificacion === 'error') loadPendingTracksPronto();
+      };
+      item.querySelector('.btn-approve-track').addEventListener('click', (ev) => aprobar(ev.target));
+      item.querySelector('.btn-forzar').addEventListener('click', (ev) => {
+        const motivo = item.querySelector('.forzar-motivo').value.trim();
+        if (motivo.length < 10) { showToast('Escribe el motivo (mínimo 10 caracteres).', true); return; }
+        aprobar(ev.target, { forzar: true, motivo });
+      });
+      const rv = item.querySelector('.btn-reverif');
+      if (rv) rv.addEventListener('click', async () => {
+        rv.disabled = true;
+        const r = await fetch(`/api/admin/tracks/${t.id}/originalidad`, { method: 'POST' });
+        if (r.ok) { showToast('Verificando de nuevo…'); loadPendingTracks(); }
+        else { rv.disabled = false; if (r.status !== 401) showToast('No se pudo iniciar la verificación.', true); }
       });
       item.querySelector('.btn-reject-track').addEventListener('click', async () => {
-        const reason = prompt(`¿Por qué rechazas "${t.title}"? El productor lo verá en su portal y puede corregirlo.`, '');
+        const reason = prompt(`¿Por qué rechazas "${t.title}"?`, '');
         if (reason === null) return;
         const res = await fetch(`/api/admin/tracks/${t.id}/reject`, {
           method: 'POST',
@@ -1581,6 +1738,8 @@
     });
   }
 
+  function loadPendingTracksPronto() { clearTimeout(origTimer); origTimer = setTimeout(loadPendingTracksAuto, 1500); }
+
   const platformForm = document.getElementById('platform-config-form');
   const adminPhoneInput = document.getElementById('admin-phone-input');
   const planProPriceInput = document.getElementById('plan-pro-price-input');
@@ -1591,7 +1750,7 @@
     const n = (v) => parseFloat(String(v || '').replace(',', '.')) || 0;
     const txt = (usd) => usdRateAdmin
       ? '≈ ' + Math.round(usd * usdRateAdmin).toLocaleString('es') + ' CUP/mes con tu tasa (1 USD = ' + usdRateAdmin.toLocaleString('es') + ' CUP)'
-      : 'Pon la «Tasa del USD para los planes» en Tienda → Tasas de cambio para calcular el precio en CUP.';
+      : 'Falta la tasa del USD para mostrar el precio en CUP.';
     document.getElementById('plan-pro-cup').textContent = txt(n(planProPriceInput.value));
     document.getElementById('plan-studio-cup').textContent = txt(n(planStudioPriceInput.value));
   }
@@ -1607,7 +1766,7 @@
         '<div class="rate-row-label">' + escapeHtml(c.label) + '</div>' +
         '<label class="mini-field"><span>Fee de red (' + escapeHtml(c.label) + ')</span><input type="text" class="pr-fee" inputmode="decimal" placeholder="0" value="' + (v.fee || '') + '"></label>' +
       '</div>';
-    }).join('') || '<div class="empty-hint">Configura primero tus monedas en «Tasas de cambio».</div>';
+    }).join('') || '<div class="empty-hint">Sin monedas configuradas.</div>';
   }
 
   async function loadCommission() {
@@ -1625,6 +1784,7 @@
     document.getElementById('referral-min-beats').value = d.referralMinBeats != null ? d.referralMinBeats : 3;
     document.getElementById('referral-bonus-cup').value = d.referralBonusCup;
     payoutRatesCfg = d.payoutRates || {};
+    for (const k of ['free', 'pro', 'studio']) document.getElementById('payout-days-' + k).value = (d.payoutDays && d.payoutDays[k]) || '';
     pintarCupPlanes();
     pintarTasasRetiro();
   }
@@ -1649,6 +1809,7 @@
         referralMinBeats: document.getElementById('referral-min-beats').value.trim() || '0',
         referralBonusCup: document.getElementById('referral-bonus-cup').value,
         payoutRates,
+        payoutDays: Object.fromEntries(['free', 'pro', 'studio'].map(k => [k, document.getElementById('payout-days-' + k).value.trim()])),
       }),
     });
     if (res.ok) { showToast('Configuración de planes, bonos y retiros guardada.'); loadCommission(); }
@@ -1689,7 +1850,7 @@
         }
         if (e.target.closest('.hist-clear')) {
           const claves = (box._movs || []).filter(m => m.borrable).map(m => m.clave);
-          if (!claves.length || !confirm('¿Borrar ' + claves.length + ' movimientos de ' + p.name + ' de este historial?\n\nSolo se quitan de tu vista: su saldo no cambia y él sigue viendo los suyos. Lo que está en curso no se borra.')) return;
+          if (!claves.length || !confirm('¿Borrar ' + claves.length + ' movimientos de ' + p.name + ' de este historial?\n\nEl saldo del productor no cambia.')) return;
           const r2 = await cambiarHistorialAdmin('movs', { accion: 'ocultar', claves }, qs);
           if (r2) { showToast('Se borraron ' + r2.borrados + ' movimientos.'); pintarMovsProductor(box, p); }
           return;
@@ -1752,7 +1913,7 @@
     t.querySelector('.hist-clear').addEventListener('click', async () => {
       const claves = opciones.borrables();
       if (!claves.length) return;
-      if (!confirm('¿Borrar ' + claves.length + ' ' + opciones.nombre + ' del historial?\n\n' + opciones.aviso + '\nLo que está en curso no se borra. Puedes restaurarlos después.')) return;
+      if (!confirm('¿Borrar ' + claves.length + ' ' + opciones.nombre + ' del historial?\n\n' + opciones.aviso + '')) return;
       const d = await cambiarHistorialAdmin(k, { accion: 'ocultar', claves }, opciones.qs && opciones.qs());
       if (d) { showToast('Se borraron ' + d.borrados + ' del historial.'); recargar(); }
     });
@@ -1798,7 +1959,7 @@
     pintarToolsHist('compras', comprasOcultas, lista.length, lista.length);
     historyList.innerHTML = '';
     if (!historial.length) {
-      historyList.innerHTML = '<div class="empty-hint">Todavía no hay compras aprobadas ni rechazadas.</div>';
+      historyList.innerHTML = '<div class="empty-hint">Aún no hay ventas registradas.</div>';
       return;
     }
     if (!lista.length) {
@@ -1817,9 +1978,9 @@
       item.innerHTML =
         (o.receipt_filename
           ? '<img class="receipt-thumb" src="/api/admin/orders/' + o.id + '/receipt" alt="" loading="lazy">'
-          : '<div class="receipt-thumb receipt-gone">sin foto</div>') +
+          : (o.pago_metodo === 'qvapay' ? '<div class="receipt-thumb receipt-qvapay" aria-hidden="true">QvaPay</div>' : '<div class="receipt-thumb receipt-gone">sin foto</div>')) +
         '<div class="info">' +
-          '<div class="buyer">' + escapeHtml(o.buyer_name) + (rechazada ? ' <span class="tag-vencido">rechazada</span>' : '') + '</div>' +
+          '<div class="buyer">' + escapeHtml(o.buyer_name) + (rechazada ? ' <span class="tag-vencido">rechazada</span>' : '') + (o.pago_metodo === 'qvapay' ? ' <span class="tag-verif">QvaPay</span>' : '') + '</div>' +
           '<div class="track">' + escapeHtml(o.track_title) + ' · <strong>' + escapeHtml(lic) + '</strong> · ' + escapeHtml(o.price_label || '') + '</div>' +
           '<div class="meta">' + escapeHtml(o.buyer_phone) + ' · ' + fechaHora(o.approved_at || o.rejected_at || o.created_at) + ' · ' + vendedor + escapeHtml(rechazada ? '' : paraProductor(o)) + '</div>' +
           (rechazada && o.reject_reason ? '<div class="meta">Motivo: ' + escapeHtml(o.reject_reason) + '</div>' : '') +
@@ -1827,7 +1988,7 @@
         '</div>' +
         '<div class="actions">' +
           (o.certificate_id ? '<a class="btn-whatsapp-order" href="/api/license/' + encodeURIComponent(o.certificate_id) + '/pdf" target="_blank" rel="noopener">PDF</a>' : '') +
-          (wa && !rechazada ? '<a class="btn-toggle-producer" href="https://wa.me/' + wa + '?text=' + waText + '" target="_blank" rel="noopener">Enviar link por WhatsApp</a>' : '') +
+          (wa && !rechazada ? '<a class="btn-toggle-producer" href="https://wa.me/' + wa + '?text=' + waText + '" target="_blank" rel="noopener">Enviar por WhatsApp</a>' : '') +
           (linkCompra ? '<button type="button" class="btn-toggle-producer btn-copy-link">Copiar link</button>' : '') +
           (rechazada ? '<button type="button" class="btn-approve-order btn-approve-late">Aprobar igual</button>' : '') +
           (o.receipt_filename ? '<button type="button" class="btn-delete btn-del-photo">Borrar foto</button>' : '') +
@@ -1835,12 +1996,12 @@
       item.classList.add('hist-item');
       const cp = item.querySelector('.btn-copy-link');
       if (cp) cp.addEventListener('click', async () => {
-        try { await navigator.clipboard.writeText(linkCompra); showToast('Link copiado. Es privado: solo mándaselo al comprador.'); }
+        try { await navigator.clipboard.writeText(linkCompra); showToast('Enlace privado copiado.'); }
         catch { prompt('Copia este link y mándaselo al comprador:', linkCompra); }
       });
       const late = item.querySelector('.btn-approve-late');
       if (late) late.addEventListener('click', (ev) => {
-        if (!confirm('¿Aprobar la compra de ' + o.buyer_name + ' aunque la rechazaste? Hazlo solo si el pago sí llegó.')) return;
+        if (!confirm('¿Aprobar la compra de ' + o.buyer_name + ' pese a haberla rechazado?')) return;
         approveOrder(o, item, ev.target);
       });
       const delFoto = item.querySelector('.btn-del-photo');
@@ -1864,7 +2025,7 @@
   conectarHistorial('compras', historyList, {
     recargar: () => loadHistory(),
     nombre: 'compras',
-    aviso: 'Solo se quitan de esta lista: las licencias, las descargas de los compradores y los saldos de los productores siguen igual.',
+    aviso: 'Licencias, descargas y saldos no cambian.',
     borrables: () => historialVisible.map(o => 'orden:' + o.id),
     filas: () => historialVisible,
     archivo: 'historial-compras',
@@ -1903,7 +2064,7 @@
     planRequestsCount.classList.toggle('show', pend.length > 0);
     planRequestsList.innerHTML = '';
     if (!requests.length) {
-      planRequestsList.innerHTML = '<div class="empty-hint">Ningún productor ha comprado un plan todavía.</div>';
+      planRequestsList.innerHTML = '<div class="empty-hint">Aún no hay compras de planes.</div>';
       return;
     }
     requests.forEach((r) => {
@@ -1955,7 +2116,7 @@
       });
       const rj = item.querySelector('.btn-reject-plan');
       if (rj) rj.addEventListener('click', async () => {
-        const reason = prompt('¿Por qué lo rechazas? El productor lo verá en su portal (ej: el monto no coincide, no llegó la transferencia).');
+        const reason = prompt('Motivo del rechazo:');
         if (reason === null) return;
         const res2 = await fetch('/api/admin/plan-requests/' + r.id + '/reject', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }),
@@ -1979,7 +2140,7 @@
   conectarHistorial('planes', planRequestsList, {
     recargar: () => loadPlanRequests(),
     nombre: 'compras de planes',
-    aviso: 'Solo se quitan de esta lista: los planes activos siguen igual.',
+    aviso: 'Los planes activos no cambian.',
     borrables: () => planesLista.filter(r => r.status !== 'pending').map(r => 'plan:' + r.id),
     filas: () => planesLista,
     archivo: 'historial-planes',
@@ -2034,6 +2195,84 @@
     }));
   }
 
+  // ---------- Reclamos de Content ID ----------
+  async function loadReclamosCid() {
+    const res = await fetch('/api/admin/reclamos-cid');
+    if (!res.ok) return;
+    const d = await res.json();
+    const cont = document.getElementById('cid-list');
+    document.getElementById('cid-count').textContent = d.abiertos ? d.abiertos + ' abierto' + (d.abiertos > 1 ? 's' : '') : '';
+    actualizarNav('productores', 'contentid', d.abiertos);
+    if (!d.reclamos.length) { cont.innerHTML = '<div class="empty-hint">Sin reclamos de Content ID.</div>'; return; }
+    const wa = (tel, txt) => { const n = soloDigitos(tel); return n ? '<a class="wa-link" href="https://wa.me/' + n + '?text=' + encodeURIComponent(txt) + '" target="_blank" rel="noopener">WhatsApp</a>' : ''; };
+    cont.innerHTML = d.reclamos.map(r => `
+      <div class="denuncia-item cid-item ${r.estado === 'abierto' ? '' : 'resuelta'}" data-id="${r.id}">
+        <div class="denuncia-head">
+          <strong>${escapeHtml(r.track_title)}</strong>
+          <span class="denuncia-estado">${r.estado === 'abierto' ? 'Abierto' : 'Resuelto'}</span>
+        </div>
+        <div class="denuncia-meta">${escapeHtml(r.plataforma)} · reclama <strong>${escapeHtml(r.reclamante)}</strong> · ${fechaHora(r.created_at)}</div>
+        ${r.detalle ? `<p class="denuncia-detalle">${escapeHtml(r.detalle)}</p>` : ''}
+        ${r.enlace ? `<div class="denuncia-meta">Enlace: <a href="${escapeHtml(/^https?:\/\//i.test(r.enlace) ? r.enlace : 'https://' + r.enlace)}" target="_blank" rel="noopener noreferrer">${escapeHtml(r.enlace)}</a></div>` : ''}
+        <div class="denuncia-meta">Comprador: <strong>${escapeHtml(r.buyer_name || '')}</strong> · ${escapeHtml(r.licencia || '')} · licencia ${escapeHtml(r.certificate_id || '')} ${wa(r.buyer_phone, 'Hola, sobre tu reclamo de Content ID de «' + r.track_title + '» en Zona Beats:')}</div>
+        <div class="denuncia-meta">Productor: <strong>${escapeHtml(r.productor || '')}</strong> ${wa(r.producer_phone, 'Hola, un comprador con licencia de «' + r.track_title + '» recibió un reclamo de Content ID de «' + r.reclamante + '» en ' + r.plataforma + '. Si el reclamo es tuyo o de tu distribuidora, libéralo por favor: la licencia es ' + (r.certificate_id || '') + '.')}</div>
+        ${r.estado === 'abierto'
+          ? `<div class="cid-resolver"><label>Resolución<input type="text" class="cid-nota" maxlength="300" placeholder="Ej: reclamo liberado el 12/10"></label><button type="button" class="btn-approve-order cid-ok">Marcar resuelto</button></div>`
+          : `<div class="denuncia-meta">Resuelto ${fechaHora(r.resuelto_at)}: ${escapeHtml(r.nota || '')}</div>`}
+      </div>`).join('');
+    cont.querySelectorAll('.cid-ok').forEach(b => b.addEventListener('click', async () => {
+      const it = b.closest('.cid-item');
+      const nota = it.querySelector('.cid-nota').value.trim();
+      if (nota.length < 5) { showToast('Escribe cómo se resolvió.', true); return; }
+      b.disabled = true;
+      const r = await fetch('/api/admin/reclamos-cid/' + it.dataset.id + '/resolver', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nota }) });
+      const e = await r.json().catch(() => ({}));
+      b.disabled = false;
+      if (!r.ok) { if (r.status !== 401) showToast(e.error || 'No se pudo guardar.', true); return; }
+      showToast('Reclamo cerrado. El comprador ya lo ve.');
+      loadReclamosCid(); loadSummary();
+    }));
+  }
+
+  // ---------- Reseñas ----------
+  async function loadResenasAdmin() {
+    const res = await fetch('/api/admin/resenas');
+    if (!res.ok) return;
+    const d = await res.json();
+    const cont = document.getElementById('resenas-list');
+    document.getElementById('resenas-count').textContent = d.resenas.length || '';
+    if (!d.resenas.length) { cont.innerHTML = '<div class="empty-hint">Aún no hay reseñas.</div>'; return; }
+    cont.innerHTML = d.resenas.map(r => `
+      <div class="denuncia-item rev-item ${r.oculta ? 'resuelta' : ''}" data-id="${r.id}">
+        <div class="denuncia-head">
+          <strong><span class="rev-stars" aria-label="${r.estrellas} de 5 estrellas">${'★'.repeat(r.estrellas)}${'☆'.repeat(5 - r.estrellas)}</span> ${escapeHtml(r.titulo || '')}</strong>
+          <span class="denuncia-estado">${r.oculta ? 'Oculta' : 'Visible'}</span>
+        </div>
+        <div class="denuncia-meta">${escapeHtml(r.comprador || r.nombre)} · de ${escapeHtml(r.productor || '')} · ${fechaHora(r.fecha)}</div>
+        ${r.texto ? `<p class="denuncia-detalle">${escapeHtml(r.texto)}</p>` : ''}
+        ${r.respuesta ? `<div class="denuncia-meta">Respuesta del productor: ${escapeHtml(r.respuesta)}</div>` : ''}
+        ${r.oculta ? `<div class="denuncia-meta">Motivo: ${escapeHtml(r.motivo || '')}</div>` : ''}
+        <div class="denuncia-actions">
+          ${r.oculta
+            ? '<button type="button" class="btn-secondary rev-mostrar">Volver a mostrar</button>'
+            : '<input type="text" class="rev-motivo" maxlength="200" aria-label="Motivo para ocultar" placeholder="Motivo (insultos, datos personales…)"><button type="button" class="btn-delete rev-ocultar">Ocultar</button>'}
+        </div>
+      </div>`).join('');
+    cont.querySelectorAll('.rev-ocultar, .rev-mostrar').forEach(b => b.addEventListener('click', async () => {
+      const it = b.closest('.rev-item');
+      const ocultar = b.classList.contains('rev-ocultar');
+      const motivo = ocultar ? it.querySelector('.rev-motivo').value.trim() : '';
+      if (ocultar && motivo.length < 5) { showToast('Escribe el motivo para ocultarla.', true); return; }
+      b.disabled = true;
+      const r = await fetch('/api/admin/resenas/' + it.dataset.id + '/ocultar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ocultar, motivo }) });
+      const e = await r.json().catch(() => ({}));
+      b.disabled = false;
+      if (!r.ok) { if (r.status !== 401) showToast(e.error || 'No se pudo cambiar.', true); return; }
+      showToast(ocultar ? 'Reseña oculta.' : 'Reseña visible otra vez.');
+      loadResenasAdmin();
+    }));
+  }
+
   async function loadHotsAdmin() {
     const res = await fetch('/api/admin/hots');
     if (!res.ok) return;
@@ -2041,14 +2280,14 @@
     const precioIn = document.getElementById('hot-price-usd'), cuposIn = document.getElementById('hot-slots');
     if (document.activeElement !== precioIn) precioIn.value = d.precioSemanaUsd || '';
     if (document.activeElement !== cuposIn) cuposIn.value = d.cupos;
-    document.getElementById('hots-status').innerHTML = (d.precioSemanaCup ? 'Precio: <strong>' + fmtCup(d.precioSemanaCup) + '</strong> por semana. ' : '<strong>Pon un precio (y la tasa del USD) para que los productores puedan comprar Hots.</strong> ') +
+    document.getElementById('hots-status').innerHTML = (d.precioSemanaCup ? 'Precio: <strong>' + fmtCup(d.precioSemanaCup) + '</strong> por semana. ' : '<strong>Hots sin precio configurado.</strong> ') +
       'Cupos: <strong>' + d.ocupados + ' de ' + d.cupos + '</strong> ocupados' + (d.proximoLibre && !d.libres ? ' · el próximo se libera el ' + fechaHora(d.proximoLibre) : '') + '.';
     const cnt = document.getElementById('hots-count');
     cnt.textContent = d.pendientes.length || ''; cnt.classList.toggle('show', d.pendientes.length > 0);
     actualizarNav('productores', 'hots', d.pendientes.length);
 
     const pend = document.getElementById('hots-pending');
-    pend.innerHTML = d.pendientes.length ? '' : '<div class="empty-hint">No hay pagos de Hots por revisar.</div>';
+    pend.innerHTML = d.pendientes.length ? '' : '<div class="empty-hint">No hay Hots pendientes.</div>';
     d.pendientes.forEach((h) => {
       const item = document.createElement('div');
       item.className = 'order-item';
@@ -2076,7 +2315,7 @@
         else { showToast(e2.error || 'No se pudo aprobar.', true); ev.target.disabled = false; }
       });
       item.querySelector('.hot-no').addEventListener('click', async () => {
-        const reason = prompt('¿Por qué lo rechazas? El productor lo verá en su portal.');
+        const reason = prompt('Motivo del rechazo:');
         if (reason === null) return;
         const r = await fetch('/api/admin/hots/' + h.id + '/reject', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }) });
         showToast(r.ok ? 'Pedido rechazado.' : 'No se pudo rechazar.', !r.ok);
@@ -2091,9 +2330,9 @@
       '<span><span aria-hidden="true">🔥</span> ' + escapeHtml(h.track_title || '') + ' · ' + escapeHtml(h.producer_id ? h.producer_name : 'tuyo') + '</span>' +
       '<strong>' + (h.currency === 'Gratis' ? 'gratis' : fmtCup(h.amount_cup)) + '</strong>' +
       '<button type="button" class="btn-link hot-quitar" data-id="' + h.id + '">Quitar</button></div>').join('')
-      : '<div class="empty-hint">Ningún beat está en la portada ahora.</div>';
+      : '<div class="empty-hint">No hay beats en portada.</div>';
     act.querySelectorAll('.hot-quitar').forEach(b => b.addEventListener('click', async () => {
-      if (!confirm('¿Quitar este beat de la portada ahora? No se devuelve el dinero automáticamente.')) return;
+      if (!confirm('¿Quitar este beat de la portada? El reembolso no es automático.')) return;
       const r = await fetch('/api/admin/hots/' + b.dataset.id + '/quitar', { method: 'POST' });
       showToast(r.ok ? 'Quitado de la portada.' : 'No se pudo quitar.', !r.ok);
       loadHotsAdmin();
@@ -2112,7 +2351,7 @@
       '<span>' + escapeHtml(h.track_title || '') + ' · ' + escapeHtml(h.producer_id ? h.producer_name : 'tuyo') + '</span>' +
       '<strong>' + (h.currency === 'Gratis' ? 'gratis' : fmtCup(h.amount_cup)) + '</strong>' +
       '<span class="muted">' + escapeHtml(h.estadoTxt) + ' · ' + semTxt(h.weeks) + (h.status === 'rejected' && h.reject_reason ? ' · ' + escapeHtml(h.reject_reason) : '') + '</span>' +
-      botonBorrarHist('hot:' + h.id) + '</div>').join('') : '<div class="empty-hint">Todavía no hay Hots terminados.</div>';
+      botonBorrarHist('hot:' + h.id) + '</div>').join('') : '<div class="empty-hint">Aún no hay Hots finalizados.</div>';
   }
   let hotsHist = [];
   document.getElementById('hots-config').addEventListener('submit', async (e) => {
@@ -2169,7 +2408,7 @@
   conectarHistorial('retiros', payoutsHistory, {
     recargar: () => loadPayouts(),
     nombre: 'retiros resueltos',
-    aviso: 'Solo se quitan de esta lista: los saldos de los productores siguen igual.',
+    aviso: 'Los saldos no cambian.',
     borrables: () => retirosFilas.map(h => h.clave),
     filas: () => retirosFilas,
     archivo: 'historial-retiros',
@@ -2230,7 +2469,7 @@
         '<div class="paid-form" hidden>' +
           '<div class="field"><label for="paid-proof-' + w.id + '">Captura de la transferencia</label>' +
           '<input type="file" id="paid-proof-' + w.id + '" accept="image/jpeg,image/png,image/webp">' +
-          '<span class="field-hint">El productor la verá en su portal. Es la prueba de que le pagaste.</span></div>' +
+          '<span class="field-hint">Comprobante visible para el productor.</span></div>' +
           '<div class="field"><label for="paid-note-' + w.id + '">Nota (opcional)</label><input type="text" id="paid-note-' + w.id + '" maxlength="300" placeholder="Ej: número de transferencia"></div>' +
           '<div class="paid-form-actions"><button type="button" class="btn-approve-order btn-confirm-paid">Confirmar pago</button>' +
           '<button type="button" class="btn-toggle-producer btn-cancel-paid">Cancelar</button></div>' +
@@ -2244,7 +2483,7 @@
         if (!archivo && ev.target.dataset.sinCaptura !== '1') {
           ev.target.dataset.sinCaptura = '1';
           ev.target.textContent = 'Confirmar sin captura';
-          showToast('Sin captura, el productor solo verá tu nota. Si igual quieres confirmar, pulsa otra vez.', true);
+          showToast('Sin comprobante adjunto. Pulsa de nuevo para confirmar.', true);
           return;
         }
         ev.target.disabled = true;
@@ -2256,11 +2495,11 @@
           }
         } catch { showToast('No se pudo leer la imagen.', true); ev.target.disabled = false; return; }
         const r2 = await fetch('/api/admin/withdrawals/' + w.id + '/paid', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note, comprobante }) });
-        if (r2.ok) { showToast('Retiro marcado como pagado. El productor lo verá en su portal' + (comprobante ? ', con la captura.' : '.')); loadPayouts(); loadProducers(); }
+        if (r2.ok) { showToast('Retiro pagado.'); loadPayouts(); loadProducers(); }
         else { const e2 = await r2.json().catch(() => ({})); showToast(e2.error || 'No se pudo marcar.', true); ev.target.disabled = false; }
       });
       item.querySelector('.btn-cancel-w').addEventListener('click', async () => {
-        const note = prompt('¿Por qué cancelas este retiro? El saldo vuelve a estar disponible para el productor.', '');
+        const note = prompt('Motivo de la cancelación (el saldo vuelve al productor):', '');
         if (note === null) return;
         const r2 = await fetch('/api/admin/withdrawals/' + w.id + '/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note }) });
         showToast(r2.ok ? 'Retiro cancelado.' : 'No se pudo cancelar.', !r2.ok);
@@ -2272,7 +2511,7 @@
     document.getElementById('payouts-unrequested').innerHTML = sinSolicitar.length
       ? sinSolicitar.map(x => '<div class="payout-history-row"><span>Saldo</span><span>' + escapeHtml(x.name) + '</span><strong>' +
           ((x.billeteras || []).length ? x.billeteras.map(b => escapeHtml(unidades(b.unidades, b.code))).join(' · ') : fmtCup(x.totalCup)) + '</strong></div>').join('')
-      : '<div class="empty-hint">Nadie tiene saldo esperando.</div>';
+      : '<div class="empty-hint">Sin saldos pendientes.</div>';
 
     retirosFilas = historial.map(h => ({
       clave: 'retiro:' + h.id, fecha: h.resolved_at || h.created_at, pedido: h.created_at, productor: h.producer_name,
@@ -2290,7 +2529,7 @@
       '<div class="payout-history-row hist-item"><span>' + fechaHora(h.fecha) + '</span><span>' + escapeHtml(h.productor || '') + '</span><strong>' + h.montoHtml + '</strong>' +
       '<span class="muted">' + escapeHtml(h.estado) + (h.nota ? ' · ' + escapeHtml(h.nota) : '') +
       (h.captura ? ' · <a class="proof-link" href="' + h.captura + '" target="_blank" rel="noopener">captura</a>' : '') + '</span>' + botonBorrarHist(h.clave) + '</div>').join('')
-      : '<div class="empty-hint">Todavía no hay retiros resueltos.</div>';
+      : '<div class="empty-hint">Aún no hay retiros resueltos.</div>';
 
     clearTimeout(retirosTimer);
     if (pendientes.length) retirosTimer = setTimeout(loadPayouts, 60000);

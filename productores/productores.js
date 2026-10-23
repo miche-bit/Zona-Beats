@@ -79,9 +79,12 @@
     if (nombre === 'dinero') { loadWithdrawals(); loadEarnings(); }
     if (nombre === 'packs') abrirPacks();
     if (nombre === 'registro') loadRegistro();
+    if (nombre === 'beats') loadResenasProductor();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
   tabs.forEach(t => t.addEventListener('click', () => abrirPestana(t.dataset.tab)));
+  document.querySelectorAll('input[name="publicado-antes"]').forEach(r => r.addEventListener('change', () => { $('publicado-donde').hidden = r.value !== 'si' || !r.checked; }));
+  document.querySelectorAll('input[name="content-id"]').forEach(r => r.addEventListener('change', () => { $('cid-aviso').hidden = !(r.value === 'si' && r.checked); }));
 
   // ---------- Sample Packs (solo planes Pro y Studio) ----------
   let packsUI = null;
@@ -131,7 +134,7 @@
     $('act-list').innerHTML = act.length ? act.map(a =>
       '<div class="act-item"><div class="act-when">' + ZBHistorial.fechaHora(a.created_at) + '</div>' +
       '<div class="act-what"><strong>' + escapeHtml(a.accion) + '</strong>' + (a.detalle ? '<span>' + escapeHtml(a.detalle) + '</span>' : '') + '</div></div>').join('')
-      : '<div class="empty-hint">Todavía no hay nada anotado. Aquí verás todo lo que el administrador haga con tus beats, packs y dinero.</div>';
+      : '<div class="empty-hint">Sin actividad registrada.</div>';
   }
   $('act-download').addEventListener('click', () => {
     ZBHistorial.descargarCSV('actividad-administrador', [
@@ -223,7 +226,7 @@
       acepta: $('reg-acepta').checked,
     };
     if (!body.acepta) {
-      err.textContent = 'Para crear tu cuenta marca la casilla de los Términos y la Política de privacidad.';
+      err.textContent = 'Acepta los Términos y la Política de privacidad para continuar.';
       err.classList.add('show');
       $('reg-acepta').focus();
       return;
@@ -253,10 +256,10 @@
     try { tel = (await (await fetch('/api/contact')).json()).adminPhone || ''; } catch { tel = ''; }
     const correo = emailInput.value.trim();
     box.innerHTML = tel
-      ? 'Escríbele al administrador y te pone una contraseña nueva: <a class="disabled-wa" href="' +
+      ? 'Solicita una contraseña nueva por WhatsApp: <a class="disabled-wa" href="' +
         waLink(tel, 'Hola, olvidé mi contraseña del portal de productores de Zona Beats.' + (correo ? ' Mi correo es ' + correo + '.' : '')) +
         '" target="_blank" rel="noopener">WhatsApp ' + escapeHtml(tel) + '</a>'
-      : 'Escríbele al administrador para que te ponga una contraseña nueva.';
+      : 'Solicita una contraseña nueva a la administración.';
   });
 
   // ---------- Perfil y plan ----------
@@ -282,7 +285,7 @@
       warn.className = 'plan-warning danger';
       warn.textContent = perfil.diasParaEliminar > 0
         ? 'Tu plan venció. Si no lo renuevas en ' + perfil.diasParaEliminar + ' día(s), tu cuenta se desactiva. Mientras tanto no puedes subir beats y cobras con la comisión del plan Free.'
-        : 'Tu plan venció y pasó el plazo de 15 días. Renueva ya en la pestaña Plan.';
+        : 'Tu plan venció hace más de 15 días. Renuévalo en la pestaña Plan.';
       warn.style.display = 'block';
     } else if (perfil.diasRestantes !== null && perfil.diasRestantes <= 15 && perfil.plan !== 'free') {
       warn.className = 'plan-warning';
@@ -294,7 +297,7 @@
 
     const tel = perfil.adminPhone;
     $('plan-contact').innerHTML = tel
-      ? 'Dudas sobre tu plan: escríbele al administrador por <a href="' + waLink(tel) + '" target="_blank" rel="noopener"><strong>WhatsApp ' + escapeHtml(tel) + '</strong></a>.'
+      ? 'Consultas sobre tu plan: <a href="' + waLink(tel) + '" target="_blank" rel="noopener"><strong>WhatsApp ' + escapeHtml(tel) + '</strong></a>.'
       : '';
 
     renderPlanes();
@@ -309,7 +312,7 @@
 
     $('currency-hint').textContent = perfil.monedasPermitidas.length
       ? 'Solo puedes usar las monedas que acepta la plataforma: ' + perfil.monedasPermitidas.join(', ') + '. Aquí te pagamos cuando retires.'
-      : 'El administrador todavía no configuró métodos de cobro.';
+      : 'Métodos de cobro no disponibles por ahora.';
 
     renderSocial(perfil.socialLinks || []);
     renderAccounts(perfil.accounts || []);
@@ -333,10 +336,12 @@
 
   function renderPlanes() {
     const solicitudPendiente = perfil.planRequest && perfil.planRequest.status === 'pending';
+    // el plazo de pago lo pone el administrador
+    const pago = (k) => { const pl = perfil.planes.find(x => x.key === k); return 'Pago en ' + (pl && pl.payout ? pl.payout : ''); };
     const feats = {
-      free: ['5 beats activos', 'Comisión 30%', 'Previews con tag', 'Solo MP3 (320 kbps)', 'Solo licencia Básica', 'Pago en 7-14 días', 'Estadística de referidos'],
-      pro: ['50 beats activos', 'Comisión 20%', 'Previews sin tag', 'WAV / MP3 (320 kbps)', 'Licencias Básica y Premium', 'Estadísticas', 'Tus redes en tu perfil', 'Pago en 3 días'],
-      studio: ['Beats ilimitados', 'Playlist', 'Comisión 10%', 'Estadísticas', 'STEMS + WAV + MP3', 'Todas las licencias + Exclusivas', 'Pago en 24 horas', 'Bono por me gusta en Playlist'],
+      free: ['5 beats activos', 'Comisión 30%', 'Previews con tag', 'Solo MP3 (320 kbps)', 'Solo licencia Básica', pago('free'), 'Estadística de referidos'],
+      pro: ['50 beats activos', 'Comisión 20%', 'Previews sin tag', 'WAV / MP3 (320 kbps)', 'Licencias Básica y Premium', 'Sample Packs', 'Estadísticas', 'Tus redes en tu perfil', pago('pro')],
+      studio: ['Beats ilimitados', 'Playlist', 'Sample Packs', 'Comisión 10%', 'Estadísticas', 'STEMS + WAV + MP3', 'Todas las licencias + Exclusivas', pago('studio'), 'Bono por me gusta en Playlist'],
     };
     $('plans-grid').innerHTML = perfil.planes.map(pl => {
       const esActual = pl.key === perfil.plan;
@@ -353,7 +358,7 @@
     }).join('');
     document.querySelectorAll('.btn-buy-plan').forEach(b => b.addEventListener('click', () => openPlanModal(b.dataset.plan)));
     $('plan-rate-note').textContent = perfil.usdRate
-      ? 'Precios en CUP calculados con la tasa del administrador: 1 USD = ' + fmt(perfil.usdRate, 0) + ' CUP.'
+      ? 'Precios en CUP a la tasa de 1 USD = ' + fmt(perfil.usdRate, 0) + ' CUP.'
       : '';
   }
 
@@ -363,7 +368,7 @@
     box.className = 'incentive-card' + (esStudio ? ' active' : '');
     box.innerHTML = esStudio
       ? '<div class="inc-kicker">BONO STUDIO ACTIVO</div><div class="inc-title">Cada 1000 me gusta por canción en Playlist, la plataforma te regala 2000 CUP.</div><div class="inc-sub">Mira tu avance en la pestaña Estadísticas. El bono se suma solo a tu saldo.</div>'
-      : '<div class="inc-kicker">PLAN STUDIO</div><div class="inc-title">Cada 1000 me gusta por canción en Playlist, la plataforma te regala 2000 CUP.</div><div class="inc-sub">Además: Playlist, beats ilimitados, STEMS, Exclusivas, 10% de comisión y pago en 24 horas.</div><button type="button" class="btn-inc" id="inc-go">Ver plan Studio</button>';
+      : '<div class="inc-kicker">PLAN STUDIO</div><div class="inc-title">Cada 1000 me gusta por canción en Playlist, la plataforma te regala 2000 CUP.</div><div class="inc-sub">Además: Playlist, beats ilimitados, STEMS, Exclusivas, 10% de comisión, Sample Packs y pago en ' + escapeHtml(((perfil.planes || []).find(x => x.key === 'studio') || {}).payout || '24 horas') + '.</div><button type="button" class="btn-inc" id="inc-go">Ver plan Studio</button>';
     const go = $('inc-go');
     if (go) go.addEventListener('click', () => abrirPestana('plan'));
   }
@@ -372,7 +377,7 @@
     const box = $('plan-request-status');
     if (p.desactivadoPorPago) {
       box.className = 'plan-request-status danger';
-      box.innerHTML = 'Tu cuenta está <strong>desactivada por falta de pago</strong>: no apareces en la tienda y no puedes subir beats. Compra o renueva tu plan aquí abajo para reactivarla.';
+      box.innerHTML = 'Tu cuenta está <strong>desactivada por falta de pago</strong>. Renueva tu plan para reactivarla.';
       box.style.display = 'block';
       if (!r || r.status !== 'pending') return;
     }
@@ -423,7 +428,7 @@
     const reglas = [
       'Plan ' + p.planLabel + ': puedes vender ' + lic.map(l => nombres[l]).join(', ') + '.',
       p.soloMp3 ? 'Audio solo en MP3 de 320 kbps.' : 'Audio en MP3 de 320 kbps o WAV.',
-      p.previewConMarca ? 'Tus previews llevan la marca de agua de la plataforma.' : 'Tus previews van sin marca de agua.',
+      p.previewConMarca ? 'Tus previews llevan el tag de la plataforma.' : 'Tus previews van sin marca de agua.',
     ];
     if (!p.puedePlaylist) reglas.push('La Playlist es solo del plan Studio.');
     $('plan-format-note').textContent = reglas.join(' ');
@@ -504,12 +509,13 @@
     if (prev.src && prev.src.startsWith('blob:')) URL.revokeObjectURL(prev.src);
     prev.src = m.url;
     prev.style.display = 'block';
-    if (Math.abs(m.w - m.h) > Math.max(m.w, m.h) * 0.02) aviso.textContent = 'Tu portada mide ' + m.w + 'x' + m.h + ' px: no es cuadrada, en la tienda se verá recortada al centro.';
+    if (Math.abs(m.w - m.h) > Math.max(m.w, m.h) * 0.02) aviso.textContent = 'Tu portada mide ' + m.w + 'x' + m.h + ' px: no es cuadrada y se mostrará recortada.';
     else if (m.w < 1000) aviso.textContent = 'Tu portada mide ' + m.w + 'x' + m.h + ' px: se verá borrosa. Lo ideal es 3000x3000 px.';
   });
 
   function resetUploadForm() {
     uploadForm.reset();
+    $('publicado-donde').hidden = true; $('cid-aviso').hidden = true;
     ['audio-drop', 'cover-drop', 'wav-drop', 'stems-drop'].forEach(id => $(id).classList.remove('has-file'));
     $('audio-drop-label').textContent = audioDefault;
     $('cover-drop-label').textContent = COVER_LABEL;
@@ -552,8 +558,8 @@
     }
     if (!esPlaylist) {
       const hayWav = Boolean(wav) || extAudio === '.wav';
-      if ((precios.premium > 0 || precios.unlimited > 0 || precios.exclusive > 0) && !hayWav) return 'Esa licencia exige el archivo WAV. Súbelo para continuar.';
-      if ((precios.unlimited > 0 || precios.exclusive > 0) && !stems) return 'Esa licencia exige los STEMS (ZIP). Súbelos para continuar.';
+      if ((precios.premium > 0 || precios.unlimited > 0 || precios.exclusive > 0) && !hayWav) return 'Esta licencia requiere el archivo WAV.';
+      if ((precios.unlimited > 0 || precios.exclusive > 0) && !stems) return 'Esta licencia requiere los STEMS.';
     }
     if (extAudio === '.mp3') {
       const kbps = await Z.kbpsMp3(audio);
@@ -565,7 +571,7 @@
   uploadForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (subiendo) return;
-    if (!window.ZBSubidas) return showToast('No se pudo cargar el sistema de subidas. Recarga la página.', true);
+    if (!window.ZBSubidas) return showToast('Error al iniciar la subida. Recarga la página.', true);
     if (!titleInput.value.trim()) return showToast('Ponle título al beat.', true);
 
     const esPlaylist = isPlaylistInput.checked;
@@ -578,9 +584,20 @@
       return showToast(exclusivo ? 'Ponle el precio exclusivo al beat.' : 'Ponle precio a al menos una licencia.', true);
     }
 
+    const prev = document.querySelector('input[name="publicado-antes"]:checked');
+    const cid = document.querySelector('input[name="content-id"]:checked');
+    if (!prev || !cid) {
+      document.querySelector('input[name="' + (!prev ? 'publicado-antes' : 'content-id') + '"]').focus();
+      return showToast('Responde las preguntas de originalidad y Content ID.', true);
+    }
+    if (cid.value === 'si') { $('cid-aviso').hidden = false; return showToast('No se aceptan beats registrados en Content ID.', true); }
+    if (prev.value === 'si' && $('publicado-donde').value.trim().length < 3) {
+      $('publicado-donde').focus();
+      return showToast('Indica dónde se publicó el beat.', true);
+    }
     if (!$('declara-autoria').checked) {
       $('declara-autoria').focus();
-      return showToast('Marca la casilla donde declaras que el beat es tuyo.', true);
+      return showToast('Confirma la declaración de autoría.', true);
     }
 
     uploadBtn.disabled = true;
@@ -607,12 +624,15 @@
         alReintentar: (etiqueta, n) => setUploadProgress(null, 'Se cortó la conexión. Reintentando ' + etiqueta + ' (intento ' + n + ')…'),
       });
       $('upload-cancel').style.display = 'none';
-      setUploadProgress(100, perfil && perfil.previewConMarca ? 'Procesando: creando el preview con marca de agua…' : 'Procesando: creando el preview…');
+      setUploadProgress(100, perfil && perfil.previewConMarca ? 'Procesando el preview…' : 'Procesando: creando el preview…');
       const res = await fetch('/api/producer/tracks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           declaraAutoria: $('declara-autoria').checked,
+          publicadoAntes: document.querySelector('input[name="publicado-antes"]:checked').value === 'si',
+          publicadoDonde: $('publicado-donde').value,
+          contentId: document.querySelector('input[name="content-id"]:checked').value === 'si',
           title: titleInput.value, genre: genreInput.value, description: descriptionInput.value,
           isPlaylist: esPlaylist, artistCredit: esPlaylist ? artistCreditInput.value : '',
           priceBasic: precios.basic, pricePremium: precios.premium, priceUnlimited: precios.unlimited, priceExclusive: precios.exclusive,
@@ -622,17 +642,17 @@
       const d = await res.json().catch(() => ({}));
       if (res.ok) {
         lista.forEach(x => Z.olvidar(x.kind, x.file));
-        showToast('Beat enviado a revisión. Aparecerá en la tienda cuando el administrador lo apruebe.');
+        showToast('Beat enviado a revisión.');
         resetUploadForm();
         loadTracks(); loadPerfil();
       } else if (res.status === 401) {
-        showToast('Tu sesión expiró. Vuelve a entrar: los archivos ya subidos no se pierden.', true);
+        showToast('Tu sesión expiró. Inicia sesión de nuevo; tus archivos se conservan.', true);
         showLogin();
       } else {
         showToast(d.error || 'Error al guardar el beat (código ' + res.status + ').', true);
       }
     } catch (err) {
-      if (err && err.status === -1) showToast('Subida pausada. Si eliges los mismos archivos y pulsas el botón, sigue donde quedó.');
+      if (err && err.status === -1) showToast('Subida en pausa. Puedes reanudarla con los mismos archivos.');
       else if (err && err.status === 401) { showToast(err.message, true); showLogin(); }
       else showToast((err && err.message) || 'No se pudo subir. Intenta de nuevo.', true);
     } finally {
@@ -684,13 +704,14 @@
       const hotHasta = hotsInfo && hotsInfo.activos[t.id];
       const hotRevision = hotsInfo && hotsInfo.enRevision.includes(t.id);
       const hotLinea = hotHasta ? '<div class="m hot-line"><span aria-hidden="true">🔥</span> En Hots hasta el ' + ZBHistorial.fechaHora(hotHasta) + '</div>'
-        : hotRevision ? '<div class="m hot-line pending"><span aria-hidden="true">🔥</span> Hot en revisión: sale en la portada cuando el administrador apruebe el pago</div>' : '';
+        : hotRevision ? '<div class="m hot-line pending"><span aria-hidden="true">🔥</span> Hot pendiente de confirmación de pago</div>' : '';
       item.innerHTML =
         (t.cover_filename ? '<img src="/api/cover/' + t.id + '?s=160" alt="" loading="lazy">' : '<div class="cover-empty"></div>') +
         '<div class="info">' +
           '<div class="t">' + escapeHtml(t.title) + (t.is_playlist ? ' <span class="mini-tag">Playlist</span>' : '') + '</div>' +
           '<div class="m">' + escapeHtml(t.genre || 'Sin género') + (t.price_label ? ' · ' + escapeHtml(t.price_label) : '') + ' · ' + (t.plays || 0) + ' repr. · ' + (t.likes || 0) + ' me gusta</div>' +
-          entregables + hotLinea +
+          entregables + hotLinea + lineaOriginalidad(t.originalidad) +
+          (t.rating && t.rating.total ? '<div class="m">★ ' + t.rating.promedio.toLocaleString('es') + ' de 5 · ' + t.rating.total + ' reseña' + (t.rating.total === 1 ? '' : 's') + '</div>' : '') +
           (t.approval_status === 'rejected' && t.rejection_reason ? '<div class="m reject">Motivo: ' + escapeHtml(t.rejection_reason) + '. Corrígelo con «Editar» y vuelve a revisión.</div>' : '') +
         '</div>' +
         '<div class="track-actions">' +
@@ -710,6 +731,35 @@
     });
   }
 
+  function lineaOriginalidad(o) {
+    if (!o) return '';
+    if (o.estado === 'pendiente') return '<div class="m orig-line">Verificando originalidad…</div>';
+    if (o.estado === 'limpio') return '<div class="m orig-line ok">✓ Originalidad verificada' + (o.servicio ? ' (catálogo y ' + escapeHtml(o.servicio) + ')' : ' (catálogo de la tienda)') + '</div>';
+    if (o.estado === 'coincidencias') return '<div class="m orig-line warn">Coincidencias de originalidad en revisión.</div>';
+    return '<div class="m orig-line warn">La verificación falló; se reintenta sola.</div>';
+  }
+
+  // ---------- Reseñas de tus compradores ----------
+  async function loadResenasProductor() {
+    const box = $('rev-list');
+    if (!box) return;
+    let d;
+    try { const r = await fetch('/api/producer/resenas', { cache: 'no-store' }); if (!r.ok) return; d = await r.json(); } catch { return; }
+    $('rev-count').textContent = d.total ? '★ ' + d.promedio.toLocaleString('es') + ' · ' + d.total : '';
+    box.innerHTML = d.resenas.length ? d.resenas.map(r =>
+      '<div class="rev-p-item" data-id="' + r.id + '"><div><span class="estrellas" aria-label="' + r.estrellas + ' de 5">' + '★★★★★'.slice(0, r.estrellas) + '☆☆☆☆☆'.slice(0, 5 - r.estrellas) + '</span> <strong>' + escapeHtml(r.nombre) + '</strong> · ' + escapeHtml(r.titulo) + ' · ' + ZBHistorial.fechaHora(r.fecha) +
+      (r.oculta ? ' <span class="mini-tag ghost">oculta: ' + escapeHtml(r.motivo || '') + '</span>' : '') + '</div>' +
+      (r.texto ? '<p>' + escapeHtml(r.texto) + '</p>' : '') +
+      '<div class="rev-p-form"><label class="sr-only" for="rev-r-' + r.id + '">Tu respuesta</label><input type="text" id="rev-r-' + r.id + '" maxlength="600" placeholder="Responder (se ve en la tienda)" value="' + escapeHtml(r.respuesta || '') + '">' +
+      '<button type="button" class="btn-link-p rev-p-send">Guardar respuesta</button></div></div>').join('')
+      : '<div class="empty-hint">Cuando alguien compre y califique tus beats, sus reseñas aparecen aquí y puedes responderlas.</div>';
+    box.querySelectorAll('.rev-p-send').forEach(b => b.addEventListener('click', async () => {
+      const item = b.closest('.rev-p-item');
+      const r = await fetch('/api/producer/resenas/' + item.dataset.id + '/respuesta', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ texto: item.querySelector('input').value }) });
+      showToast(r.ok ? 'Respuesta guardada.' : 'No se pudo guardar.', !r.ok);
+    }));
+  }
+
   // ---------- Editar beat ----------
   const editModal = $('edit-modal');
   let editando = null;
@@ -722,8 +772,8 @@
     $('edit-credit-field').style.display = t.is_playlist ? '' : 'none';
     $('edit-credit-input').value = t.artist_credit || '';
     $('edit-hint').textContent = t.approval_status === 'rejected'
-      ? 'Este beat fue rechazado. Al guardar los cambios vuelve a revisión.'
-      : 'Los cambios se ven en la tienda enseguida.';
+      ? 'Beat rechazado. Al guardar, vuelve a revisión.'
+      : 'Los cambios se publican al instante.';
     const lic = (perfil && perfil.licenciasPermitidas) || ['basic'];
     const actuales = {};
     (t.licenses || []).forEach(l => { actuales[l.license_type] = l.price_cup; });
@@ -731,7 +781,7 @@
     const esExclusivo = Boolean(t.is_exclusive);
     const tipos = esExclusivo ? ['exclusive'] : ['basic', 'premium', 'unlimited'];
     $('edit-prices').innerHTML = t.is_playlist ? '' :
-      '<p class="panel-hint compact">Precios en CUP. Deja vacío lo que no quieras vender.</p>' +
+      '<p class="panel-hint compact">Precios en CUP. Deja vacía la licencia que no ofrezcas.</p>' +
       tipos.filter(k => lic.includes(k) || actuales[k]).map(k =>
         '<div class="field"><label for="edit-p-' + k + '">' + nombres[k] + '</label>' +
         '<input type="text" inputmode="decimal" id="edit-p-' + k + '" data-lic="' + k + '" value="' + (actuales[k] || '') + '"' + (lic.includes(k) ? '' : ' disabled') + '></div>'
@@ -739,8 +789,8 @@
     const a = t.archivos || {};
     $('edit-files-note').textContent = t.is_playlist ? '' :
       'Este beat tiene: MP3' + (a.wav ? ', WAV' : '') + (a.stems ? ', STEMS' : '') + '. ' +
-      (!a.wav ? 'Sin WAV no puedes poner precio a Premium, Ilimitada ni Exclusiva. ' : (!a.stems ? 'Sin STEMS no puedes poner precio a Ilimitada ni Exclusiva. ' : '')) +
-      'Para cambiar los archivos, elimina el beat y súbelo de nuevo.';
+      (!a.wav ? 'Premium, Ilimitada y Exclusiva requieren WAV. ' : (!a.stems ? 'Ilimitada y Exclusiva requieren STEMS. ' : '')) +
+      'Los archivos no se pueden reemplazar.';
     editModal.classList.add('active');
   }
   $('edit-close').addEventListener('click', () => editModal.classList.remove('active'));
@@ -774,7 +824,7 @@
   });
 
   async function deleteTrack(id, title) {
-    if (!confirm(`¿Eliminar "${title}"? Se borra de la tienda y de la app. No se puede deshacer.`)) return;
+    if (!confirm(`¿Eliminar "${title}"? Esta acción es definitiva.`)) return;
     const res = await fetch(`/api/producer/tracks/${id}`, { method: 'DELETE' });
     if (res.ok) { showToast('Beat eliminado.'); loadTracks(); loadPerfil(); }
     else {
@@ -841,7 +891,7 @@
       const ultimo = retiros.historial.find(w => w.status !== 'pending');
       if (ultimo && ultimo.status === 'paid' && Date.now() - parseFecha(ultimo.resolved_at).getTime() < 3 * 86400000) {
         notice.innerHTML = '<div class="w-card paid"><strong>Te pagamos ' + montoRetiro(ultimo) + '.</strong> Revisa tu cuenta.' + (ultimo.note ? ' Nota: ' + escapeHtml(ultimo.note) : '') +
-          (ultimo.proof_filename ? ' <a class="mov-proof" href="/api/producer/withdrawals/' + ultimo.id + '/comprobante" target="_blank" rel="noopener">Ver captura del pago</a>' : '') + '</div>';
+          (ultimo.proof_filename ? ' <a class="mov-proof" href="/api/producer/withdrawals/' + ultimo.id + '/comprobante" target="_blank" rel="noopener">Comprobante de pago</a>' : '') + '</div>';
         notice.style.display = 'block';
       } else {
         notice.style.display = 'none';
@@ -863,8 +913,8 @@
       const atraso = -falta;
       const dA = Math.floor(atraso / 86400000), hA = Math.floor((atraso % 86400000) / 3600000);
       const tel = String((retiros && retiros.adminPhone) || '').replace(/[^0-9]/g, '');
-      tiempo = '<span class="w-late">El plazo de tu plan venció hace ' + (dA ? dA + ' d ' : '') + hA + ' h.</span> El administrador ya debía pagarte; queda anotado en tu Registro cuando lo haga.' +
-        (tel ? ' <a class="mov-proof" href="https://wa.me/' + tel + '?text=' + encodeURIComponent('Hola, mi retiro de ' + montoRetiro(w).replace(/<[^>]+>/g, '') + ' en Zona Beats pasó el plazo de mi plan. ¿Me confirmas cuándo me pagas?') + '" target="_blank" rel="noopener">Recordárselo por WhatsApp</a>' : '');
+      tiempo = '<span class="w-late">El plazo de tu plan venció hace ' + (dA ? dA + ' d ' : '') + hA + ' h.</span>' +
+        (tel ? ' <a class="mov-proof" href="https://wa.me/' + tel + '?text=' + encodeURIComponent('Hola, mi retiro de ' + montoRetiro(w).replace(/<[^>]+>/g, '') + ' en Zona Beats pasó el plazo de mi plan. ¿Me confirmas cuándo me pagas?') + '" target="_blank" rel="noopener">Consultar por WhatsApp</a>' : '');
     }
     else {
       const d = Math.floor(falta / 86400000), h = Math.floor((falta % 86400000) / 3600000), m = Math.floor((falta % 3600000) / 60000);
@@ -887,7 +937,7 @@
     if (!retiros) return;
     const bills = retiros.billeteras || [];
     if (!bills.some(b => b.opciones.length)) {
-      showToast('Primero agrega una cuenta de cobro en la pestaña Perfil (en la moneda de tu saldo).', true);
+      showToast('Agrega una cuenta de cobro en tu Perfil.', true);
       abrirPestana('perfil');
       return;
     }
@@ -896,7 +946,7 @@
     const conCuenta = bills.find(b => b.opciones.length);
     if (conCuenta) wsel.value = conCuenta.code;
     ponerMontoTodo();
-    $('withdraw-foot').textContent = 'Te pagamos en ' + retiros.plazo + '. Al confirmar se abre WhatsApp para avisar al administrador.';
+    $('withdraw-foot').textContent = 'Te pagamos en ' + retiros.plazo + '.';
     wModal.classList.add('active');
   });
   $('withdraw-wallet').addEventListener('change', ponerMontoTodo);
@@ -924,7 +974,7 @@
     const dec = o && o.decimals != null ? o.decimals : 2;
     const monto = leerMonto($('withdraw-amount').value);
     $('withdraw-amount-label').textContent = '¿Cuánto quieres retirar?' + (b ? ' (en ' + b.label + ')' : '');
-    $('withdraw-amount-hint').textContent = b ? 'Tienes ' + fmt(b.unidades, decimalesDe(b.code)) + ' ' + b.label + '. Puedes sacar una parte y dejar el resto.' : '';
+    $('withdraw-amount-hint').textContent = b ? 'Tienes ' + fmt(b.unidades, decimalesDe(b.code)) + ' ' + b.label + '.' : '';
     let error = '';
     if (!b) error = 'No tienes saldo para retirar.';
     else if (!o || !o.ok) error = (o && o.error) || 'Agrega en tu Perfil una cuenta de cobro en ' + b.label + '.';
@@ -968,7 +1018,7 @@
         return;
       }
       wModal.classList.remove('active');
-      showToast('Retiro solicitado. Avísale al administrador por WhatsApp.');
+      showToast('Retiro solicitado.');
       const url = d.adminPhone ? waLink(d.adminPhone, d.whatsappText) : '';
       if (ventana && url) ventana.location.href = url;
       else if (ventana) ventana.close();
@@ -1012,7 +1062,7 @@
     $('mov-download').disabled = !filtrados.length;
     $('mov-clear').disabled = !filtrados.some(m => m.borrable);
     if (!filtrados.length) {
-      list.innerHTML = '<div class="empty-hint">' + (movFiltro ? 'No hay movimientos de este tipo.' : 'Todavía no tienes movimientos. Aquí verás tus ventas, bonos, planes y retiros.') + '</div>';
+      list.innerHTML = '<div class="empty-hint">' + (movFiltro ? 'No hay movimientos de este tipo.' : 'Sin movimientos todavía.') + '</div>';
       $('mov-more').style.display = 'none';
       return;
     }
@@ -1021,7 +1071,7 @@
         '<div class="mov-icon" aria-hidden="true">' + (MOV_ICONOS[m.tipo] || '•') + '</div>' +
         '<div class="info"><div class="t">' + escapeHtml(m.titulo) + '</div>' +
         '<div class="m"><span class="mov-when">' + ZBHistorial.fechaHora(m.fecha) + '</span>' + (m.detalle ? ' · ' + escapeHtml(m.detalle) : '') +
-          (m.comprobanteUrl ? ' · <a class="mov-proof" href="' + escapeHtml(m.comprobanteUrl) + '" target="_blank" rel="noopener">Ver captura del pago</a>' : '') +
+          (m.comprobanteUrl ? ' · <a class="mov-proof" href="' + escapeHtml(m.comprobanteUrl) + '" target="_blank" rel="noopener">Comprobante de pago</a>' : '') +
           (m.fueraDePlazo ? ' · <span class="mov-late">fuera del plazo de tu plan</span>' : '') + '</div></div>' +
         '<div class="amount">' + montoMovimiento(m) +
           (m.estado ? '<span class="paid-tag ' + (/pagado|aprobado/.test(m.estado) ? 'is-paid' : '') + '">' + escapeHtml(m.estado) + '</span>' : '') +
@@ -1053,14 +1103,14 @@
     if (!b) return;
     b.disabled = true;
     const d = await cambiarHistorial({ accion: 'ocultar', claves: [b.dataset.clave] });
-    if (d) showToast('Se borró del historial. Tu saldo no cambia.');
+    if (d) showToast('Entrada eliminada del historial.');
     else b.disabled = false;
   });
   $('mov-clear').addEventListener('click', async () => {
     const claves = movimientos.filter(m => (!movFiltro || m.tipo === movFiltro) && m.borrable).map(m => m.clave);
     if (!claves.length) return;
     const que = movFiltro ? 'los movimientos de tipo «' + MOV_TIPOS[movFiltro] + '»' : 'todo tu historial';
-    if (!confirm('¿Borrar ' + que + ' (' + claves.length + ')?\n\nSolo se quitan de esta lista: tu saldo no cambia. Lo que está en curso no se borra. Puedes restaurarlos después.')) return;
+    if (!confirm('¿Borrar ' + que + ' (' + claves.length + ')?\n\nTu saldo no cambia.')) return;
     const d = await cambiarHistorial({ accion: 'ocultar', claves });
     if (d) showToast('Se borraron ' + d.borrados + ' movimientos del historial.');
   });
@@ -1081,7 +1131,7 @@
       { titulo: 'Moneda', valor: m => m.label || m.moneda },
       { titulo: 'Estado', valor: m => m.estado || 'hecho' },
     ], filas);
-    showToast('Historial descargado (se abre con Excel).');
+    showToast('Historial descargado.');
   });
 
   // ---------- Estadísticas ----------
@@ -1094,30 +1144,28 @@
     const progreso =
       '<div class="ref-stats four">' +
         '<div><strong>' + r.aprobados + '</strong><span>cuentan para el bono</span></div>' +
-        '<div><strong>' + (r.enCamino || 0) + '</strong><span>aprobados, les falta vender o subir beats</span></div>' +
+        '<div><strong>' + (r.enCamino || 0) + '</strong><span>pendientes de cumplir requisitos</span></div>' +
         '<div><strong>' + r.pendientes + '</strong><span>esperando aprobación</span></div>' +
         '<div><strong>' + formatCup(r.ganadoCup) + '</strong><span>ganado en bonos</span></div>' +
       '</div>' +
       '<div class="bar"><div class="bar-fill" style="width:' + pct + '%"></div></div>' +
-      '<p class="panel-hint compact">Cada ' + r.cadaCuantos + ' referidos que cuenten ganas ' + formatCup(r.bonoCup) + ' (se cobra en CUP). Un referido cuenta cuando el administrador lo aprueba' +
-        (r.minVentasCup > 0 || r.minBeats > 0 ? ', gana ' + formatCup(r.minVentasCup) + ' vendiendo sus beats y tiene ' + r.minBeats + ' beats aprobados' : '') + '. Para el próximo bono te faltan ' + r.faltanParaBono + '.</p>' +
+      '<p class="panel-hint compact">Bono de ' + formatCup(r.bonoCup) + ' cada ' + r.cadaCuantos + ' referidos válidos. Próximo bono: faltan ' + r.faltanParaBono + '.</p>' +
       (!r.habilitado && (r.minVentasCup > 0 || r.minBeats > 0) ? (() => {
         const falVentas = Math.max(0, r.minVentasCup - r.ventasCup), falBeats = Math.max(0, r.minBeats - r.beatsSubidos);
         const req = (ok, txt) => '<li class="' + (ok ? 'ok' : '') + '"><span aria-hidden="true">' + (ok ? '✓' : '○') + '</span> ' + txt + '</li>';
-        return '<div class="ref-lock"><strong>Para empezar a cobrar tus referidos (en CUP) te falta:</strong><ul class="ref-reqs">' +
-          (r.minVentasCup > 0 ? req(!falVentas, 'Ganar ' + formatCup(r.minVentasCup) + ' vendiendo tus beats — llevas ' + formatCup(r.ventasCup) + (falVentas ? ' (faltan ' + formatCup(falVentas) + ')' : '')) : '') +
-          (r.minBeats > 0 ? req(!falBeats, 'Tener ' + r.minBeats + ' beats aprobados en el catálogo — tienes ' + r.beatsSubidos + (falBeats ? ' (faltan ' + falBeats + ')' : '')) : '') +
-          '</ul>' + (r.enEsperaCup > 0 ? '<p class="panel-hint compact" style="margin:0">Tienes <strong>' + formatCup(r.enEsperaCup) + '</strong> en bonos guardados: se suman a tu saldo en CUP cuando cumplas.</p>' : '') + '</div>';
+        return '<div class="ref-lock"><strong>Requisitos para cobrar bonos por referidos:</strong><ul class="ref-reqs">' +
+          (r.minVentasCup > 0 ? req(!falVentas, 'Ventas por ' + formatCup(r.minVentasCup) + ' — llevas ' + formatCup(r.ventasCup) + (falVentas ? ' (faltan ' + formatCup(falVentas) + ')' : '')) : '') +
+          (r.minBeats > 0 ? req(!falBeats, r.minBeats + ' beats publicados — tienes ' + r.beatsSubidos + (falBeats ? ' (faltan ' + falBeats + ')' : '')) : '') +
+          '</ul>' + (r.enEsperaCup > 0 ? '<p class="panel-hint compact" style="margin:0">Tienes <strong>' + formatCup(r.enEsperaCup) + '</strong> en bonos retenidos hasta cumplir los requisitos.</p>' : '') + '</div>';
       })() : '');
     $('ref-progress').innerHTML = progreso;
-    $('ref-hint').textContent = 'Comparte tu enlace. Cada ' + r.cadaCuantos + ' productores que se registren con él y cumplan los mínimos, ganas ' + formatCup(r.bonoCup) + ' (se suma a tu saldo en CUP' +
-      (r.minVentasCup > 0 || r.minBeats > 0 ? ' cuando hayas ganado ' + formatCup(r.minVentasCup) + ' vendiendo tus beats y tengas ' + r.minBeats + ' beats aprobados' : '') + ').';
+    $('ref-hint').textContent = 'Invita productores con tu enlace: ' + formatCup(r.bonoCup) + ' de bono cada ' + r.cadaCuantos + ' altas válidas.';
     $('stats-referidos').innerHTML = progreso + (r.lista.length
       ? '<div class="mini-list">' + r.lista.map(x => {
         const est = !x.approved ? 'esperando aprobación' : x.cuenta ? 'cuenta ✓' : 'le falta ' + [x.faltaVentas ? 'vender' : '', x.faltaBeats ? 'subir beats' : ''].filter(Boolean).join(' y ');
         return '<div class="mini-row"><span>' + escapeHtml(x.name) + '</span><em class="' + (x.cuenta ? 'ok' : '') + '">' + est + '</em></div>';
       }).join('') + '</div>'
-      : '<div class="empty-hint">Todavía nadie se registró con tu enlace.</div>');
+      : '<div class="empty-hint">Aún no hay altas con tu enlace.</div>');
 
     const bonoPanel = $('stats-bono-panel');
     if (st.bonoLikes) {
@@ -1127,7 +1175,7 @@
         (b.pistas.length ? b.pistas.map(t => {
           const resto = (t.likes || 0) % b.cadaCuantos;
           return '<div class="stat-track"><div class="st-name">' + escapeHtml(t.title) + '</div><div class="bar"><div class="bar-fill" style="width:' + Math.round(resto / b.cadaCuantos * 100) + '%"></div></div><div class="st-num">' + fmt(t.likes) + ' me gusta · faltan ' + fmt(b.cadaCuantos - resto) + '</div></div>';
-        }).join('') : '<div class="empty-hint">Sube canciones a la Playlist para empezar a ganar.</div>');
+        }).join('') : '<div class="empty-hint">Aún no tienes canciones en Playlist.</div>');
     } else {
       bonoPanel.style.display = 'none';
     }
@@ -1250,7 +1298,7 @@
   async function openPlanModal(planKey) {
     const pl = perfil.planes.find(x => x.key === planKey);
     if (!pl) return;
-    if (!pl.priceCup) { showToast('El administrador todavía no puso la tasa del USD para calcular el precio.', true); return; }
+    if (!pl.priceCup) { showToast('Precio no disponible por ahora.', true); return; }
     await Promise.all([cargarDatosDePago(), loadWithdrawals()]);
     planModalState = { plan: planKey, months: 1, price: pl.priceCup };
     $('plan-modal-title').textContent = (planKey === perfil.plan ? 'Renovar plan ' : 'Plan ') + pl.label;
@@ -1265,7 +1313,7 @@
     }).join('');
     document.querySelectorAll('.month-opt').forEach(b => b.classList.toggle('active', b.dataset.m === '1'));
     $('plan-receipt-input').value = '';
-    $('plan-receipt-label').textContent = 'Toca para subir la captura de la transferencia';
+    $('plan-receipt-label').textContent = 'Adjuntar comprobante de pago';
     $('plan-receipt-drop').classList.remove('has-file');
     actualizarModalPlan();
     planModal.classList.add('active');
@@ -1279,7 +1327,7 @@
   $('plan-currency').addEventListener('change', actualizarModalPlan);
   $('plan-modal-close').addEventListener('click', () => planModal.classList.remove('active'));
   planModal.addEventListener('click', (e) => { if (e.target === planModal) planModal.classList.remove('active'); });
-  wireFileDrop($('plan-receipt-drop'), $('plan-receipt-input'), $('plan-receipt-label'), 'Toca para subir la captura de la transferencia');
+  wireFileDrop($('plan-receipt-drop'), $('plan-receipt-input'), $('plan-receipt-label'), 'Adjuntar comprobante de pago');
 
   $('plan-send-btn').addEventListener('click', async () => {
     let f = $('plan-receipt-input').files[0];
@@ -1299,7 +1347,7 @@
       const d = await res.json().catch(() => ({}));
       if (res.ok) {
         planModal.classList.remove('active');
-        showToast('Comprobante enviado. Te avisamos aquí cuando el administrador active tu plan.');
+        showToast('Comprobante enviado. Tu plan se activará al confirmarse el pago.');
         loadPerfil();
       } else {
         showToast(d.error || 'No se pudo enviar el comprobante.', true);
@@ -1355,7 +1403,7 @@
     await Promise.all([cargarDatosDePago(), loadWithdrawals()]);
     const hres = await fetch('/api/producer/hots');
     if (hres.ok) hotsInfo = await hres.json();
-    if (!hotsInfo || !hotsInfo.precioSemanaCup) { showToast('Los Hots todavía no tienen precio. Avísale al administrador.', true); return; }
+    if (!hotsInfo || !hotsInfo.precioSemanaCup) { showToast('Los Hots aún no están disponibles.', true); return; }
     const hasta = hotsInfo.activos[t.id];
     if (!hasta && hotsInfo.libres <= 0) {
       showToast('Los cupos de Hots están llenos.' + (hotsInfo.proximoLibre ? ' El próximo se libera el ' + ZBHistorial.fechaHora(hotsInfo.proximoLibre) + '.' : ''), true);
@@ -1376,7 +1424,7 @@
       b.textContent = semanasTxt(Number(b.dataset.w)) + ' · ' + formatCup(hotsInfo.precioSemanaCup * Number(b.dataset.w));
     });
     $('hot-receipt-input').value = '';
-    $('hot-receipt-label').textContent = 'Toca para subir la captura de la transferencia';
+    $('hot-receipt-label').textContent = 'Adjuntar comprobante de pago';
     $('hot-receipt-drop').classList.remove('has-file');
     actualizarModalHot();
     hotModal.classList.add('active');
@@ -1390,7 +1438,7 @@
   $('hot-wallet').addEventListener('change', pintarHotSaldo);
   $('hot-modal-close').addEventListener('click', () => hotModal.classList.remove('active'));
   hotModal.addEventListener('click', (e) => { if (e.target === hotModal) hotModal.classList.remove('active'); });
-  wireFileDrop($('hot-receipt-drop'), $('hot-receipt-input'), $('hot-receipt-label'), 'Toca para subir la captura de la transferencia');
+  wireFileDrop($('hot-receipt-drop'), $('hot-receipt-input'), $('hot-receipt-label'), 'Adjuntar comprobante de pago');
 
   $('hot-balance-btn').addEventListener('click', async () => {
     const btn = $('hot-balance-btn');
@@ -1432,7 +1480,7 @@
       const d = await res.json().catch(() => ({}));
       if (res.ok) {
         hotModal.classList.remove('active');
-        showToast('Comprobante enviado. Tu beat sale en la portada cuando el administrador apruebe el pago.');
+        showToast('Comprobante enviado. Tu beat saldrá en portada al confirmarse el pago.');
         loadTracks(); loadMovimientos();
       } else showToast(d.error || 'No se pudo enviar el comprobante.', true);
     } catch {

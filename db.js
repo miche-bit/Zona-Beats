@@ -596,4 +596,67 @@ agregarCol('platform_config', 'orden_horas', 'INTEGER DEFAULT 24');
 agregarCol('tracks', 'stems_remote', "TEXT DEFAULT ''");
 agregarCol('tracks', 'stems_size', 'INTEGER DEFAULT 0');
 
+// ---------- Antifraude, reseñas, insignias y originalidad ----------
+agregarCol('orders', 'transaction_ref', "TEXT DEFAULT ''");
+agregarCol('orders', 'receipt_hash', "TEXT DEFAULT ''");
+agregarCol('producers', 'identidad_verificada_at', "TEXT DEFAULT ''");
+// lo que declara el productor al subir: si el beat ya salió en otro lado y si está en Content ID
+agregarCol('tracks', 'prelanzado', "TEXT DEFAULT ''");
+agregarCol('tracks', 'content_id_declarado', 'INTEGER DEFAULT 0');
+// días que tiene la plataforma para pagar un retiro, por plan (vacío = los de fábrica)
+agregarCol('platform_config', 'payout_days_json', "TEXT DEFAULT ''");
+// cobro automático con QvaPay
+agregarCol('orders', 'pago_metodo', "TEXT DEFAULT ''");
+agregarCol('orders', 'qvapay_uuid', "TEXT DEFAULT ''");
+agregarCol('orders', 'qvapay_url', "TEXT DEFAULT ''");
+agregarCol('orders', 'qvapay_pagado_at', "TEXT DEFAULT ''");
+agregarCol('orders', 'qvapay_monto', 'REAL DEFAULT 0');
+agregarCol('orders', 'qvapay_error', "TEXT DEFAULT ''");
+db.exec(`CREATE TABLE IF NOT EXISTS resenas (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id INTEGER UNIQUE NOT NULL,
+  track_id INTEGER,
+  producer_id INTEGER,
+  track_title TEXT DEFAULT '',
+  buyer_name TEXT DEFAULT '',
+  estrellas INTEGER NOT NULL,
+  texto TEXT DEFAULT '',
+  respuesta TEXT DEFAULT '',
+  respuesta_at TEXT DEFAULT '',
+  oculta INTEGER DEFAULT 0,
+  oculta_motivo TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now'))
+)`);
+db.exec('CREATE INDEX IF NOT EXISTS idx_resenas_track ON resenas (track_id)');
+db.exec('CREATE INDEX IF NOT EXISTS idx_resenas_productor ON resenas (producer_id)');
+// verificación de originalidad de cada audio (huella propia + servicio externo de reconocimiento)
+db.exec(`CREATE TABLE IF NOT EXISTS originalidad (
+  track_id INTEGER PRIMARY KEY,
+  estado TEXT NOT NULL DEFAULT 'pendiente',
+  huella TEXT DEFAULT '',
+  internas_json TEXT DEFAULT '[]',
+  externas_json TEXT DEFAULT '[]',
+  servicio TEXT DEFAULT '',
+  error TEXT DEFAULT '',
+  checked_at TEXT DEFAULT '',
+  override_motivo TEXT DEFAULT '',
+  override_at TEXT DEFAULT ''
+)`);
+// reclamos de Content ID que reportan los compradores
+db.exec(`CREATE TABLE IF NOT EXISTS reclamos_cid (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id INTEGER NOT NULL,
+  track_id INTEGER,
+  producer_id INTEGER,
+  track_title TEXT DEFAULT '',
+  plataforma TEXT DEFAULT '',
+  reclamante TEXT DEFAULT '',
+  enlace TEXT DEFAULT '',
+  detalle TEXT DEFAULT '',
+  estado TEXT DEFAULT 'abierto',
+  nota TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now')),
+  resuelto_at TEXT DEFAULT ''
+)`);
+
 module.exports = db;

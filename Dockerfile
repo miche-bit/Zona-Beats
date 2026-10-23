@@ -3,8 +3,10 @@ FROM node:22-bookworm-slim
 
 # ffmpeg crea los previews MP3 livianos, la marca de agua de los productores Free,
 # el MP3 de 320 kbps de entrega y las miniaturas de las portadas.
+# libchromaprint-tools (fpcalc) calcula la huella acústica de la verificación de originalidad
+# si el ffmpeg instalado no trae Chromaprint.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg && \
+    apt-get install -y --no-install-recommends ffmpeg libchromaprint-tools && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

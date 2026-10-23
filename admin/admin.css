@@ -556,7 +556,7 @@ label {
 }
 .btn-whatsapp-order:hover { filter: brightness(1.08); }
 
-.btn-approve-order {
+.btn-approve-order, .btn-forzar {
   background: var(--accent);
   color: var(--on-bright);
   font-weight: 700;
@@ -564,7 +564,7 @@ label {
   border-radius: var(--r-sm);
   font-size: 12px;
 }
-.btn-approve-order:hover { background: var(--accent-hi); }
+.btn-approve-order:hover, .btn-forzar:hover { background: var(--accent-hi); }
 
 .order-approved-tag {
   color: var(--live);
@@ -1209,7 +1209,7 @@ input, textarea, select { max-width: 100%; min-width: 0; }
 
 /* Denuncias de derechos de autor */
 .denuncia-item { border: 1px solid var(--line); border-left: 3px solid var(--warn); border-radius: var(--r-md); padding: var(--s-3); margin-bottom: var(--s-2); background: var(--bg-card); min-width: 0; }
-.denuncia-item.resuelta { border-left-color: var(--line); opacity: 0.75; }
+.denuncia-item.resuelta { border-left-color: var(--line); background: var(--bg-elevated); }
 .denuncia-head { display: flex; justify-content: space-between; gap: var(--s-2); flex-wrap: wrap; align-items: baseline; }
 .denuncia-head strong { overflow-wrap: anywhere; }
 .denuncia-estado { font-size: 12px; font-weight: 700; color: var(--warn); }
@@ -1232,3 +1232,45 @@ input, textarea, select { max-width: 100%; min-width: 0; }
 .paid-form .field { margin-bottom: 10px; }
 .paid-form-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .proof-link { color: var(--live); text-decoration: underline; font-size: 12px; }
+
+/* ---------- Filtro de productores ---------- */
+.prod-filtros { display: flex; flex-wrap: wrap; gap: var(--s-2); margin: var(--s-3) 0; }
+.prod-filtro {
+  flex: 1 1 180px; min-height: 44px; padding: 10px 14px; border-radius: var(--r-sm);
+  border: 1px solid var(--line); background: var(--bg-elevated); color: var(--text-dim);
+  font: inherit; font-weight: 600; cursor: pointer;
+}
+.prod-filtro:hover { border-color: var(--accent-dim); color: var(--text); }
+.prod-filtro.active { border-color: var(--accent); color: var(--text); background: rgba(var(--accent-rgb), 0.12); }
+.prod-filtro-n { font-family: var(--font-mono); font-weight: 400; color: var(--text-faint); }
+.tag-verif { font-size: 11px; font-weight: 600; color: var(--live); border: 1px solid rgba(var(--live-rgb), 0.4); border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
+
+/* ---------- Originalidad en beats pendientes ---------- */
+.orig-box { margin-top: var(--s-2); padding: var(--s-2) var(--s-3); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--bg-elevated); font-size: 13px; min-width: 0; }
+.orig-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-faint); margin-bottom: 4px; }
+.orig-estado { font-weight: 600; }
+.orig-estado.ok { color: var(--live); }
+.orig-estado.warn { color: var(--warn); }
+.orig-estado.proc { color: var(--text-dim); }
+.orig-lista { margin: 4px 0 0 18px; padding: 0; color: var(--text-dim); overflow-wrap: anywhere; }
+.orig-lista a { color: var(--accent-ink); }
+.orig-decl { margin-top: 4px; color: var(--text-dim); }
+.orig-decl.warn { color: var(--warn); }
+.orig-decl.muted { color: var(--text-faint); font-size: 12px; }
+.orig-box .btn-reverif { margin-top: var(--s-2); }
+.forzar-box { margin-top: var(--s-2); display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: flex-end; }
+.forzar-box[hidden] { display: none; }
+.forzar-box label { flex: 1 1 240px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--warn); }
+
+/* ---------- Content ID y reseñas ---------- */
+.cid-resolver { display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: flex-end; margin-top: var(--s-2); }
+.cid-resolver label { flex: 1 1 240px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-dim); }
+.rev-stars { color: #f5b301; letter-spacing: 1px; }
+.rev-item .denuncia-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.rev-item .rev-motivo { flex: 1 1 200px; min-width: 0; }
+.denuncia-meta .wa-link, .denuncia-meta a { text-decoration: underline; }
+.forzar-box label, .cid-resolver label { text-transform: none; font-family: var(--font-body); letter-spacing: normal; font-size: 13px; font-weight: 500; }
+.receipt-thumb.receipt-qvapay { display: grid; place-items: center; font-weight: 700; font-size: 11px; color: var(--accent-ink); background: rgba(var(--accent-rgb), 0.12); }
+.orig-mini.ok { color: var(--live); }
+.orig-mini.warn { color: var(--warn); }
+.orig-mini.proc { color: var(--text-dim); }

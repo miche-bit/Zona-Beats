@@ -303,7 +303,7 @@
     const ordenados = [...producers].sort((a, b) => favs.includes(b.id) - favs.includes(a.id));
 
     if (!ordenados.length) {
-      producersGrid.innerHTML = '<div class="empty-hint">Todavía no hay productores en la plataforma.</div>';
+      producersGrid.innerHTML = '<div class="empty-hint">Aún no hay productores.</div>';
       return;
     }
 
@@ -316,6 +316,7 @@
         <div class="producer-card-name">${escapeHtml(p.name)}</div>
         <div class="producer-card-bio">${escapeHtml(p.bio || '')}</div>
         <div class="producer-card-count">${p.beats} beat${p.beats === 1 ? '' : 's'}</div>
+        ${insigniasHtml(p.insignias)}
       </div>
     `).join('');
 
@@ -338,7 +339,7 @@
 
   // Cabecera del productor: se pinta ya con lo que trae la tarjeta, para que el nombre y la
   // foto «viajen» de la tarjeta a la página (elemento compartido) sin esperar al servidor.
-  function cabeceraProductor(id, nombre, conFoto, bio, socialHtml) {
+  function cabeceraProductor(id, nombre, conFoto, bio, socialHtml, insignias) {
     return `
       <button type="button" class="back-to-producers">&larr; Todos los productores</button>
       <div class="producer-detail-head">
@@ -346,6 +347,7 @@
         <div>
           <h2>${escapeHtml(nombre)}</h2>
           <p>${escapeHtml(bio || '')}</p>
+          ${insigniasHtml(insignias)}
           ${socialHtml ? `<div class="hero-social">${socialHtml}</div>` : ''}
         </div>
       </div>`;
@@ -376,7 +378,7 @@
       () => ({ 'zb-titulo': producerDetail.querySelector('.producer-detail-head h2'), 'zb-avatar': producerDetail.querySelector('.producer-avatar-lg') })
     );
     const res = await fetch(`/api/producers/${id}/tracks`);
-    if (!res.ok) { producerDetail.innerHTML = '<div class="empty-hint">No se pudo cargar este productor.</div>'; return; }
+    if (!res.ok) { producerDetail.innerHTML = '<div class="empty-hint">Perfil no disponible.</div>'; return; }
     const { producer, tracks, discountPercent: dp } = await res.json();
     discountPercent = dp || 0;
 
@@ -386,7 +388,7 @@
       return `<a href="${escapeHtml(l.url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(l.label || platform)}">${icon}</a>`;
     }).join('');
 
-    producerDetail.innerHTML = cabeceraProductor(producer.id, producer.name, producer.avatar, producer.bio, socialHtml)
+    producerDetail.innerHTML = cabeceraProductor(producer.id, producer.name, producer.avatar, producer.bio, socialHtml, producer.insignias)
       + '<div class="track-grid" id="producer-track-grid"></div>';
 
     producerDetail.querySelector('.back-to-producers').addEventListener('click', () => volverAProductores(producer.id));
@@ -397,7 +399,7 @@
     renderTracks(tracks, tracks.length, grid);
     currentSection = savedSection;
 
-    if (!tracks.length) grid.innerHTML = '<div class="empty-hint">Este productor todavía no tiene beats en venta.</div>';
+    if (!tracks.length) grid.innerHTML = '<div class="empty-hint">Sin beats disponibles por ahora.</div>';
   }
 
   async function loadTracksForSection(section) {
@@ -435,10 +437,23 @@
 
   // Quién hizo cada tema: en Playlist van los artistas (la colaboración); en Catálogo y VIP, género y productor.
   const nombreProductor = (t) => t.producer_display || t.producer_name || 'Zona Beats';
+  const numEs = (n) => Number(n).toLocaleString('es', { maximumFractionDigits: 1 });
+  const estrellasTxt = (n) => '★★★★★'.slice(0, Math.round(n)) + '☆☆☆☆☆'.slice(0, 5 - Math.round(n));
+  const notaHtml = (r) => r && r.total ? `<span class="track-rating" title="${numEs(r.promedio)} de 5 en ${r.total} reseña${r.total === 1 ? '' : 's'} verificada${r.total === 1 ? '' : 's'}"><span aria-hidden="true">★</span> ${numEs(r.promedio)} <span class="track-rating-n">(${r.total})</span><span class="sr-only"> de 5, ${r.total} reseñas</span></span>` : '';
+  const verifHtml = (t) => t.producer_verificado ? '<span class="prod-verif" title="Identidad verificada"><span aria-hidden="true">✓</span><span class="sr-only"> (identidad verificada)</span></span>' : '';
+  function insigniasHtml(ins) {
+    if (!ins) return '';
+    const items = [];
+    if (ins.identidadVerificada) items.push('<span class="badge-prod ok">✓ Identidad verificada</span>');
+    if (ins.miembroDesde) items.push('<span class="badge-prod">Miembro desde ' + new Date(String(ins.miembroDesde).replace(' ', 'T') + 'Z').toLocaleDateString('es', { month: 'short', year: 'numeric' }) + '</span>');
+    if (ins.ventasEntregadas > 0) items.push('<span class="badge-prod">' + ins.ventasEntregadas + ' venta' + (ins.ventasEntregadas === 1 ? '' : 's') + ' entregada' + (ins.ventasEntregadas === 1 ? '' : 's') + '</span>');
+    if (ins.resenas && ins.resenas.total) items.push('<span class="badge-prod">★ ' + numEs(ins.resenas.promedio) + ' (' + ins.resenas.total + ')</span>');
+    return items.length ? '<div class="badges-prod">' + items.join('') + '</div>' : '';
+  }
   function creditosHtml(track, seccion) {
     const artistas = seccion === 'playlist' && track.artist_credit
       ? `<div class="track-artists"><span aria-hidden="true">🎤</span><span class="sr-only">Artistas:</span> ${escapeHtml(track.artist_credit)}</div>` : '';
-    return artistas + `<div class="track-credits">${track.genre ? `<span class="track-genre">${escapeHtml(track.genre)}</span><span class="dot" aria-hidden="true">·</span>` : ''}<span class="track-prod">prod. ${escapeHtml(nombreProductor(track))}</span></div>`;
+    return artistas + `<div class="track-credits">${track.genre ? `<span class="track-genre">${escapeHtml(track.genre)}</span><span class="dot" aria-hidden="true">·</span>` : ''}<span class="track-prod">prod. ${escapeHtml(nombreProductor(track))}${verifHtml(track)}</span>${notaHtml(track.rating)}</div>`;
   }
   function creditosTexto(track, seccion, conComa) {
     const partes = [];
@@ -461,10 +476,10 @@
 
     if (currentSection === 'vip') {
       emptyStateTitle.textContent = 'Aún no hay Beats VIP';
-      emptyStateText.textContent = 'Cuando se vendan pistas exclusivas, aparecerán aquí.';
+      emptyStateText.textContent = 'Aquí aparecen los beats vendidos en exclusiva.';
     } else if (currentSection === 'packs') {
       emptyStateTitle.textContent = 'Aún no hay Sample Packs';
-      emptyStateText.textContent = 'Pronto habrá paquetes de sonidos, loops y drums para tus producciones.';
+      emptyStateText.textContent = 'Loops, drums y one-shots para tus producciones, muy pronto.';
     } else if (currentSection === 'playlist') {
       emptyStateTitle.textContent = 'Playlist vacía';
       emptyStateText.textContent = 'Todavía no hay colaboraciones gratuitas publicadas.';
@@ -828,7 +843,32 @@
     p.textContent = txt || 'Esta pista todavía no tiene descripción.';
     p.classList.toggle('empty', !txt);
     document.getElementById('desc-play').style.display = conReproducir ? '' : 'none';
+    const confianza = [];
+    if (track.originalidadVerificada) confianza.push('<li><span aria-hidden="true">✓</span> Originalidad verificada antes de su publicación.</li>');
+    if (track.producer_verificado) confianza.push('<li><span aria-hidden="true">✓</span> Productor con identidad verificada.</li>');
+    if (track._section !== 'playlist' && track.for_sale) confianza.push('<li><span aria-hidden="true">✓</span> Contrato de licencia disponible antes de comprar.</li>');
+    const ulT = document.getElementById('desc-trust');
+    ulT.innerHTML = confianza.join(''); ulT.hidden = !confianza.length;
+    pintarResenas(track);
     descOverlay.classList.add('active');
+  }
+  async function pintarResenas(track) {
+    const caja = document.getElementById('desc-reviews');
+    caja.hidden = true; caja.innerHTML = '';
+    if (track._section === 'playlist') return;
+    let d;
+    try { const r = await fetch('/api/tracks/' + track.id + '/resenas'); if (!r.ok) return; d = await r.json(); } catch { return; }
+    if (descTrack !== track) return;
+    if (!d.total && !d.ocultas) {
+      caja.innerHTML = '<p class="rev-empty">Aún sin reseñas.</p>';
+      caja.hidden = false; return;
+    }
+    caja.innerHTML = '<div class="rev-head"><strong>' + (d.total ? estrellasTxt(d.promedio) + ' ' + numEs(d.promedio) + ' de 5' : 'Sin reseñas visibles') + '</strong>' +
+      '<span>' + d.total + ' reseña' + (d.total === 1 ? '' : 's') + ' de compradores verificados' + (d.ocultas ? ' · ' + d.ocultas + ' oculta' + (d.ocultas === 1 ? '' : 's') + ' por moderación' : '') + '</span></div>' +
+      d.resenas.slice(0, 6).map(r => '<div class="rev-item"><div class="rev-top"><span class="rev-stars" aria-label="' + r.estrellas + ' de 5">' + estrellasTxt(r.estrellas) + '</span> <strong>' + escapeHtml(r.nombre) + '</strong> <span class="rev-check">compra verificada</span></div>' +
+        (r.texto ? '<p>' + escapeHtml(r.texto) + '</p>' : '') +
+        (r.respuesta ? '<p class="rev-reply"><strong>Respuesta del productor:</strong> ' + escapeHtml(r.respuesta) + '</p>' : '') + '</div>').join('');
+    caja.hidden = false;
   }
   async function compartirPista(track, labelEl) {
     const url = enlacePista(track);
@@ -958,23 +998,23 @@
   const LICENSE_INFO = {
     basic: {
       label: 'Básica',
-      description: 'Nivel 1 · Recibes el MP3. Puedes crear y distribuir tu canción, pero NO monetizarla en ningún medio. No exclusiva: el beat sigue a la venta.',
+      description: 'MP3. Distribución sin monetización. No exclusiva.',
     },
     premium: {
       label: 'Premium',
-      description: 'Nivel 2 · Recibes MP3 + WAV. Mismos derechos que la Básica (tampoco permite monetizar), con mejor calidad de archivo. No exclusiva.',
+      description: 'MP3 + WAV. Distribución sin monetización, en máxima calidad. No exclusiva.',
     },
     unlimited: {
       label: 'Ilimitada',
-      description: 'Nivel 3 · Recibes MP3 + WAV + STEMS. Permite distribuir y MONETIZAR sin límite. Compra única: el beat se retira del catálogo. No es exclusiva ni va a Beats VIP.',
+      description: 'MP3 + WAV + STEMS. Distribución y monetización ilimitadas. Venta única: el beat sale del catálogo.',
     },
     pack: {
       label: 'Sample Pack',
-      description: 'Recibes el pack completo (archivo comprimido). Puedes usar los sonidos en tus canciones, incluso monetizadas, sin pagar regalías. No puedes revender ni compartir los sonidos. No exclusiva.',
+      description: 'Pack completo. Uso en tus producciones, incluso monetizadas, libre de regalías. Prohibida su reventa o distribución.',
     },
     exclusive: {
       label: 'Exclusiva',
-      description: 'Nivel 4 · Recibes MP3 + WAV + STEMS. Todos los derechos comerciales y exclusividad. El beat se retira para siempre y pasa a Beats VIP (con tu nombre solo si lo autorizas).',
+      description: 'MP3 + WAV + STEMS. Exclusividad y todos los derechos comerciales. El beat pasa a Beats VIP a tu nombre.',
     },
   };
   const LICENSE_ORDER = ['basic', 'premium', 'unlimited', 'exclusive', 'pack'];
@@ -990,7 +1030,7 @@
     const licenses = (track.licenses || []).slice().sort((a, b) => LICENSE_ORDER.indexOf(a.license_type) - LICENSE_ORDER.indexOf(b.license_type));
 
     if (!licenses.length) {
-      licenseList.innerHTML = '<div class="modal-no-accounts">Esta pista no tiene ninguna licencia disponible en este momento.</div>';
+      licenseList.innerHTML = '<div class="modal-no-accounts">Sin licencias disponibles por ahora.</div>';
       document.getElementById('modal-price').style.display = 'none';
       document.getElementById('modal-instructions').style.display = 'none';
       modalAccounts.innerHTML = '';
@@ -1020,6 +1060,7 @@
     });
 
     document.getElementById('modal-price').style.display = 'none';
+    document.getElementById('modal-contract-link').hidden = true;
     document.getElementById('modal-instructions').style.display = 'none';
     modalAccounts.innerHTML = '';
     document.getElementById('modal-confirm-phone').style.display = 'none';
@@ -1051,13 +1092,20 @@
 
     modalPrice.textContent = formatPriceInCurrency(lic.price_cup, selectedCurrency);
     document.getElementById('modal-price').style.display = 'block';
+    const contrato = document.getElementById('modal-contract-link');
+    contrato.href = '/api/tracks/' + track.id + '/contrato/' + encodeURIComponent(type) + '?moneda=' + encodeURIComponent(selectedCurrency);
+    contrato.hidden = false;
     document.getElementById('modal-instructions').style.display = 'block';
 
     const accountsForCurrency = paymentInfo.accounts.filter(a => a.currency === selectedCurrency);
+    const qv = esPagoQvapay();
+    modoQvapay(qv);
 
     modalAccounts.innerHTML = '';
-    if (!accountsForCurrency.length) {
-      modalAccounts.innerHTML = `<div class="modal-no-accounts">No hay una cuenta configurada para ${escapeHtml(selectedCurrency)} todavía. Elige otra moneda arriba en "Ver precios en".</div>`;
+    if (qv) {
+      modalAccounts.innerHTML = '<div class="modal-qvapay">Pago con tu saldo QvaPay. La licencia y los archivos se entregan en cuanto se confirma el pago.</div>';
+    } else if (!accountsForCurrency.length) {
+      modalAccounts.innerHTML = `<div class="modal-no-accounts">Pago en ${escapeHtml(selectedCurrency)} no disponible por ahora. Elige otra moneda.</div>`;
     } else {
       accountsForCurrency.forEach((acc) => {
         const row = document.createElement('div');
@@ -1082,41 +1130,57 @@
     }
 
     const confirmPhoneBlock = document.getElementById('modal-confirm-phone');
-    if (accountsForCurrency.length && paymentInfo.contactPhone) {
+    if (!qv && accountsForCurrency.length && paymentInfo.contactPhone) {
       document.getElementById('modal-confirm-phone-number').textContent = paymentInfo.contactPhone;
       confirmPhoneBlock.style.display = 'flex';
     } else {
       confirmPhoneBlock.style.display = 'none';
     }
 
-    orderForm.style.display = accountsForCurrency.length ? 'block' : 'none';
+    orderForm.style.display = qv || accountsForCurrency.length ? 'block' : 'none';
     vipPublicWrap.style.display = type === 'exclusive' ? 'flex' : 'none';
     if (type !== 'exclusive') vipPublicInput.checked = false;
     updateSubmitButtonState();
   }
 
   const telefonoValido = (v) => String(v || '').replace(/[^0-9]/g, '').length >= 8;
+  // QvaPay: pago automático con el saldo del artista (sin comprobante ni número de transacción)
+  const esPagoQvapay = () => Boolean(paymentInfo.qvapay && selectedCurrency === paymentInfo.qvapay.moneda);
+  const textoInstrucciones = document.getElementById('modal-instructions').innerHTML;
+  function modoQvapay(qv) {
+    const tx = document.getElementById('tx-ref-input');
+    tx.closest('.modal-field').hidden = qv;
+    tx.required = !qv; // un campo oculto y obligatorio impediría enviar el formulario
+    document.querySelector('.modal-receipt-step').hidden = qv;
+    document.getElementById('modal-instructions').innerHTML = qv
+      ? 'Al continuar, se abrirá QvaPay para completar el pago con tu saldo.'
+      : textoInstrucciones;
+  }
   function updateSubmitButtonState() {
-    const ready = selectedLicenseType && buyerNameInput.value.trim() && telefonoValido(buyerPhoneInput.value) && receiptFile && termsAcceptInput.checked;
+    const qv = esPagoQvapay();
+    const txOk = qv || String(document.getElementById('tx-ref-input').value || '').replace(/[^A-Za-z0-9]/g, '').length >= 4;
+    const pagoOk = qv || receiptFile;
+    const ready = selectedLicenseType && buyerNameInput.value.trim() && telefonoValido(buyerPhoneInput.value) && txOk && pagoOk && termsAcceptInput.checked;
     orderSubmitBtn.disabled = !ready;
     orderSubmitBtn.classList.toggle('disabled', !ready);
-    if (!termsAcceptInput.checked && selectedLicenseType && buyerNameInput.value.trim() && buyerPhoneInput.value.trim() && receiptFile) {
+    if (!termsAcceptInput.checked && selectedLicenseType && buyerNameInput.value.trim() && buyerPhoneInput.value.trim() && pagoOk) {
       orderSubmitBtn.textContent = 'Acepta los términos para continuar';
     } else {
       orderSubmitBtn.textContent = ready
-        ? 'Enviar comprobante'
-        : 'Completa tus datos y el comprobante';
+        ? (qv ? 'Pagar con QvaPay' : 'Enviar comprobante')
+        : 'Completa tus datos';
     }
   }
 
   buyerNameInput.addEventListener('input', updateSubmitButtonState);
+  document.getElementById('tx-ref-input').addEventListener('input', updateSubmitButtonState);
   buyerPhoneInput.addEventListener('input', () => {
     buyerPhoneError.textContent = '';
     updateSubmitButtonState();
   });
   buyerPhoneInput.addEventListener('blur', () => {
     const v = buyerPhoneInput.value.trim();
-    buyerPhoneError.textContent = v && !telefonoValido(v) ? 'Escribe tu número completo, con el código del país (ej: 53512345678).' : '';
+    buyerPhoneError.textContent = v && !telefonoValido(v) ? 'Incluye el código de país (ej: 5351234567).' : '';
   });
   termsAcceptInput.addEventListener('change', updateSubmitButtonState);
 
@@ -1190,12 +1254,13 @@
 
   orderForm.addEventListener('submit', async (e) => {
     e.preventDefault();
+    if (esPagoQvapay()) { pagarConQvapay(); return; }
     if (!receiptFile || !activeModalTrack || !termsAcceptInput.checked || !selectedLicenseType) return;
 
     const buyerName = buyerNameInput.value.trim();
     const buyerPhone = buyerPhoneInput.value.trim();
     if (!telefonoValido(buyerPhone)) {
-      buyerPhoneError.textContent = 'Escribe tu número completo, con el código del país (ej: 53512345678).';
+      buyerPhoneError.textContent = 'Incluye el código de país (ej: 5351234567).';
       buyerPhoneInput.focus();
       return;
     }
@@ -1211,6 +1276,7 @@
       formData.append('trackId', activeModalTrack.id);
       formData.append('buyerName', buyerName);
       formData.append('buyerPhone', buyerPhone);
+      formData.append('transactionRef', document.getElementById('tx-ref-input').value.trim());
       formData.append('currency', selectedCurrency);
       formData.append('displayedPrice', displayedPrice);
       formData.append('licenseType', selectedLicenseType);
@@ -1242,7 +1308,7 @@
         const message = encodeURIComponent(
           `Hola, soy ${buyerName} 👋 Acabo de comprar "${activeModalTrack.title}" (Licencia ${licenseLabel})` +
           ` (${displayedPrice}). ` + (orderData.codigo ? `Pedido ${orderData.codigo}. ` : '') +
-          `Ya te envié el comprobante de mi transferencia a través de la plataforma. ¡Gracias!`
+          `El comprobante ya está adjunto en el pedido. ¡Gracias!`
         );
         const phoneDigits = paymentInfo.contactPhone.replace(/[^0-9]/g, '');
         modalWhatsappBtn.href = `https://wa.me/${phoneDigits}?text=${message}`;
@@ -1256,6 +1322,36 @@
       updateSubmitButtonState();
     }
   });
+
+  async function pagarConQvapay() {
+    if (!activeModalTrack || !termsAcceptInput.checked || !selectedLicenseType) return;
+    const buyerName = buyerNameInput.value.trim();
+    const buyerPhone = buyerPhoneInput.value.trim();
+    if (!telefonoValido(buyerPhone)) {
+      buyerPhoneError.textContent = 'Incluye el código de país (ej: 5351234567).';
+      buyerPhoneInput.focus();
+      return;
+    }
+    const licenseLabel = (LICENSE_INFO[selectedLicenseType] || {}).label || selectedLicenseType;
+    orderSubmitBtn.disabled = true;
+    orderSubmitBtn.textContent = 'Conectando con QvaPay…';
+    try {
+      const res = await fetch('/api/orders/qvapay', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trackId: activeModalTrack.id, buyerName, buyerPhone, licenseType: selectedLicenseType,
+          vipPublic: selectedLicenseType === 'exclusive' && vipPublicInput.checked }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok || !d.url) throw new Error(d.error || 'No se pudo iniciar el pago con QvaPay.');
+      guardarCompra({ token: d.orderToken, title: activeModalTrack.title, license: licenseLabel, createdAt: new Date().toISOString(), codigo: d.codigo || '' });
+      orderSubmitBtn.textContent = 'Abriendo QvaPay…';
+      location.href = d.url;
+    } catch (err) {
+      alert(err.message);
+      orderSubmitBtn.disabled = false;
+      updateSubmitButtonState();
+    }
+  }
 
   function closeBuyModal() {
     modalOverlay.classList.remove('active');
@@ -1318,6 +1414,7 @@
     const lista = compras();
     if (!lista.length) return;
     let hayPendientes = false;
+    let pagoEnCurso = false;
     let cambio = false;
     for (const c of lista) {
       try {
@@ -1328,10 +1425,11 @@
         const antes = comprasEstado[c.token] && comprasEstado[c.token].status;
         comprasEstado[c.token] = d;
         if (d.status === 'pending') hayPendientes = true;
+        if (d.status === 'esperando_pago') { hayPendientes = true; pagoEnCurso = true; }
         if (d.status === 'approved' && !c.downloaded && d.downloadUrl) {
           c.downloaded = true; cambio = true;
           descargarAhora(d.downloadUrl);
-          if (antes === 'pending') abrirCompras();
+          if (antes === 'pending' || antes === 'esperando_pago') abrirCompras();
         }
         if (d.status === 'rejected' && antes === 'pending') abrirCompras();
       } catch { hayPendientes = true; }
@@ -1340,13 +1438,14 @@
     actualizarBotonCompras();
     if (purchasesOverlay.classList.contains('active')) pintarCompras();
     clearTimeout(comprasTimer);
-    if (hayPendientes) comprasTimer = setTimeout(revisarCompras, 30000);
+    // tras volver de QvaPay se consulta más seguido hasta que llegue la confirmación
+    if (hayPendientes) comprasTimer = setTimeout(revisarCompras, pagoEnCurso ? 5000 : 30000);
   }
 
   function pintarCompras() {
     const lista = compras();
     if (!lista.length) {
-      purchasesList.innerHTML = '<p class="purchases-hint">Todavía no has comprado nada desde este dispositivo.</p>';
+      purchasesList.innerHTML = '<p class="purchases-hint">Aún no tienes compras en este dispositivo.</p>';
       return;
     }
     const pesoTxt = (b) => {
@@ -1361,19 +1460,27 @@
       let estado = '<span class="purchase-status pending">Comprobando…</span>';
       let acciones = '';
       if (d.status === 'pending') {
-        estado = '<span class="purchase-status pending">Esperando que el vendedor apruebe tu pago</span>';
+        estado = '<span class="purchase-status pending">Esperando confirmación del pago</span>';
         if (d.limiteAprobacion) {
           const lim = new Date(d.limiteAprobacion);
           const txtLim = lim.toLocaleString('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
           estado += d.puedeReclamar
-            ? '<span class="purchase-plazo vencido">Pasó el plazo de ' + horasTxt(d.horasAprobacion || 24) + ' (' + txtLim + ') sin aprobar tu pago.</span>'
-            : '<span class="purchase-plazo">El vendedor tiene hasta el ' + txtLim + ' para aprobarlo.</span>';
+            ? '<span class="purchase-plazo vencido">Pasó el plazo de ' + horasTxt(d.horasAprobacion || 24) + ' (' + txtLim + ') sin confirmar tu pago.</span>'
+            : '<span class="purchase-plazo">Confirmación antes del ' + txtLim + '.</span>';
         }
       }
-      if (d.status === 'missing') estado = '<span class="purchase-status missing">No encontramos esta compra. Escríbele al vendedor por WhatsApp.</span>';
+      if (d.status === 'esperando_pago') {
+        estado = '<span class="purchase-status pending">Pago con QvaPay sin completar</span>' +
+          (d.qvapay && d.qvapay.url ? '<span class="purchase-meta">Si ya pagaste, la confirmación llega en unos segundos.</span>' : '');
+        if (d.qvapay && d.qvapay.url) acciones = '<div class="purchase-actions"><a class="purchase-dl" href="' + escapeHtml(d.qvapay.url) + '">Completar pago en QvaPay</a></div>';
+      }
+      if (d.status === 'pending' && d.qvapay && d.qvapay.pagado) {
+        estado = '<span class="purchase-status pending">Pago recibido por QvaPay · en revisión</span>';
+      }
+      if (d.status === 'missing') estado = '<span class="purchase-status missing">Compra no encontrada. Contáctanos por WhatsApp.</span>';
       if (d.status === 'rejected') {
         estado = '<span class="purchase-status missing">Pago no aprobado</span>' +
-          '<span class="purchase-meta">' + (d.rejectReason ? 'Motivo: ' + escapeHtml(d.rejectReason) : 'El vendedor no pudo confirmar tu pago.') + ' Escríbele por WhatsApp si crees que es un error.</span>';
+          '<span class="purchase-meta">' + (d.rejectReason ? 'Motivo: ' + escapeHtml(d.rejectReason) : 'No se pudo confirmar tu pago.') + '</span>';
       }
       if (d.status === 'approved') {
         estado = '<span class="purchase-status approved">Aprobada · Licencia ' + escapeHtml(d.certificateId || '') + '</span>';
@@ -1381,36 +1488,88 @@
         acciones = '<div class="purchase-actions">' +
           (archivos.length
             ? archivos.map((f, i) => '<a class="' + (i === 0 ? 'purchase-dl' : 'purchase-pdf') + '" href="' + escapeHtml(f.url) + '" download>Descargar ' + escapeHtml(f.label || f.f) + pesoTxt(f.size) + '</a>').join('')
-            : '<span class="purchase-meta">El vendedor te enviará el archivo por WhatsApp.</span>') +
+            : '<span class="purchase-meta">Recibirás tus archivos por WhatsApp.</span>') +
           (d.pdfUrl ? '<a class="purchase-pdf" href="' + escapeHtml(d.pdfUrl) + '" target="_blank" rel="noopener">Licencia en PDF</a>' : '') +
           '</div>' +
-          ((archivos.length > 1 || archivos.some(f => f.f === 'pack')) ? '<span class="purchase-meta">Los archivos grandes (WAV, STEMS, Sample Packs) descárgalos con wifi o buenos datos: si se corta, vuelve a tocar el botón.</span>' : '');
+          ((archivos.length > 1 || archivos.some(f => f.f === 'pack')) ? '<span class="purchase-meta">Para WAV, STEMS y packs se recomienda una conexión estable.</span>' : '');
       }
       // reclamo: si pasó el plazo sin aprobar, o si rechazaron el pago
       let reclamo = '';
       if (d.reclamo) {
         const fr = new Date(String(d.reclamo.fecha).replace(' ', 'T') + 'Z').toLocaleString('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
-        reclamo = '<span class="purchase-reclamo-ok">' + (d.reclamo.atendido ? 'Tu reclamo del ' + fr + ' fue atendido por el vendedor.' : 'Reclamo enviado el ' + fr + '. El vendedor lo ve marcado en rojo.') + '</span>';
+        reclamo = '<span class="purchase-reclamo-ok">' + (d.reclamo.atendido ? 'Tu reclamo del ' + fr + ' fue atendido.' : 'Reclamo enviado el ' + fr + '.') + '</span>';
       }
       if (d.puedeReclamar && !(d.reclamo && !d.reclamo.atendido)) {
         const idR = 'reclamo-' + c.token.slice(0, 8);
         reclamo += '<div class="purchase-reclamo">' +
-          '<label for="' + idR + '">' + (d.status === 'rejected' ? '¿Crees que es un error? Reclama' : 'Reclamar al vendedor') + '</label>' +
-          '<textarea id="' + idR + '" maxlength="600" placeholder="Ej: pagué el día 10 por transferencia desde BANDEC, adjunté la captura…"></textarea>' +
+          '<label for="' + idR + '">' + (d.status === 'rejected' ? 'Solicitar revisión' : 'Reclamar') + '</label>' +
+          '<textarea id="' + idR + '" maxlength="600" placeholder="Detalles del pago"></textarea>' +
           '<button type="button" class="purchase-reclamar" data-token="' + c.token + '">Enviar reclamo</button></div>';
+      }
+      // reseña verificada y ayuda con Content ID (solo compras aprobadas)
+      let extras = '';
+      if (d.status === 'approved') {
+        const rs = d.resena;
+        const idT = c.token.slice(0, 8);
+        extras += '<details class="purchase-more"' + (rs ? '' : ' open') + '><summary>' + (rs ? 'Tu reseña: ' + estrellasTxt(rs.estrellas) : 'Califica tu compra') + '</summary>' +
+          (rs && rs.oculta ? '<span class="purchase-meta">Tu reseña no está visible.</span>' :
+          '<div class="rev-form" data-token="' + c.token + '"><div class="rev-pick" role="radiogroup" aria-label="Estrellas">' +
+            [1, 2, 3, 4, 5].map(n => '<button type="button" role="radio" class="rev-star' + (rs && rs.estrellas >= n ? ' on' : '') + '" data-n="' + n + '" aria-checked="' + (rs && rs.estrellas === n) + '" aria-label="' + n + ' estrella' + (n === 1 ? '' : 's') + '">★</button>').join('') +
+          '</div><label class="sr-only" for="rev-txt-' + idT + '">Tu opinión</label><textarea id="rev-txt-' + idT + '" maxlength="600" placeholder="¿Qué te pareció? (opcional)">' + escapeHtml(rs ? rs.texto : '') + '</textarea>' +
+          '<button type="button" class="rev-send">' + (rs ? 'Cambiar reseña' : 'Publicar reseña') + '</button></div>') + '</details>';
+        if (d.contentId) {
+          const reps = d.contentId.reportes || [];
+          extras += '<details class="purchase-more"' + (reps.some(x => x.estado === 'abierto') ? ' open' : '') + '><summary>¿Te saltó un reclamo de derechos de autor?</summary>' +
+            '<p class="purchase-meta">' + (d.contentId.monetiza ? 'Tu licencia incluye monetización. Presenta esta carta para impugnar cualquier reclamo y repórtalo aquí.' : 'Tu licencia incluye distribución. Presenta esta carta para mantener tu publicación.') + '</p>' +
+            '<div class="purchase-actions"><a class="purchase-pdf" href="' + escapeHtml(d.contentId.cartaUrl) + '" target="_blank" rel="noopener">Carta de licencia</a></div>' +
+            reps.map(x => '<span class="purchase-meta">Reporte del ' + new Date(String(x.created_at).replace(' ', 'T') + 'Z').toLocaleDateString('es') + ' (' + escapeHtml(x.plataforma) + ', ' + escapeHtml(x.reclamante) + '): ' + (x.estado === 'abierto' ? 'en gestión' : 'resuelto · ' + escapeHtml(x.nota)) + '</span>').join('') +
+            '<div class="cid-form" data-token="' + c.token + '">' +
+              '<label for="cid-pl-' + idT + '">Plataforma</label><select id="cid-pl-' + idT + '"><option value="">Elige…</option>' + ['YouTube', 'Facebook / Instagram', 'TikTok', 'SoundCloud', 'Twitch', 'Spotify / Apple Music / distribuidora', 'Otra'].map(o => '<option>' + o + '</option>').join('') + '</select>' +
+              '<label for="cid-rc-' + idT + '">Reclamante</label><input type="text" id="cid-rc-' + idT + '" maxlength="150" placeholder="Sello o distribuidora">' +
+              '<label for="cid-ln-' + idT + '">Enlace (opcional)</label><input type="text" id="cid-ln-' + idT + '" maxlength="300">' +
+              '<button type="button" class="cid-send">Reportar reclamo</button></div></details>';
+        }
       }
       const codigo = d.codigo || c.codigo || '';
       const comprobante = d.comprobanteUrl ? '<a class="purchase-pdf" href="' + escapeHtml(d.comprobanteUrl) + '" target="_blank" rel="noopener">Comprobante del pedido</a>' : '';
-      if (comprobante && d.status !== 'approved') acciones = '<div class="purchase-actions">' + comprobante + '</div>';
+      if (comprobante && d.status === 'esperando_pago' && acciones) acciones = acciones.replace('</div>', comprobante + '</div>');
+      else if (comprobante && d.status !== 'approved') acciones = '<div class="purchase-actions">' + comprobante + '</div>';
       else if (comprobante) acciones = acciones.replace('</div>', comprobante + '</div>');
       return '<div class="purchase-card' + (d.status === 'approved' ? ' is-approved' : (d.status === 'rejected' ? ' is-rejected' : '')) + '">' +
         '<div class="purchase-title">' + escapeHtml(c.title || d.trackTitle || 'Beat') + '</div>' +
         '<div class="purchase-meta">Licencia ' + escapeHtml(String(c.license || d.licenseLabel || '').replace(/^Licencia (de )?/i, '')) + ' · ' + fecha + '</div>' +
         (codigo ? '<div class="purchase-code">Pedido ' + escapeHtml(codigo) + '</div>' : '') +
-        estado + acciones + reclamo +
+        estado + acciones + extras + reclamo +
         '<button type="button" class="purchase-forget" data-token="' + c.token + '">Quitar de este dispositivo</button>' +
         '</div>';
     }).join('');
+    purchasesList.querySelectorAll('.rev-form').forEach((f) => {
+      let elegidas = (f.querySelectorAll('.rev-star.on') || []).length;
+      f.querySelectorAll('.rev-star').forEach((b) => b.addEventListener('click', () => {
+        elegidas = Number(b.dataset.n);
+        f.querySelectorAll('.rev-star').forEach((x) => { x.classList.toggle('on', Number(x.dataset.n) <= elegidas); x.setAttribute('aria-checked', String(Number(x.dataset.n) === elegidas)); });
+      }));
+      f.querySelector('.rev-send').addEventListener('click', async (ev) => {
+        if (!elegidas) { alert('Elige de 1 a 5 estrellas.'); return; }
+        ev.target.disabled = true;
+        const r = await fetch('/api/purchase/' + f.dataset.token + '/resena', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ estrellas: elegidas, texto: f.querySelector('textarea').value }) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { alert(d.error || 'No se pudo publicar.'); ev.target.disabled = false; return; }
+        await revisarCompras(); pintarCompras();
+      });
+    });
+    purchasesList.querySelectorAll('.cid-form').forEach((f) => {
+      f.querySelector('.cid-send').addEventListener('click', async (ev) => {
+        const [pl, rc, ln] = f.querySelectorAll('select, input');
+        if (!pl.value) { pl.focus(); return; }
+        if (rc.value.trim().length < 2) { rc.focus(); return; }
+        ev.target.disabled = true;
+        const r = await fetch('/api/purchase/' + f.dataset.token + '/content-id', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plataforma: pl.value, reclamante: rc.value, enlace: ln.value }) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { alert(d.error || 'No se pudo enviar.'); ev.target.disabled = false; return; }
+        await revisarCompras(); pintarCompras();
+      });
+    });
     purchasesList.querySelectorAll('.purchase-reclamar').forEach((b) => b.addEventListener('click', async () => {
       const caja = b.closest('.purchase-reclamo');
       const texto = caja.querySelector('textarea').value.trim();
@@ -1427,7 +1586,7 @@
       } catch { alert('No hay conexión. Intenta de nuevo.'); b.disabled = false; }
     }));
     purchasesList.querySelectorAll('.purchase-forget').forEach((b) => b.addEventListener('click', () => {
-      if (!confirm('¿Quitar esta compra de este dispositivo? Si no guardaste el link que te mandó el vendedor, no podrás volver a verla aquí.')) return;
+      if (!confirm('¿Quitar esta compra de este dispositivo? Solo podrás recuperarla con su enlace privado.')) return;
       escribirCompras(compras().filter(x => x.token !== b.dataset.token));
       pintarCompras(); actualizarBotonCompras();
     }));
@@ -1443,6 +1602,14 @@
   document.getElementById('purchases-close-btn').addEventListener('click', () => purchasesOverlay.classList.remove('active'));
   purchasesOverlay.addEventListener('click', (e) => { if (e.target === purchasesOverlay) purchasesOverlay.classList.remove('active'); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) revisarCompras(); });
+
+  // Regreso desde QvaPay: /?pago=ok o /?pago=cancelado
+  (function volverDeQvapay() {
+    const pago = new URLSearchParams(location.search).get('pago');
+    if (pago !== 'ok' && pago !== 'cancelado') return;
+    history.replaceState(null, '', location.pathname);
+    setTimeout(() => { abrirCompras(); revisarCompras(); }, 300);
+  })();
 
   // Link privado que manda el vendedor por WhatsApp: /?compra=TOKEN
   (function tomarCompraDeLaUrl() {
@@ -1475,11 +1642,11 @@
       $t('trust-figura').textContent = d.figura || '';
       $t('trust-vende').hidden = false;
     }
-    $t('trust-plazo').textContent = 'Revisamos tu pago en menos de ' + horasTxt(d.horasAprobacion) + '. Si no, puedes reclamar desde «Mis compras».';
+    $t('trust-plazo').textContent = 'Confirmación del pago en menos de ' + horasTxt(d.horasAprobacion) + '.';
     const c = d.cifras || {};
     const items = [];
     if (c.entregadas > 0) items.push(['' + c.entregadas.toLocaleString('es'), c.entregadas === 1 ? 'compra entregada' : 'compras entregadas']);
-    if (c.aprobacion && c.aprobacion.muestras >= 3) items.push([duracionTexto(c.aprobacion.mediana), 'tarda normalmente en aprobarse un pago (últimos 90 días)']);
+    if (c.aprobacion && c.aprobacion.muestras >= 3) items.push([duracionTexto(c.aprobacion.mediana), 'tiempo medio de confirmación']);
     if (c.productores > 0) items.push(['' + c.productores, c.productores === 1 ? 'productor activo' : 'productores activos']);
     if (items.length) {
       $t('trust-cifras').innerHTML = items.map(i => '<li><strong>' + escapeHtml(i[0]) + '</strong><span>' + escapeHtml(i[1]) + '</span></li>').join('');

@@ -99,17 +99,17 @@
       <main id="track-grid" class="track-grid"><div class="skel-wrap skel-tarjetas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-card"></div><div class="skel skel-card"></div><div class="skel skel-card"></div><div class="skel skel-card"></div><div class="skel skel-card"></div><div class="skel skel-card"></div><div class="skel skel-card"></div><div class="skel skel-card"></div></div></main>
       <div id="empty-state" class="empty-state" style="display:none;">
         <h3 id="empty-state-title">Aún no hay pistas</h3>
-        <p id="empty-state-text">Está preparando el primer set. Vuelve pronto.</p>
+        <p id="empty-state-text">Nuevos beats muy pronto.</p>
       </div>
       <div id="no-results-state" class="empty-state" style="display:none;">
         <h3>Sin resultados</h3>
-        <p>No hay nada que coincida con tu búsqueda.</p>
+        <p>Sin resultados para tu búsqueda.</p>
       </div>
     </div>
   </div>
 
   <section class="trust" id="trust" aria-labelledby="trust-title" hidden>
-    <h2 class="trust-title" id="trust-title">Compra con confianza</h2>
+    <h2 class="trust-title" id="trust-title">Compra segura</h2>
     <div class="trust-grid">
       <div class="trust-card" id="trust-vende" hidden>
         <h3>Quién vende</h3>
@@ -117,22 +117,22 @@
         <p class="trust-muted" id="trust-figura"></p>
       </div>
       <div class="trust-card" id="trust-cifras-card" hidden>
-        <h3>En números reales</h3>
+        <h3>En cifras</h3>
         <ul class="trust-cifras" id="trust-cifras"></ul>
       </div>
       <div class="trust-card">
-        <h3>Lo que te garantizamos</h3>
+        <h3>Garantías</h3>
         <ul class="trust-list">
-          <li id="trust-plazo">Revisamos tu pago dentro del plazo indicado. Si no, puedes reclamar desde «Mis compras».</li>
-          <li>Al pagar recibes un <strong>comprobante del pedido</strong> en PDF con un código propio.</li>
-          <li>Cada compra aprobada trae una <strong>licencia con código</strong> que cualquiera puede <a href="/verify">comprobar aquí</a>.</li>
-          <li>Los productores firman que cada beat es suyo, y cada obra tiene un registro de autoría con fecha.</li>
-          <li>Devoluciones y condiciones: <a href="/terminos">Términos y condiciones</a>.</li>
+          <li id="trust-plazo">Confirmamos tu pago dentro del plazo indicado.</li>
+          <li><strong>Comprobante de pedido</strong> en PDF con código propio.</li>
+          <li><strong>Licencia con código</strong> <a href="/verify">verificable</a> en cada compra.</li>
+          <li>Beats originales, con autoría registrada y verificación de originalidad.</li>
+          <li><a href="/terminos">Términos y condiciones</a>.</li>
         </ul>
       </div>
       <div class="trust-card" id="trust-contacto-card" hidden>
-        <h3>¿Dudas antes de comprar?</h3>
-        <p>Escríbenos y te respondemos personalmente.</p>
+        <h3>¿Tienes dudas?</h3>
+        <p>Atención personalizada.</p>
         <a class="trust-wa" id="trust-wa" href="#" target="_blank" rel="noopener">WhatsApp</a>
       </div>
     </div>
@@ -140,7 +140,7 @@
 
   <footer class="footer-note">
     <div>PREVIEWS PROTEGIDOS · COMPRA TU LICENCIA · CONTENIDO ORIGINAL</div>
-    <div class="footer-verify"><a href="/verify">Verificar una licencia comprada aquí</a></div>
+    <div class="footer-verify"><a href="/verify">Verificar una licencia</a></div>
     <nav class="footer-legal" aria-label="Información legal">
       <a href="/terminos">Términos y condiciones</a>
       <a href="/privacidad">Política de privacidad</a>
@@ -210,6 +210,8 @@
         </div>
       </div>
       <p class="desc-text" id="desc-text"></p>
+      <ul class="desc-trust" id="desc-trust" hidden></ul>
+      <div class="desc-reviews" id="desc-reviews" hidden></div>
       <div class="desc-actions">
         <button type="button" class="btn-primary-wide" id="desc-play">Reproducir</button>
         <button type="button" class="btn-outline-wide" id="desc-share">Compartir</button>
@@ -227,12 +229,13 @@
       <div class="modal-license-list" id="modal-license-list"></div>
 
       <div class="modal-price" id="modal-price" style="display:none;">—</div>
+      <a class="modal-contract-link" id="modal-contract-link" href="#" target="_blank" rel="noopener" hidden>Ver contrato de licencia (PDF)</a>
 
       <p class="modal-instructions" id="modal-instructions" style="display:none;">
-        Transfiere el monto exacto a una de estas cuentas, completa tus datos y sube la foto del comprobante. Cuando el vendedor confirme el pago, descargas tu beat y tu licencia aquí mismo, en «Mis compras».
+        Transfiere el importe exacto a una de estas cuentas y adjunta el comprobante. Tu beat y tu licencia estarán disponibles en «Mis compras» al confirmarse el pago.
       </p>
 
-      <button type="button" class="modal-terms-link" id="modal-terms-link">Leer antes de comprar</button>
+      <button type="button" class="modal-terms-link" id="modal-terms-link">Términos de licencia</button>
 
       <div class="modal-accounts" id="modal-accounts"></div>
 
@@ -243,21 +246,26 @@
 
       <form id="order-form">
         <div class="modal-field">
-          <label for="buyer-name-input">Tu nombre (sale en tu licencia)</label>
-          <input type="text" id="buyer-name-input" placeholder="¿Cómo te llamas?" maxlength="100" autocomplete="name" required>
+          <label for="buyer-name-input">Nombre artístico o legal (figura en la licencia)</label>
+          <input type="text" id="buyer-name-input" placeholder="Tu nombre" maxlength="100" autocomplete="name" required>
         </div>
         <div class="modal-field">
-          <label for="buyer-phone-input">Tu WhatsApp (para que te contacten)</label>
+          <label for="buyer-phone-input">WhatsApp</label>
           <input type="tel" id="buyer-phone-input" placeholder="Ej: 53512345678" maxlength="40" inputmode="tel" autocomplete="tel" required>
           <span class="modal-field-error" id="buyer-phone-error"></span>
+        </div>
+        <div class="modal-field">
+          <label for="tx-ref-input">Número de la transacción</label>
+          <input type="text" id="tx-ref-input" placeholder="Ej: TMW123456789" maxlength="120" autocomplete="off" required>
+          <span class="modal-field-hint">Transfermóvil, EnZona, banco o hash de la transacción en cripto.</span>
         </div>
 
         <div class="modal-receipt-step">
           <label class="modal-receipt-label" for="receipt-input">
-            Foto del comprobante de la transferencia
+            Comprobante de pago
           </label>
           <label class="modal-receipt-drop" id="receipt-drop">
-            <span id="receipt-drop-text">Toca para subir la foto del comprobante</span>
+            <span id="receipt-drop-text">Adjuntar comprobante</span>
             <img id="receipt-preview" style="display:none;" alt="Comprobante subido">
             <input type="file" id="receipt-input" accept="image/*">
           </label>
@@ -265,7 +273,7 @@
 
         <label class="modal-terms-check" id="vip-public-wrap" style="display:none;">
           <input type="checkbox" id="vip-public-input">
-          <span>Autorizo que mi nombre aparezca en <strong>Beats VIP</strong> como dueño de este beat (si no marcas, sale como «Dueño anónimo»).</span>
+          <span>Autorizo que mi nombre figure en <strong>Beats VIP</strong> como titular de este beat.</span>
         </label>
 
         <label class="modal-terms-check">
@@ -274,20 +282,20 @@
         </label>
 
         <button type="submit" class="modal-whatsapp-btn" id="order-submit-btn" disabled>
-          Completa tus datos y el comprobante
+          Completa tus datos
         </button>
       </form>
 
       <div class="modal-success" id="modal-success" style="display:none;">
         <div class="modal-success-icon">✓</div>
-        <div class="modal-success-title">Comprobante enviado</div>
-        <p class="modal-success-text">Ya quedó registrado. Ahora confírmalo por WhatsApp con un solo toque:</p>
+        <div class="modal-success-title">Pedido recibido</div>
+        <p class="modal-success-text">Confirma tu pedido por WhatsApp:</p>
         <p class="modal-success-text modal-order-code" id="modal-order-code" hidden></p>
         <a class="modal-whatsapp-btn" id="modal-whatsapp-btn" href="#" target="_blank" rel="noopener">
           Avisar por WhatsApp
         </a>
-        <p class="modal-success-text modal-success-note">Cuando el vendedor apruebe tu pago, tu beat y tu licencia en PDF se descargan <strong>aquí mismo</strong>, en «Mis compras». No cierres la página o vuelve a entrar desde este mismo teléfono.</p>
-        <a class="btn-outline-wide btn-outline-link" id="modal-receipt-btn" href="#" target="_blank" rel="noopener" hidden>Descargar comprobante del pedido (PDF)</a>
+        <p class="modal-success-text modal-success-note">Al confirmarse el pago, tu beat y tu licencia estarán en <strong>«Mis compras»</strong>, en este mismo dispositivo.</p>
+        <a class="btn-outline-wide btn-outline-link" id="modal-receipt-btn" href="#" target="_blank" rel="noopener" hidden>Comprobante del pedido (PDF)</a>
         <button type="button" class="btn-outline-wide" id="modal-see-purchases-btn">Ver mis compras</button>
       </div>
     </div>
@@ -353,7 +361,7 @@
       <button class="modal-close" id="purchases-close-btn" aria-label="Cerrar">&times;</button>
       <div class="modal-eyebrow">TUS COMPRAS EN ESTE DISPOSITIVO</div>
       <h3 class="terms-title">Mis compras</h3>
-      <p class="purchases-hint">Se actualiza sola. Cuando el vendedor apruebe tu pago, la descarga empieza automáticamente.</p>
+      <p class="purchases-hint">Tus descargas se habilitan al confirmarse cada pago.</p>
       <div id="purchases-list"></div>
     </div>
   </div>

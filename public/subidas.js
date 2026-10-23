@@ -135,7 +135,7 @@
           body: JSON.stringify({ kind: kind, name: file.name, size: file.size }),
         });
       } catch (e) {
-        throw errorSubida('Sin conexión. Revisa tu internet e intenta de nuevo.', 0);
+        throw errorSubida('Sin conexión. Inténtalo de nuevo.', 0);
       }
       if (!nuevo.res.ok) throw errorSubida(nuevo.data.error || ('No se pudo empezar a subir (código ' + nuevo.res.status + ').'), nuevo.res.status);
       id = nuevo.data.id; recibido = nuevo.data.received || 0; trozo = nuevo.data.chunkSize || trozo;
@@ -165,32 +165,32 @@
         recibido = r.data.received;
         if (r.data.busy) {
           ocupado++;
-          if (ocupado > 40) throw errorSubida('El servidor sigue ocupado con este archivo. Espera un minuto y vuelve a pulsar el botón.', 409);
+          if (ocupado > 40) throw errorSubida('El archivo se está procesando. Inténtalo en un minuto.', 409);
           await esperar(1500);
         }
         continue;
       }
-      if (r.status === 401) throw errorSubida('Tu sesión expiró. Vuelve a entrar y pulsa el botón otra vez: la subida sigue donde quedó.', 401);
+      if (r.status === 401) throw errorSubida('Tu sesión expiró. Inicia sesión de nuevo para continuar la subida.', 401);
       if (r.status === 404) {
         olvidar(kind, file);
-        throw errorSubida(r.data.error || 'La subida se perdió en el servidor. Vuelve a intentarlo.', 404);
+        throw errorSubida(r.data.error || 'La subida no se completó. Inténtalo de nuevo.', 404);
       }
-      if (r.status === 413) throw errorSubida(r.data.error || 'El servidor no aceptó el tamaño del trozo.', 413);
-      if (r.status === 507) throw errorSubida(r.data.error || 'El servidor se quedó sin espacio. Avísale al administrador.', 507);
+      if (r.status === 413) throw errorSubida(r.data.error || 'Error de transferencia. Inténtalo de nuevo.', 413);
+      if (r.status === 507) throw errorSubida(r.data.error || 'Espacio de almacenamiento insuficiente.', 507);
       // sin conexión, tiempo agotado, error del servidor o trozo incompleto: se espera y se reintenta.
       // Con conexión lenta el trozo se achica (hasta 256 KB) para que cada parte llegue a tiempo.
       if (r.status === 0 || r.status === 400) { trozo = Math.max(256 * 1024, Math.floor(trozo / 2)); rapidos = 0; }
       fallos++;
       // un archivo enorme tarda horas: se aguantan cortes largos (apagones, wifi que se cae) antes de rendirse
-      if (fallos > (file.size > 1024 * 1024 * 1024 ? 60 : 8)) throw errorSubida('Se cortó la conexión varias veces. Revisa tu internet y vuelve a pulsar el botón: la subida sigue donde quedó.', 0);
+      if (fallos > (file.size > 1024 * 1024 * 1024 ? 60 : 8)) throw errorSubida('Conexión inestable. Inténtalo de nuevo: la subida continuará donde quedó.', 0);
       if (op.alReintentar) op.alReintentar(fallos);
       await esperar(Math.min(30000, 1500 * Math.pow(2, fallos - 1)));
       if (op.senal && op.senal.aborted) throw errorSubida('Subida pausada.', -1);
       try {
         var estado = await pedirJSON('/api/uploads/' + id);
         if (estado.res.ok && typeof estado.data.received === 'number') recibido = estado.data.received;
-        else if (estado.res.status === 404) { olvidar(kind, file); throw errorSubida('La subida se perdió en el servidor. Vuelve a intentarlo.', 404); }
-        else if (estado.res.status === 401) throw errorSubida('Tu sesión expiró. Vuelve a entrar y pulsa el botón otra vez: la subida sigue donde quedó.', 401);
+        else if (estado.res.status === 404) { olvidar(kind, file); throw errorSubida('La subida no se completó. Inténtalo de nuevo.', 404); }
+        else if (estado.res.status === 401) throw errorSubida('Tu sesión expiró. Inicia sesión de nuevo para continuar la subida.', 401);
       } catch (e) {
         if (e.subida) throw e;
       }

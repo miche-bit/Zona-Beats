@@ -18,7 +18,7 @@
 
       <div id="login-mode">
         <h1>Zona Beats</h1>
-        <p>Entra con tu cuenta de productor.</p>
+        <p>Portal de productores.</p>
         <div class="field">
           <label for="email-input">Correo</label>
           <input type="email" id="email-input" placeholder="tucorreo@ejemplo.com">
@@ -40,7 +40,7 @@
 
       <div id="register-mode" style="display:none;">
         <h1>Crear cuenta</h1>
-        <p>Regístrate como productor. El administrador revisa tu cuenta antes de activarla.</p>
+        <p>Solicita tu alta como productor. Cada cuenta se revisa antes de activarse.</p>
         <div class="field">
           <label for="reg-name">Nombre artístico</label>
           <input type="text" id="reg-name" placeholder="Cómo quieres que te vean">
@@ -52,7 +52,7 @@
         <div class="field">
           <label for="reg-phone">Tu teléfono (WhatsApp)</label>
           <input type="tel" id="reg-phone" placeholder="Ej: 53512345678" inputmode="tel">
-          <span class="field-hint">El administrador te escribe aquí para aprobar tu cuenta.</span>
+          <span class="field-hint">Te contactaremos por este número.</span>
         </div>
         <div class="field">
           <label for="reg-password">Contraseña</label>
@@ -60,7 +60,7 @@
             <input type="password" id="reg-password" placeholder="Mínimo 6 caracteres" autocomplete="new-password">
             <button type="button" class="btn-show-pass" data-target="reg-password">Mostrar</button>
           </div>
-          <span class="field-hint">Toca «Mostrar» para revisar que la escribiste bien.</span>
+          
         </div>
         <div class="field">
           <label for="reg-ref">Código de quien te invitó (opcional)</label>
@@ -73,7 +73,7 @@
         <button class="btn-primary" id="register-btn">Crear cuenta</button>
         <div class="error-msg" id="register-error"></div>
         <div class="register-ok" id="register-ok">
-          Cuenta creada. El administrador tiene que aprobarla antes de que puedas entrar. Te avisará cuando esté lista.
+          Solicitud recibida. Te avisaremos en cuanto tu cuenta esté activa.
         </div>
         <p class="switch-mode">¿Ya tienes cuenta? <button type="button" id="go-login">Entrar</button></p>
       </div>
@@ -134,7 +134,7 @@
 
         <div class="panel">
           <h2>Invita productores</h2>
-          <p class="panel-hint" id="ref-hint">Comparte tu enlace. Cuando el administrador apruebe a los productores que invitaste, ganas un bono.</p>
+          <p class="panel-hint" id="ref-hint">Invita a otros productores con tu enlace y gana un bono por cada alta aprobada.</p>
           <div class="ref-box">
             <input type="text" id="ref-link" aria-label="Tu enlace de referido" readonly>
             <button type="button" class="btn-secondary-p" id="ref-copy">Copiar</button>
@@ -147,7 +147,7 @@
       <section class="tab-page" data-page="subir">
         <div class="panel">
           <h2>Subir nuevo beat</h2>
-          <p class="panel-hint">Tu beat entra en revisión y aparecerá en la tienda solo cuando el administrador lo apruebe.</p>
+          <p class="panel-hint">Cada beat pasa por revisión antes de publicarse.</p>
           <p class="plan-rules" id="plan-format-note"></p>
           <form id="upload-form">
             <div class="upload-grid">
@@ -162,7 +162,7 @@
                 </div>
                 <div class="field">
                   <label for="description-input">Descripción</label>
-                  <textarea id="description-input" rows="3" maxlength="600" placeholder="BPM, tonalidad, a qué suena… (los compradores lo ven al tocar «Descripción»)"></textarea>
+                  <textarea id="description-input" rows="3" maxlength="600" placeholder="BPM, tonalidad, vibra, referencias…"></textarea>
                 </div>
                 <div class="field checkbox-field" id="playlist-toggle-wrap">
                   <label class="checkbox-label">
@@ -183,22 +183,22 @@
 
                 <div id="sale-fields">
                   <div id="license-mode-fields">
-                    <p class="panel-hint compact">Pon precio a las licencias que quieras vender. Cada licencia con precio exige su archivo.</p>
+                    <p class="panel-hint compact">Define el precio de cada licencia que ofreces.</p>
                     <div class="field lic-field" data-lic="basic">
                       <label for="price-basic-input">Básica (MP3) — CUP</label>
                       <input type="text" id="price-basic-input" inputmode="decimal" placeholder="Ej: 500">
                     </div>
                     <div class="field lic-field" data-lic="premium">
                       <label for="price-premium-input">Premium (MP3 + WAV) — CUP</label>
-                      <input type="text" id="price-premium-input" inputmode="decimal" placeholder="Si pones precio, sube el WAV">
+                      <input type="text" id="price-premium-input" inputmode="decimal" placeholder="Requiere WAV">
                     </div>
                     <div class="field lic-field" data-lic="unlimited">
                       <label for="price-unlimited-input">Ilimitada (MP3 + WAV + STEMS) — CUP</label>
-                      <input type="text" id="price-unlimited-input" inputmode="decimal" placeholder="Si pones precio, sube WAV y STEMS">
+                      <input type="text" id="price-unlimited-input" inputmode="decimal" placeholder="Requiere WAV y STEMS">
                     </div>
                   </div>
                   <div id="exclusive-mode-fields" style="display:none;">
-                    <p class="panel-hint exclusive-warning">Al venderse, el beat se retira de la tienda para siempre y queda solo para ese comprador. Exige WAV y STEMS.</p>
+                    <p class="panel-hint exclusive-warning">Venta única: el beat sale de la tienda y pasa a ser del artista que lo compre. Se entrega con WAV y STEMS.</p>
                     <div class="field">
                       <label for="price-exclusive-input">Precio exclusivo — CUP</label>
                       <input type="text" id="price-exclusive-input" inputmode="decimal" placeholder="Ej: 5000">
@@ -213,7 +213,7 @@
                     <span id="audio-drop-label">MP3 320 kbps · máx 250 MB</span>
                     <input type="file" id="audio-input" accept=".mp3,audio/mpeg" required>
                   </label>
-                  <span class="field-hint">Con este archivo se crea el preview que escucha el público (y el MP3 que recibe el comprador).</span>
+                  <span class="field-hint">De este archivo salen el preview y el MP3 de entrega.</span>
                 </div>
                 <div class="field" id="wav-stems-field">
                   <label>Archivo WAV <span class="req-tag" id="wav-req" style="display:none;">obligatorio</span></label>
@@ -247,11 +247,31 @@
                 <div class="upload-progress-label" id="upload-progress-label">Subiendo… 0%</div>
                 <button type="button" class="btn-link-p" id="upload-cancel">Pausar</button>
               </div>
-              <p class="panel-hint compact">Si se corta la conexión, la subida sigue sola. Si cierras la página, vuelve a elegir los mismos archivos y pulsa el botón: sigue donde quedó.</p>
+              <p class="panel-hint compact">Si la conexión se interrumpe, la subida continúa donde quedó.</p>
             </div>
+            <fieldset class="cid-preguntas">
+              <legend>Originalidad y Content ID <span class="req-tag">obligatorio</span></legend>
+              <p class="panel-hint compact">Un beat registrado en Content ID (YouTube, Meta, TikTok, SoundCloud, distribuidoras u otra plataforma) genera reclamos a los artistas que lo licencian. Todo beat pasa por una verificación de originalidad antes de publicarse.</p>
+              <div class="cid-q">
+                <span id="q-prev">¿Este beat se ha publicado o vendido antes?</span>
+                <div class="cid-opts" role="radiogroup" aria-labelledby="q-prev">
+                  <label><input type="radio" name="publicado-antes" value="no"> No, es inédito</label>
+                  <label><input type="radio" name="publicado-antes" value="si"> Sí</label>
+                </div>
+                <input type="text" id="publicado-donde" maxlength="200" placeholder="¿Dónde? Ej: BeatStars, YouTube" hidden aria-label="Dónde se publicó antes">
+              </div>
+              <div class="cid-q">
+                <span id="q-cid">¿Está registrado en Content ID en alguna plataforma o distribuidora?</span>
+                <div class="cid-opts" role="radiogroup" aria-labelledby="q-cid">
+                  <label><input type="radio" name="content-id" value="no"> No</label>
+                  <label><input type="radio" name="content-id" value="si"> Sí</label>
+                </div>
+                <p class="field-hint warn" id="cid-aviso" hidden>No se aceptan beats registrados en Content ID en ninguna plataforma.</p>
+              </div>
+            </fieldset>
             <label class="checkbox-label legal-accept" for="declara-autoria">
               <input type="checkbox" id="declara-autoria">
-              <span>Declaro que este beat es mío y que tengo los derechos de todo lo que usa (samples, voces, loops). <a href="/terminos" target="_blank" rel="noopener">Ver términos</a></span>
+              <span>Declaro ser el autor de este beat y tener los derechos de todo su contenido (samples, voces, loops). <a href="/terminos" target="_blank" rel="noopener">Ver términos</a></span>
             </label>
             <button type="submit" class="btn-primary" id="upload-btn">Enviar a revisión</button>
           </form>
@@ -265,8 +285,16 @@
             <h2>Tus beats</h2>
             <span class="plan-chip ghost" id="beats-count"></span>
           </div>
-          <p class="panel-hint">Puedes eliminar cualquier beat que no tenga ventas aprobadas.</p>
+          <p class="panel-hint">Los beats sin ventas pueden eliminarse.</p>
           <div id="track-list"><div class="skel-wrap skel-filas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div></div></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header-row-p">
+            <h2>Reseñas de tus compradores</h2>
+            <span class="plan-chip ghost" id="rev-count"></span>
+          </div>
+          <p class="panel-hint">Opiniones de artistas que licenciaron tus beats.</p>
+          <div id="rev-list"></div>
         </div>
       </section>
 
@@ -274,13 +302,13 @@
       <section class="tab-page" data-page="packs">
         <div class="panel pk-lock" id="packs-lock" hidden>
           <h2>Sample Packs</h2>
-          <p>Vender paquetes de sonidos (loops, drums, one-shots, vocales) está incluido en los planes <strong>Pro</strong> y <strong>Studio</strong>.</p>
+          <p>La venta de Sample Packs está incluida en los planes <strong>Pro</strong> y <strong>Studio</strong>.</p>
           <button type="button" class="btn-primary" id="packs-ver-planes">Ver planes</button>
         </div>
         <div id="packs-zona" hidden>
           <div class="panel">
             <h2>Subir Sample Pack</h2>
-            <p class="panel-hint">Sube tus sonidos en un archivo comprimido, una demo para que se escuche y una portada. El pack entra en revisión y sale en la sección «Sample Packs» de la tienda cuando el administrador lo apruebe. No cuenta para el límite de beats de tu plan.</p>
+            <p class="panel-hint">Archivo comprimido, demo y portada. Cada pack pasa por revisión y no cuenta para el límite de beats de tu plan.</p>
             <div id="packs-form"></div>
           </div>
           <div class="panel">
@@ -288,7 +316,7 @@
               <h2>Tus Sample Packs</h2>
               <span class="plan-chip ghost" id="packs-count"></span>
             </div>
-            <p class="panel-hint">Puedes eliminar un pack mientras no tenga compras.</p>
+            <p class="panel-hint">Los packs sin ventas pueden eliminarse.</p>
             <div id="packs-list"></div>
           </div>
         </div>
@@ -301,16 +329,16 @@
             <h2>Certificados de registro</h2>
             <span class="plan-chip ghost" id="reg-count"></span>
           </div>
-          <p class="panel-hint">Cada beat y cada pack que subes queda registrado a tu nombre, con la fecha y la huella digital de cada archivo. El certificado es tu prueba de autoría: cualquiera puede comprobarlo en <a href="/verify" target="_blank" rel="noopener">/verify</a>. Tú sigues siendo el dueño de tu música; el registro no se puede cambiar ni borrar, aunque el beat salga de la tienda.</p>
+          <p class="panel-hint">Cada obra queda registrada a tu nombre con fecha y huella digital. El certificado acredita tu autoría y puede <a href="/verify" target="_blank" rel="noopener">verificarse públicamente</a>. Tu música sigue siendo tuya.</p>
           <div id="reg-list" tabindex="0" role="region" aria-label="Certificados de registro"></div>
         </div>
         <div class="panel">
           <div class="panel-header-row-p">
-            <h2>Lo que hizo el administrador</h2>
+            <h2>Registro de actividad</h2>
             <button type="button" class="btn-link-p" id="act-download" disabled>Descargar</button>
           </div>
-          <p class="panel-hint">Cada vez que el administrador descarga tus archivos, cambia tus precios o datos, aprueba o rechaza algo tuyo, borra ventas o te paga, queda anotado aquí con fecha y hora. Este registro no se puede borrar.</p>
-          <div id="act-list" tabindex="0" role="region" aria-label="Lo que hizo el administrador"></div>
+          <p class="panel-hint">Toda acción de la administración sobre tu cuenta y tus obras, con fecha y hora. Este registro es permanente.</p>
+          <div id="act-list" tabindex="0" role="region" aria-label="Registro de actividad"></div>
         </div>
       </section>
 
@@ -330,7 +358,7 @@
         </div>
         <div class="panel">
           <h2>Movimientos de tu cuenta</h2>
-          <p class="panel-hint compact">Todo lo que entra y sale de tu saldo: ventas, bonos, planes y retiros, del más nuevo al más viejo. Borrar una entrada solo la quita de esta lista: tu saldo no cambia.</p>
+          <p class="panel-hint compact">Ventas, bonos, planes y retiros.</p>
           <div class="mov-filters" id="mov-filters">
             <button type="button" class="mov-chip active" data-tipo="">Todos</button>
             <button type="button" class="mov-chip" data-tipo="venta">Ventas</button>
@@ -384,7 +412,7 @@
       <section class="tab-page" data-page="perfil">
         <div class="panel">
           <h2>Tu perfil público</h2>
-          <p class="panel-hint">Así te ven los compradores en la sección "Productores" de la tienda.</p>
+          <p class="panel-hint">Tu perfil público en la tienda.</p>
           <div class="profile-row">
             <div class="avatar-box">
               <img id="avatar-preview" alt="" style="display:none;">
@@ -428,7 +456,7 @@
 
         <div class="panel">
           <h2>Cambiar contraseña</h2>
-          <p class="panel-hint">Al cambiarla se cierra tu sesión en los otros teléfonos o computadoras.</p>
+          <p class="panel-hint">Se cerrará la sesión en tus otros dispositivos.</p>
           <div class="cfg-grid-p">
             <div class="field">
               <label for="pass-current">Contraseña actual</label>
@@ -471,7 +499,7 @@
         <span class="field-hint" id="withdraw-amount-hint"></span>
       </div>
       <div class="w-summary" id="w-summary"></div>
-      <button type="button" class="btn-primary" id="withdraw-confirm">Confirmar retiro y avisar al administrador</button>
+      <button type="button" class="btn-primary" id="withdraw-confirm">Solicitar retiro</button>
       <p class="panel-hint center" id="withdraw-foot"></p>
     </div>
   </div>
@@ -495,7 +523,7 @@
 
       <div class="pay-balance" id="plan-balance-box" style="display:none;">
         <div class="pay-balance-title">Pagar con tu saldo</div>
-        <p class="panel-hint compact" style="margin:0 0 10px;">Se descuenta de lo que ganaste en la plataforma y el plan se activa al instante, sin retirar ni mandar comprobante.</p>
+        <p class="panel-hint compact" style="margin:0 0 10px;">Se descuenta de tu saldo y el plan se activa al instante.</p>
         <div class="field" style="margin-bottom:10px;">
           <label for="plan-wallet">¿De qué saldo?</label>
           <select id="plan-wallet" class="select-p"></select>
@@ -520,13 +548,13 @@
       <div class="field">
         <label>Foto del comprobante</label>
         <label class="file-drop" id="plan-receipt-drop">
-          <span id="plan-receipt-label">Toca para subir la captura de la transferencia</span>
+          <span id="plan-receipt-label">Adjuntar comprobante de pago</span>
           <input type="file" id="plan-receipt-input" accept=".jpg,.jpeg,.png,.webp,image/*">
         </label>
       </div>
 
       <button type="button" class="btn-primary" id="plan-send-btn">Enviar comprobante</button>
-      <p class="panel-hint" style="margin:10px 0 0;text-align:center;">El administrador revisa el pago y activa tu plan. Verás el resultado aquí mismo.</p>
+      <p class="panel-hint" style="margin:10px 0 0;text-align:center;">Tu plan se activará al confirmarse el pago.</p>
     </div>
   </div>
 
@@ -550,7 +578,7 @@
 
       <div class="pay-balance" id="hot-balance-box" style="display:none;">
         <div class="pay-balance-title">Pagar con tu saldo</div>
-        <p class="panel-hint compact" style="margin:0 0 10px;">Se descuenta de lo que ganaste y tu beat sale en la portada al instante.</p>
+        <p class="panel-hint compact" style="margin:0 0 10px;">Se descuenta de tu saldo y el beat sale en portada al instante.</p>
         <div class="field" style="margin-bottom:10px;">
           <label for="hot-wallet">¿De qué saldo?</label>
           <select id="hot-wallet" class="select-p"></select>
@@ -573,12 +601,12 @@
       <div class="field">
         <label for="hot-receipt-input">Foto del comprobante</label>
         <label class="file-drop" id="hot-receipt-drop">
-          <span id="hot-receipt-label">Toca para subir la captura de la transferencia</span>
+          <span id="hot-receipt-label">Adjuntar comprobante de pago</span>
           <input type="file" id="hot-receipt-input" accept=".jpg,.jpeg,.png,.webp,image/*">
         </label>
       </div>
       <button type="button" class="btn-primary" id="hot-send-btn">Enviar comprobante</button>
-      <p class="panel-hint" style="margin:10px 0 0;text-align:center;">Cuando el administrador apruebe el pago, tu beat sale en la portada.</p>
+      <p class="panel-hint" style="margin:10px 0 0;text-align:center;">Tu beat saldrá en portada al confirmarse el pago.</p>
     </div>
   </div>
 

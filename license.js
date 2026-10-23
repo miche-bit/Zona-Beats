@@ -177,6 +177,10 @@ function buildLicensePdf(data) {
   const terms = LICENSE_TERMS[data.licenseType] || [];
 
   const blocks = [
+    ...(data.ejemplo ? [
+      { text: 'MODELO DE CONTRATO - NO ES UNA LICENCIA VÁLIDA', size: 12, bold: true, gap: 4, color: '0.75 0.10 0.20' },
+      { text: 'Así será el documento que recibirás al comprar. Tu nombre, el número de licencia y el hash se completan cuando el vendedor aprueba tu pago.', size: 9, gap: 12, color: '0.45 0.45 0.50' },
+    ] : []),
     { text: 'CERTIFICADO DE LICENCIA', size: 18, bold: true, gap: 2 },
     { text: data.platformName || 'Zona Beats', size: 11, gap: 14, color: '0.45 0.45 0.50' },
     { rule: true, gap: 16 },
@@ -282,4 +286,35 @@ function buildPedidoPdf(data) {
   return buildPdf(blocks);
 }
 
-module.exports = { buildLicensePdf, buildRegistroPdf, buildPedidoPdf, LICENSE_LABELS };
+// Carta para impugnar un reclamo de derechos de autor en cualquier plataforma (Content ID y equivalentes)
+function buildCartaContentIdPdf(data) {
+  const lic = LICENSE_LABELS[data.licenseType] || data.licenseType;
+  const fecha = formatDate(data.createdAt);
+  const blocks = [
+    { text: 'CARTA DE LICENCIA PARA RECLAMOS DE DERECHOS DE AUTOR', size: 15, bold: true, gap: 2 },
+    { text: 'Content ID / Rights Manager / Copyright claim - License letter', size: 10, gap: 4, color: '0.45 0.45 0.50' },
+    { text: data.platformName || 'Zona Beats', size: 11, gap: 14, color: '0.45 0.45 0.50' },
+    { rule: true, gap: 14 },
+    { text: 'A quien corresponda (YouTube, Facebook, Instagram, TikTok, SoundCloud, Twitch, Spotify, Apple Music, distribuidoras digitales y cualquier otra plataforma):', size: 11, gap: 8 },
+    { text: `${data.platformName || 'Zona Beats'} certifica que ${data.buyerName} tiene la ${lic} número ${data.certificateId} del ${data.licenseType === 'pack' ? 'Sample Pack' : 'beat'} «${data.trackTitle}», del productor ${data.producerName}, emitida el ${fecha}.`, size: 11, gap: 8 },
+    data.monetiza
+      ? { text: 'Esta licencia autoriza a distribuir y MONETIZAR en plataformas digitales y redes sociales la obra creada con el beat. Cualquier reclamo de derechos de autor sobre esa obra que provenga del beat licenciado, hecho por Content ID o por el sistema de identificación de contenido de cualquier plataforma, no tiene fundamento y debe liberarse.', size: 11, gap: 8 }
+      : { text: 'Esta licencia autoriza a distribuir la obra creada con el beat, pero no a monetizarla. El titular tiene derecho a mantener su publicación; para monetizar necesita una licencia superior.', size: 11, gap: 8 },
+    { text: 'English: This letter certifies that the person named above holds a valid ' + (data.monetiza ? 'license that allows distribution and monetization' : 'license that allows distribution (not monetization)') + ` of works made with the beat "${data.trackTitle}" (license ${data.certificateId}). Verify it at the link below.`, size: 9, gap: 12, color: '0.35 0.35 0.40' },
+    { text: 'COMPROBACIÓN', size: 9, bold: true, gap: 8, color: '0.45 0.45 0.50' },
+    { text: 'La licencia se puede comprobar en línea:', size: 10, gap: 4 },
+    { text: data.verifyUrl, size: 10, gap: 6, color: '0.10 0.35 0.75' },
+    { text: `Hash SHA-256 de la licencia: ${(data.certificateHash || '').slice(0, 32)}`, size: 9, gap: 1 },
+    { text: (data.certificateHash || '').slice(32), size: 9, gap: 12 },
+    { text: 'CÓMO IMPUGNAR EL RECLAMO', size: 9, bold: true, gap: 8, color: '0.45 0.45 0.50' },
+    { text: '1. Abre el aviso de derechos de autor del video o de la canción y elige impugnar o disputar el reclamo.', size: 10, gap: 2, indent: 6 },
+    { text: '2. Como motivo, elige que tienes una licencia o permiso del titular.', size: 10, gap: 2, indent: 6 },
+    { text: `3. Escribe el número de licencia ${data.certificateId} y pega el enlace de comprobación.`, size: 10, gap: 2, indent: 6 },
+    { text: '4. Avísanos desde «Mis compras» > «¿Te saltó un reclamo de derechos de autor?» para que hablemos con el productor.', size: 10, gap: 12, indent: 6 },
+    { rule: true, gap: 12 },
+    { text: `Contacto de la tienda: ${data.contacto || 'WhatsApp de la tienda'}${data.titular ? ' · Titular: ' + data.titular : ''}`, size: 9, gap: 4, color: '0.35 0.35 0.40' },
+  ];
+  return buildPdf(blocks);
+}
+
+module.exports = { buildLicensePdf, buildRegistroPdf, buildPedidoPdf, buildCartaContentIdPdf, LICENSE_LABELS };

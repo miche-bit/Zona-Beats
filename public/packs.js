@@ -18,6 +18,17 @@
   };
   const FORMATOS = { pack: ['.zip', '.rar', '.7z'], audio: ['.mp3', '.wav'], cover: ['.jpg', '.jpeg', '.png', '.webp'] };
 
+  // Verificación de originalidad (obligatoria antes de aprobar lo de un productor)
+  function pintarOriginalidad(p, admin) {
+    const o = p.originalidad;
+    if (!o) return '';
+    if (o.estado === 'pendiente') return '<div class="pk-meta pk-proc">Verificando originalidad de la demo…</div>';
+    if (o.estado === 'limpio') return '<div class="pk-meta pk-ok">✓ Originalidad verificada' + (o.servicio ? ' (catálogo y ' + esc(o.servicio) + ')' : ' (catálogo de la tienda)') + '</div>';
+    if (o.estado === 'error') return '<div class="pk-meta pk-warn">La verificación de originalidad falló' + (admin && o.error ? ': ' + esc(o.error) : '') + '.' + (admin ? ' <button type="button" class="pk-btn" data-acc="reverificar">Verificar de nuevo</button>' : '') + '</div>';
+    const lista = (o.internas || []).map(x => 'se parece ' + x.similitud + ' % a «' + esc(x.titulo) + '» de ' + esc(x.productor)).concat((o.externas || []).map(x => 'coincide con «' + esc(x.titulo) + '» de ' + esc(x.artista) + (x.enlace ? ' (<a href="' + esc(x.enlace) + '" target="_blank" rel="noopener">escuchar</a>)' : '')));
+    return '<div class="pk-meta pk-warn">Coincidencias de originalidad' + (lista.length ? ': ' + lista.join(' · ') : '') + (o.override ? ' · publicado igual: ' + esc(o.override.motivo) : '') + '</div>';
+  }
+
   function fechaCorta(f) {
     return window.ZBHistorial ? window.ZBHistorial.fechaHora(f) : String(f || '');
   }
@@ -45,12 +56,12 @@
             </div>
             <div class="field">
               <label for="pk-desc">Qué trae el pack</label>
-              <textarea id="pk-desc" rows="4" maxlength="1000" placeholder="Cantidad de sonidos, BPM, tonalidades, formato (WAV 24 bit)… El público lo lee al tocar «Descripción»."></textarea>
+              <textarea id="pk-desc" rows="4" maxlength="1000" placeholder="Cantidad de sonidos, BPM, tonalidades, formato (WAV 24 bit)…"></textarea>
             </div>
             <div class="field">
               <label for="pk-price">Precio — CUP</label>
               <input type="text" id="pk-price" inputmode="decimal" placeholder="Ej: 1500" autocomplete="off">
-              <span class="field-hint">Un solo precio. El pack se puede vender a muchas personas.</span>
+              <span class="field-hint">Licencia no exclusiva.</span>
             </div>
           </div>
           <div class="upload-col">
@@ -61,7 +72,7 @@
                 <span class="pk-drop-label">${ETIQUETAS[k]}</span>
                 <input type="file" id="pk-${k}" accept="${FORMATOS[k].join(',')}">
               </label>
-              ${k === 'audio' ? '<span class="field-hint">Es lo que suena en la tienda. El comprador recibe el archivo del pack.</span>' : ''}
+              ${k === 'audio' ? '<span class="field-hint">Muestra que se escucha en la tienda.</span>' : ''}
             </div>`).join('')}
           </div>
         </div>
@@ -124,7 +135,7 @@
         const malo = Z.validarTamano(k, f);
         if (malo) return falta(inputs[k], malo);
       }
-      if (!admin && !$f('#pk-autoria').checked) return falta($f('#pk-autoria'), 'Marca la casilla donde declaras que los sonidos son tuyos.');
+      if (!admin && !$f('#pk-autoria').checked) return falta($f('#pk-autoria'), 'Confirma la declaración de autoría.');
 
       const lista = [
         { kind: 'cover', file: inputs.cover.files[0], etiqueta: 'la portada' },
@@ -157,17 +168,17 @@
         const d = await res.json().catch(() => ({}));
         if (res.ok) {
           lista.forEach((x) => Z.olvidar(x.kind, x.file));
-          aviso(admin ? 'Pack publicado en la tienda.' : 'Pack enviado a revisión. Aparecerá en la tienda cuando el administrador lo apruebe.');
+          aviso(admin ? 'Pack publicado en la tienda.' : 'Pack enviado a revisión.');
           limpiarForm();
           cargar();
         } else if (res.status === 401) {
-          aviso('Tu sesión expiró. Vuelve a entrar: los archivos ya subidos no se pierden.', true);
+          aviso('Tu sesión expiró. Inicia sesión de nuevo; tus archivos se conservan.', true);
           if (op.sesionVencida) op.sesionVencida();
         } else {
           aviso(d.error || 'No se pudo guardar el pack (código ' + res.status + ').', true);
         }
       } catch (err) {
-        if (err && err.status === -1) aviso('Subida pausada. Si eliges los mismos archivos y pulsas el botón, sigue donde quedó.');
+        if (err && err.status === -1) aviso('Subida en pausa. Puedes reanudarla con los mismos archivos.');
         else if (err && err.status === 401) { aviso(err.message, true); if (op.sesionVencida) op.sesionVencida(); }
         else aviso((err && err.message) || 'No se pudo subir. Intenta de nuevo.', true);
       } finally {
@@ -196,7 +207,7 @@
       if (admin && op.avisoAlmacen) op.avisoAlmacen.hidden = d.almacenamiento === 'externo';
       if (op.cuenta) op.cuenta.textContent = packs.length ? packs.length + ' pack' + (packs.length === 1 ? '' : 's') + (d.pendientes ? ' · ' + d.pendientes + ' en revisión' : '') : '';
       if (!packs.length) {
-        op.lista.innerHTML = '<div class="empty-hint">' + (admin ? 'Todavía no hay Sample Packs. Sube el primero arriba.' : 'Todavía no has subido ningún pack.') + '</div>';
+        op.lista.innerHTML = '<div class="empty-hint">' + (admin ? 'Aún no hay Sample Packs.' : 'Todavía no has subido ningún pack.') + '</div>';
         return;
       }
       op.lista.innerHTML = packs.map(pintar).join('');
@@ -214,8 +225,9 @@
             <div class="pk-title">${esc(p.title)}</div>
             <div class="pk-meta">${datos}</div>
             <div class="pk-meta">Subido el ${esc(fechaCorta(p.created_at))}${p.archivo ? '' : ' · <span class="pk-warn">falta el archivo del pack</span>'}</div>
-            ${p.procesando ? '<div class="pk-meta pk-proc">Procesando el archivo: calculando su huella' + (p.externo ? ' y guardando una copia segura' : '') + '. Puede tardar varios minutos en packs grandes; ya se puede vender.</div>' : ''}
-            ${p.approval_status === 'rejected' && p.rejection_reason ? `<div class="pk-meta pk-warn">Motivo: ${esc(p.rejection_reason)}${admin ? '' : '. Corrígelo con «Editar» y vuelve a revisión.'}</div>` : ''}
+            ${pintarOriginalidad(p, admin)}
+            ${p.procesando ? '<div class="pk-meta pk-proc">Procesando el archivo…</div>' : ''}
+            ${p.approval_status === 'rejected' && p.rejection_reason ? `<div class="pk-meta pk-warn">Motivo: ${esc(p.rejection_reason)}${admin ? '' : ''}</div>` : ''}
             <div class="pk-extra"></div>
           </div>
           <div class="pk-actions">
@@ -247,8 +259,28 @@
       if (acc === 'aprobar') {
         btn.disabled = true;
         const r = await fetch('/api/admin/tracks/' + id + '/approve', { method: 'POST' });
-        aviso(r.ok ? 'Pack aprobado: ya está en la tienda.' : 'No se pudo aprobar.', !r.ok);
-        return cargar();
+        const d = await r.json().catch(() => ({}));
+        btn.disabled = false;
+        if (r.ok) { aviso('Pack aprobado: ya está en la tienda.'); return cargar(); }
+        if (d.verificacion === 'coincidencias') {
+          extra.innerHTML = '<div class="pk-inline"><label for="pk-forzar-' + id + '">Coincidencias de originalidad: indica el motivo para publicar</label>' +
+            '<input type="text" id="pk-forzar-' + id + '" maxlength="300" placeholder="Motivo">' +
+            '<div class="pk-inline-actions"><button type="button" class="pk-btn pk-ok" data-acc="forzar">Publicar igual</button><button type="button" class="pk-btn" data-acc="cancelar">Cancelar</button></div></div>';
+          extra.querySelector('input').focus();
+        }
+        return aviso(d.error || 'No se pudo aprobar.', true);
+      }
+      if (acc === 'forzar') {
+        const r = await fetch('/api/admin/tracks/' + id + '/approve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ forzar: true, motivo: extra.querySelector('input').value }) });
+        const d = await r.json().catch(() => ({}));
+        aviso(r.ok ? 'Pack publicado.' : (d.error || 'No se pudo aprobar.'), !r.ok);
+        if (r.ok) return cargar();
+        return;
+      }
+      if (acc === 'reverificar') {
+        await fetch('/api/admin/tracks/' + id + '/originalidad', { method: 'POST' });
+        aviso('Verificando de nuevo…');
+        return setTimeout(cargar, 2500);
       }
       if (acc === 'rechazar') {
         extra.innerHTML = `
@@ -280,7 +312,7 @@
             <div class="field"><label for="pk-e-genre-${id}">Tipo de sonidos</label><input type="text" id="pk-e-genre-${id}" data-k="genre" maxlength="60" value="${esc(p.genre)}"></div>
             <div class="field"><label for="pk-e-desc-${id}">Qué trae</label><textarea id="pk-e-desc-${id}" data-k="description" rows="3" maxlength="1000">${esc(p.description)}</textarea></div>
             <div class="field"><label for="pk-e-price-${id}">Precio — CUP</label><input type="text" id="pk-e-price-${id}" data-k="price" inputmode="decimal" value="${esc(p.price_cup)}"></div>
-            <p class="field-hint">${!admin && p.approval_status === 'rejected' ? 'Al guardar, el pack vuelve a revisión.' : 'Para cambiar los archivos, elimina el pack y súbelo de nuevo.'}</p>
+            <p class="field-hint">${!admin && p.approval_status === 'rejected' ? 'Al guardar, el pack vuelve a revisión.' : 'Los archivos no se pueden reemplazar.'}</p>
             <div class="pk-inline-actions">
               <button type="button" class="pk-btn pk-ok" data-acc="guardar">Guardar</button>
               <button type="button" class="pk-btn" data-acc="cancelar">Cancelar</button>
