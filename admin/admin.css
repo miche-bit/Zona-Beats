@@ -1274,3 +1274,6 @@ input, textarea, select { max-width: 100%; min-width: 0; }
 .orig-mini.ok { color: var(--live); }
 .orig-mini.warn { color: var(--warn); }
 .orig-mini.proc { color: var(--text-dim); }
+#originalidad-panel #orig-probar { margin-top: var(--s-2); }
+#originalidad-panel #orig-probar-res { margin-top: var(--s-3); }
+#originalidad-panel #orig-probar-res:empty { display: none; }

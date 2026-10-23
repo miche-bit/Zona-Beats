@@ -144,11 +144,17 @@ async function reconocerExterno(archivo) {
 // Prueba de conexión: AudD reconoce su propia canción de ejemplo (gasta 1 o 2 consultas)
 async function probarExterno() {
   if (!externoActivo()) return { ok: false, error: 'Falta AUDD_API_TOKEN' };
-  const fd = new FormData();
-  fd.append('api_token', AUDD_TOKEN());
-  fd.append('url', 'https://audd.tech/example.mp3');
-  fd.append('limit', '2');
   try {
+    // se descarga la canción de ejemplo de AudD y se envía como archivo
+    // (enviar solo el enlace está reservado a los planes de pago)
+    const ej = await fetch(process.env.AUDD_EJEMPLO_URL || 'https://audd.tech/example.mp3'); // la variable solo sirve para pruebas
+    if (!ej.ok) return { ok: false, error: 'No se pudo descargar la canción de prueba de AudD' };
+    const audio = Buffer.from(await ej.arrayBuffer());
+    if (audio.length > 15 * 1024 * 1024) return { ok: false, error: 'La canción de prueba es demasiado grande' };
+    const fd = new FormData();
+    fd.append('api_token', AUDD_TOKEN());
+    fd.append('limit', '2');
+    fd.append('file', new Blob([audio], { type: 'audio/mpeg' }), 'example.mp3');
     const ctrl = new AbortController();
     const reloj = setTimeout(() => ctrl.abort(), 60000);
     let res;
