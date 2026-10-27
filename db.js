@@ -603,6 +603,8 @@ agregarCol('producers', 'identidad_verificada_at', "TEXT DEFAULT ''");
 // lo que declara el productor al subir: si el beat ya salió en otro lado y si está en Content ID
 agregarCol('tracks', 'prelanzado', "TEXT DEFAULT ''");
 agregarCol('tracks', 'content_id_declarado', 'INTEGER DEFAULT 0');
+// forma de onda para dibujar el beat (64 barras en base 36; '-' = no se pudo calcular)
+agregarCol('tracks', 'onda', "TEXT DEFAULT ''");
 // días que tiene la plataforma para pagar un retiro, por plan (vacío = los de fábrica)
 agregarCol('platform_config', 'payout_days_json', "TEXT DEFAULT ''");
 // cobro automático con QvaPay

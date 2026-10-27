@@ -275,8 +275,10 @@
       }
     });
 
+    // solo /verify/<número>; la página abierta como /verify o /verify.html no consulta nada
     let fromUrl = '';
-    try { fromUrl = decodeURIComponent(location.pathname.replace(/^\/verify\/?/, '')); } catch { fromUrl = ''; }
+    const enRuta = location.pathname.match(/^\/verify\/([^/]+)\/?$/);
+    try { fromUrl = enRuta ? decodeURIComponent(enRuta[1]).trim() : ''; } catch { fromUrl = ''; }
     if (fromUrl) {
       input.value = fromUrl.toUpperCase();
       if (!verificarCodigo(fromUrl)) verificar(fromUrl);

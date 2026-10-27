@@ -42,10 +42,23 @@
     let control = null;
 
     // ---------- Formulario ----------
+    // Con op.pasos el formulario va en dos pasos (datos → archivos) para que cada uno quepa en la pantalla.
+    const conPasos = Boolean(op.pasos);
+    const ICONOS = {
+      pack: '<path d="M4.5 8 12 4.5 19.5 8v8L12 19.5 4.5 16z"/><path d="M4.5 8 12 11.5 19.5 8M12 11.5v8"/>',
+      audio: '<path d="M9 17.5V6l9-1.8v11"/><circle cx="6.8" cy="17.5" r="2.2"/><circle cx="15.8" cy="15.2" r="2.2"/>',
+      cover: '<rect x="4" y="4" width="16" height="16" rx="2"/><circle cx="9" cy="9.5" r="1.6"/><path d="m5 18 5-5 3 3 2-2 4 4"/>',
+    };
+    const TITULOS = { pack: 'Archivo del pack', audio: 'Demo para escuchar', cover: 'Portada' };
     op.form.innerHTML = `
-      <form class="pk-form" novalidate>
+      <form class="pk-form${conPasos ? ' con-pasos' : ''}" novalidate data-paso="1">
+        ${conPasos ? `
+        <ol class="stepper pk-stepper" aria-label="Pasos para subir tu pack">
+          <li><button type="button" class="stp on" data-paso="1" aria-current="step"><span class="stp-n">1</span><span class="stp-t">Datos y precio</span></button></li>
+          <li><button type="button" class="stp" data-paso="2" disabled><span class="stp-n">2</span><span class="stp-t">Archivos</span></button></li>
+        </ol>` : ''}
         <div class="upload-grid">
-          <div class="upload-col">
+          <div class="upload-col pk-paso" data-paso="1" role="group" aria-label="Datos y precio">
             <div class="field">
               <label for="pk-title">Nombre del pack</label>
               <input type="text" id="pk-title" maxlength="120" placeholder="Ej: Dembow Drums Vol. 1" autocomplete="off">
@@ -56,31 +69,33 @@
             </div>
             <div class="field">
               <label for="pk-desc">Qué trae el pack</label>
-              <textarea id="pk-desc" rows="4" maxlength="1000" placeholder="Cantidad de sonidos, BPM, tonalidades, formato (WAV 24 bit)…"></textarea>
+              <textarea id="pk-desc" rows="3" maxlength="1000" placeholder="Cantidad de sonidos, BPM, tonalidades, formato (WAV 24 bit)…"></textarea>
             </div>
             <div class="field">
-              <label for="pk-price">Precio — CUP</label>
-              <input type="text" id="pk-price" inputmode="decimal" placeholder="Ej: 1500" autocomplete="off">
-              <span class="field-hint">Licencia no exclusiva.</span>
+              <label for="pk-price">Precio</label>
+              <div class="price-input"><input type="text" id="pk-price" inputmode="decimal" placeholder="Ej: 1500" autocomplete="off" aria-describedby="pk-price-hint"><span aria-hidden="true">CUP</span></div>
+              <span class="field-hint" id="pk-price-hint">Licencia no exclusiva.</span>
             </div>
           </div>
-          <div class="upload-col">
+          <div class="upload-col pk-paso" data-paso="2" role="group" aria-label="Archivos">
             ${['pack', 'audio', 'cover'].map((k) => `
-            <div class="field">
-              <label for="pk-${k}">${k === 'pack' ? 'Archivo del pack' : k === 'audio' ? 'Demo para escuchar' : 'Portada'} <span class="req-tag">obligatorio</span></label>
+            <div class="field file-field">
+              <span class="ff-lbl" id="pk-${k}-lbl">${TITULOS[k]} <span class="req-tag">obligatorio</span></span>
               <label class="file-drop" data-drop="${k}">
-                <span class="pk-drop-label">${ETIQUETAS[k]}</span>
-                <input type="file" id="pk-${k}" accept="${FORMATOS[k].join(',')}">
+                <span class="fd-ico" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false">${ICONOS[k]}</svg></span>
+                <span class="fd-txt pk-drop-label" id="pk-${k}-txt">${ETIQUETAS[k]}</span>
+                <span class="fd-btn" aria-hidden="true">Elegir</span>
+                <input type="file" id="pk-${k}" accept="${FORMATOS[k].join(',')}" aria-labelledby="pk-${k}-lbl pk-${k}-txt">
               </label>
               ${k === 'audio' ? '<span class="field-hint">Muestra que se escucha en la tienda.</span>' : ''}
             </div>`).join('')}
+            ${admin ? '' : `
+            <label class="checkbox-label legal-accept" for="pk-autoria">
+              <input type="checkbox" id="pk-autoria">
+              <span>Declaro que los sonidos de este pack son míos o tengo derecho a venderlos, y que no contienen samples de terceros sin permiso. <a href="/terminos" target="_blank" rel="noopener">Ver términos</a></span>
+            </label>`}
           </div>
         </div>
-        ${admin ? '' : `
-        <label class="checkbox-label legal-accept" for="pk-autoria">
-          <input type="checkbox" id="pk-autoria">
-          <span>Declaro que los sonidos de este pack son míos o tengo derecho a venderlos, y que no contienen samples de terceros sin permiso. <a href="/terminos" target="_blank" rel="noopener">Ver términos</a></span>
-        </label>`}
         <div class="upload-progress-wrap pk-progress" hidden>
           <div class="upload-progress-track"><div class="upload-progress-fill pk-fill"></div></div>
           <div class="upload-progress-row">
@@ -89,11 +104,58 @@
           </div>
           <p class="panel-hint compact">Si se corta la conexión, la subida sigue sola. Si cierras la página, vuelve a elegir los mismos archivos y pulsa el botón: sigue donde quedó (hasta 7 días). Con packs grandes deja la pantalla encendida.</p>
         </div>
-        <button type="submit" class="btn-primary pk-enviar">${admin ? 'Publicar pack' : 'Enviar a revisión'}</button>
+        <div class="pk-nav">
+          ${conPasos ? '<button type="button" class="pk-btn pk-atras" hidden>Atrás</button><button type="button" class="btn-primary pk-siguiente">Siguiente</button>' : ''}
+          <button type="submit" class="btn-primary pk-enviar"${conPasos ? ' hidden' : ''}>${admin ? 'Publicar pack' : 'Enviar a revisión'}</button>
+        </div>
       </form>`;
 
     const form = op.form.querySelector('.pk-form');
     const $f = (sel) => form.querySelector(sel);
+    let paso = 1;
+    function irPaso(n, enfocar) {
+      if (!conPasos) return;
+      paso = n;
+      form.dataset.paso = String(n);
+      form.querySelectorAll('.pk-paso').forEach((c) => { c.hidden = Number(c.dataset.paso) !== n; });
+      form.querySelectorAll('.pk-stepper .stp').forEach((b) => {
+        const k = Number(b.dataset.paso);
+        b.classList.toggle('on', k === n); b.classList.toggle('hecho', k < n);
+        b.disabled = subiendo || (k > n && Boolean(problemaDatos()));
+        if (k === n) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current');
+      });
+      $f('.pk-atras').hidden = n === 1;
+      $f('.pk-atras').disabled = subiendo;
+      $f('.pk-siguiente').hidden = n === 2;
+      $f('.pk-enviar').hidden = n !== 2;
+      if (enfocar) {
+        const caja = form.querySelector('.pk-paso[data-paso="' + n + '"]');
+        caja.setAttribute('tabindex', '-1');
+        setTimeout(() => caja.focus({ preventScroll: true }), 30);
+      }
+    }
+    function problemaDatos() {
+      if (!$f('#pk-title').value.trim()) return { el: $f('#pk-title'), msg: 'Ponle nombre al pack.' };
+      if (!(Z && Z.precio($f('#pk-price').value.trim()) > 0)) return { el: $f('#pk-price'), msg: 'Ponle precio al pack.' };
+      return null;
+    }
+    if (conPasos) {
+      $f('.pk-siguiente').addEventListener('click', () => {
+        const p = problemaDatos();
+        if (p) { aviso(p.msg, true); p.el.focus(); return; }
+        irPaso(2, true);
+      });
+      $f('.pk-atras').addEventListener('click', () => { if (!subiendo) irPaso(1, true); });
+      $f('.pk-stepper').addEventListener('click', (e) => {
+        const b = e.target.closest('.stp');
+        if (!b || b.disabled || subiendo) return;
+        const n = Number(b.dataset.paso);
+        if (n === 2) { const p = problemaDatos(); if (p) { aviso(p.msg, true); p.el.focus(); return; } }
+        irPaso(n, true);
+      });
+      ['#pk-title', '#pk-price'].forEach((sel) => $f(sel).addEventListener('input', () => irPaso(paso)));
+      irPaso(1);
+    }
     const inputs = { pack: $f('#pk-pack'), audio: $f('#pk-audio'), cover: $f('#pk-cover') };
     Object.keys(inputs).forEach((k) => {
       const inp = inputs[k];
@@ -111,6 +173,7 @@
         drop.classList.remove('has-file');
         drop.querySelector('.pk-drop-label').textContent = ETIQUETAS[k];
       });
+      irPaso(1);
     }
     function progreso(pct, texto) {
       if (pct != null) $f('.pk-fill').style.width = pct + '%';
@@ -122,9 +185,11 @@
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       if (subiendo) return;
+      // Enter en el primer paso = «Siguiente»
+      if (conPasos && paso === 1) { $f('.pk-siguiente').click(); return; }
       const titulo = $f('#pk-title').value.trim();
       const precio = $f('#pk-price').value.trim();
-      const falta = (el, msg) => { aviso(msg, true); el.focus(); };
+      const falta = (el, msg) => { aviso(msg, true); if (conPasos && el.closest('.pk-paso[data-paso="1"]')) irPaso(1); el.focus(); };
       if (!titulo) return falta($f('#pk-title'), 'Ponle nombre al pack.');
       if (!(Z && Z.precio(precio) > 0)) return falta($f('#pk-price'), 'Ponle precio al pack.');
       for (const k of ['pack', 'audio', 'cover']) {
@@ -143,6 +208,7 @@
         { kind: 'pack', file: inputs.pack.files[0], etiqueta: 'el pack' },
       ];
       subiendo = true;
+      irPaso(paso);
       control = new AbortController();
       $f('.pk-enviar').disabled = true;
       $f('.pk-progress').hidden = false;
@@ -170,7 +236,9 @@
           lista.forEach((x) => Z.olvidar(x.kind, x.file));
           aviso(admin ? 'Pack publicado en la tienda.' : 'Pack enviado a revisión.');
           limpiarForm();
+          pagina = 0;
           cargar();
+          if (op.alEnviar) op.alEnviar();
         } else if (res.status === 401) {
           aviso('Tu sesión expiró. Inicia sesión de nuevo; tus archivos se conservan.', true);
           if (op.sesionVencida) op.sesionVencida();
@@ -186,6 +254,7 @@
         control = null;
         $f('.pk-enviar').disabled = false;
         $f('.pk-progress').hidden = true;
+        irPaso(paso);
       }
     });
 
@@ -206,11 +275,23 @@
       if (op.alCargar) op.alCargar(d);
       if (admin && op.avisoAlmacen) op.avisoAlmacen.hidden = d.almacenamiento === 'externo';
       if (op.cuenta) op.cuenta.textContent = packs.length ? packs.length + ' pack' + (packs.length === 1 ? '' : 's') + (d.pendientes ? ' · ' + d.pendientes + ' en revisión' : '') : '';
+      ultimos = packs;
+      pintarLista();
+    }
+    // La lista va en páginas si se pidió (op.pager + op.porPagina)
+    let ultimos = [];
+    let pagina = 0;
+    function pintarLista() {
+      const packs = ultimos;
       if (!packs.length) {
-        op.lista.innerHTML = '<div class="empty-hint">' + (admin ? 'Aún no hay Sample Packs.' : 'Todavía no has subido ningún pack.') + '</div>';
+        op.lista.innerHTML = '<div class="empty-hint">' + (admin ? 'Aún no hay sample packs.' : 'Todavía no has subido ningún pack.') + '</div>';
+        if (op.pager && window.ZBUI) ZBUI.paginar(op.pager, 0, 0, 1);
         return;
       }
-      op.lista.innerHTML = packs.map(pintar).join('');
+      if (!op.pager || !window.ZBUI || !window.ZBUI.paginarEncajado) { op.lista.innerHTML = packs.map(pintar).join(''); return; }
+      const max = typeof op.porPagina === 'function' ? op.porPagina() : (op.porPagina || 6);
+      pagina = ZBUI.paginarEncajado(op.lista, op.pager, packs.length, pagina, max, (p) => { pagina = p; pintarLista(); },
+        (desde, hasta) => { op.lista.innerHTML = packs.slice(desde, hasta).map(pintar).join(''); }).pagina;
     }
 
     function pintar(p) {
@@ -236,7 +317,7 @@
             ${admin ? `<button type="button" class="pk-btn" data-acc="escuchar">Escuchar demo</button><a class="pk-btn" href="/api/admin/tracks/${p.id}/file?f=stems" download>Descargar pack</a>` : ''}
             ${!admin && p.registro ? `<a class="pk-btn" href="/api/producer/registros/${encodeURIComponent(p.registro)}/pdf" download>Certificado de registro</a>` : ''}
             <button type="button" class="pk-btn" data-acc="editar">Editar</button>
-            <button type="button" class="pk-btn pk-no" data-acc="borrar">Eliminar</button>
+            ${admin || !p.ventas ? '<button type="button" class="pk-btn pk-no" data-acc="borrar">Eliminar</button>' : ''}
           </div>
         </div>`;
     }

@@ -32,6 +32,14 @@ const { buildLicensePdf, buildRegistroPdf, buildPedidoPdf, buildCartaContentIdPd
 const almacen = require('./almacen');
 const originalidad = require('./originalidad');
 const qvapay = require('./qvapay');
+const onda = require('./onda');
+
+// Cuerpo JSON de una petición: si no es un objeto (null, un número, una lista…) se trata como vacío.
+// Un JSON mal formado sigue lanzando el error, para que cada ruta responda 400.
+function jsonObjeto(txt) {
+  const v = JSON.parse(txt);
+  return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+}
 const producerAuth = require('./producerAuth');
 const { applyWatermark, getDurationSeconds, transcodificarMp3, miniaturaImagen } = require('./watermark');
 const { pipeline } = require('node:stream/promises');
@@ -120,7 +128,9 @@ function getCookie(req, name) {
   const header = req.headers.cookie || '';
   const parts = header.split(';').map(p => p.trim());
   for (const p of parts) {
-    if (p.startsWith(name + '=')) return decodeURIComponent(p.slice(name.length + 1));
+    if (!p.startsWith(name + '=')) continue;
+    // una cookie mal formada (por ejemplo, con un % suelto) cuenta como sesión inexistente
+    try { return decodeURIComponent(p.slice(name.length + 1)); } catch { return null; }
   }
   return null;
 }
@@ -599,7 +609,7 @@ route('POST', '/api/uploads', async (req, res) => {
   const owner = duenoSubida(req);
   if (!owner) return sendJSON(res, 401, { error: 'Tu sesión expiró. Vuelve a entrar.' });
   let d;
-  try { d = JSON.parse((await readBody(req, 4096)).toString('utf8') || '{}'); }
+  try { d = jsonObjeto((await readBody(req, 4096)).toString('utf8') || '{}'); }
   catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   const kind = String(d.kind || '');
   const tipo = UPLOAD_KINDS[kind];
@@ -762,14 +772,14 @@ route('GET', '/api/tracks', (req, res, params, query) => {
   if (type === 'playlist') {
     rows = db.prepare(`
       SELECT t.id, t.title, t.genre, t.description, t.artist_credit, t.cover_filename, t.duration_seconds, t.plays, t.likes, t.created_at,
-             t.producer_id, p.name as producer_name
+             t.producer_id, p.name as producer_name, t.onda
       FROM tracks t LEFT JOIN producers p ON p.id = t.producer_id
       WHERE t.is_playlist = 1 AND t.approval_status = 'approved' AND ${FILTRO_PRODUCTOR_ACTIVO} ORDER BY t.created_at DESC
     `).all();
   } else if (type === 'vip') {
     rows = db.prepare(`
       SELECT t.id, t.title, t.genre, t.description, t.cover_filename, t.duration_seconds, t.plays,
-             t.price_label, t.price_cup, t.for_sale, t.is_exclusive, t.sold, t.created_at,
+             t.price_label, t.price_cup, t.for_sale, t.is_exclusive, t.sold, t.created_at, t.onda,
              p.name as producer_name,
              (SELECT CASE WHEN o.vip_public = 1 THEN o.buyer_name ELSE '' END FROM orders o
                WHERE o.track_id = t.id AND o.status = 'approved' AND o.license_type = 'exclusive'
@@ -782,7 +792,7 @@ route('GET', '/api/tracks', (req, res, params, query) => {
   } else {
     rows = db.prepare(`
       SELECT t.id, t.title, t.genre, t.description, t.cover_filename, t.duration_seconds, t.plays, t.likes,
-             t.price_label, t.price_cup, t.for_sale, t.is_exclusive, t.sold, t.is_pack, t.created_at,
+             t.price_label, t.price_cup, t.for_sale, t.is_exclusive, t.sold, t.is_pack, t.created_at, t.onda,
              t.producer_id, p.name as producer_name
       FROM tracks t
       LEFT JOIN producers p ON p.id = t.producer_id
@@ -988,7 +998,7 @@ route('GET', '/api/purchase/:token', (req, res, params) => {
     licenseType: order.license_type,
     licenseLabel: LICENSE_LABELS[order.license_type] || order.license_type,
     priceLabel: order.price_label,
-    createdAt: order.created_at,
+    createdAt: normalizarFecha(order.created_at),
     certificateId: aprobada ? order.certificate_id : null,
     pdfUrl: aprobada ? `/api/license/${encodeURIComponent(order.certificate_id)}/pdf` : null,
     files: archivos.map(a => ({ f: a.f, label: a.etiqueta, size: a.size, url: `${base}?f=${a.f}` })),
@@ -1087,7 +1097,7 @@ route('POST', '/api/producer/register', async (req, res) => {
   }
   try {
     const body = await readBody(req, 1024 * 5);
-    const { name, email, password, phone, referralCode, acepta } = JSON.parse(body.toString('utf8'));
+    const { name, email, password, phone, referralCode, acepta } = jsonObjeto(body.toString('utf8'));
     if (acepta !== true) {
       return sendJSON(res, 400, { error: 'Para crear tu cuenta tienes que aceptar los Términos y la Política de privacidad.' });
     }
@@ -1172,6 +1182,8 @@ route('GET', '/api/producer/me', (req, res) => {
       playlist: v.playlist, stats: v.stats, licenses: v.licenses, packs: v.packs, payoutDays: v.payoutDays,
     })),
     planRequest: ultimaSolicitudPlan(full.id),
+    // bono Studio por me gusta, con los números que puso el administrador
+    bonoLikes: (() => { const b = configBonos(); return { cada: b.likesPorBono, cup: b.bonoLikesCup }; })(),
   });
 });
 
@@ -1180,7 +1192,7 @@ route('POST', '/api/producer/profile', async (req, res) => {
   if (!producer) return sendJSON(res, 401, { error: 'No autorizado' });
   try {
     const body = await readBody(req, 1024 * 30);
-    const { name, bio, socialLinks, accounts, contactPhone } = JSON.parse(body.toString('utf8'));
+    const { name, bio, socialLinks, accounts, contactPhone } = jsonObjeto(body.toString('utf8'));
     const permitidas = monedasCobroProductor(producer.id);
     const telefono = String(contactPhone || '').replace(/[^0-9+]/g, '').slice(0, 20);
     if (telefono.replace(/[^0-9]/g, '').length < 8) {
@@ -1226,7 +1238,7 @@ route('POST', '/api/producer/password', async (req, res) => {
   const producer = getAuthedProducer(req);
   if (!producer) return sendJSON(res, 401, { error: 'No autorizado' });
   let d;
-  try { d = JSON.parse((await readBody(req, 2048)).toString('utf8')); }
+  try { d = jsonObjeto((await readBody(req, 2048)).toString('utf8')); }
   catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   const full = producerFull(producer.id);
   let ok = false;
@@ -1310,7 +1322,7 @@ route('POST', '/api/producer/plan-con-saldo', async (req, res) => {
   const producer = getAuthedProducer(req);
   if (!producer) return sendJSON(res, 401, { error: 'No autorizado' });
   let d;
-  try { d = JSON.parse((await readBody(req, 2048)).toString('utf8') || '{}'); }
+  try { d = jsonObjeto((await readBody(req, 2048)).toString('utf8') || '{}'); }
   catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   const plan = String(d.plan || '');
   const months = parseInt(d.months, 10);
@@ -1327,7 +1339,7 @@ route('POST', '/api/producer/plan-con-saldo', async (req, res) => {
   const saldo = saldoDisponible(producer.id);
   const b = saldo.billeteras.find(x => x.code === moneda);
   if (!b || b.unidades + 1e-9 < costo.unidades) {
-    return sendJSON(res, 400, { error: `Tu saldo en ${etiquetaMoneda(moneda)} no alcanza: el plan cuesta ${costo.unidades} y tienes ${b ? b.unidades : 0}.` });
+    return sendJSON(res, 400, { error: `Tu saldo en ${etiquetaMoneda(moneda)} no alcanza: el plan cuesta ${fmtMonto(costo.unidades, moneda)} y tienes ${fmtMonto(b ? b.unidades : 0, moneda)}.` });
   }
   const full = producerFull(producer.id);
   const nombre = PRODUCER_PLANS[plan].label;
@@ -1417,7 +1429,7 @@ route('GET', '/api/hots', (req, res) => {
   const pct = descuentoActivo();
   const rows = db.prepare(`
     SELECT t.id, t.title, t.genre, t.description, t.cover_filename, t.duration_seconds, t.plays, t.likes,
-           t.price_label, t.price_cup, t.for_sale, t.is_exclusive, t.sold, t.created_at, t.producer_id, p.name as producer_name
+           t.price_label, t.price_cup, t.for_sale, t.is_exclusive, t.sold, t.created_at, t.producer_id, p.name as producer_name, t.onda
     FROM tracks t LEFT JOIN producers p ON p.id = t.producer_id
     WHERE t.id IN (${activos.map(() => '?').join(',')}) AND ${HOT_TRACK_OK}
   `).all(...activos.map(a => a.track_id)).map(t => ({
@@ -1464,7 +1476,7 @@ route('POST', '/api/producer/hots/saldo', async (req, res) => {
   const producer = getAuthedProducer(req);
   if (!producer) return sendJSON(res, 401, { error: 'No autorizado' });
   let d;
-  try { d = JSON.parse((await readBody(req, 2048)).toString('utf8') || '{}'); }
+  try { d = jsonObjeto((await readBody(req, 2048)).toString('utf8') || '{}'); }
   catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   const semanas = leerSemanas(d.weeks);
   if (!semanas) return sendJSON(res, 400, { error: 'Elige 1, 2 o 4 semanas' });
@@ -1481,7 +1493,7 @@ route('POST', '/api/producer/hots/saldo', async (req, res) => {
   acreditarBonos(producer.id);
   const b = saldoDisponible(producer.id).billeteras.find(x => x.code === moneda);
   if (!b || b.unidades + 1e-9 < costo.unidades) {
-    return sendJSON(res, 400, { error: `Tu saldo en ${etiquetaMoneda(moneda)} no alcanza: el Hot cuesta ${costo.unidades} y tienes ${b ? b.unidades : 0}.` });
+    return sendJSON(res, 400, { error: `Tu saldo en ${etiquetaMoneda(moneda)} no alcanza: el Hot cuesta ${fmtMonto(costo.unidades, moneda)} y tienes ${fmtMonto(b ? b.unidades : 0, moneda)}.` });
   }
   db.exec('BEGIN');
   let act;
@@ -1552,7 +1564,7 @@ route('GET', '/api/admin/hots', (req, res) => {
 route('POST', '/api/admin/hots/config', async (req, res) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   let d;
-  try { d = JSON.parse((await readBody(req, 2048)).toString('utf8') || '{}'); }
+  try { d = jsonObjeto((await readBody(req, 2048)).toString('utf8') || '{}'); }
   catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   const precio = parsePrecio(d.priceUsd);
   const cupos = parseInt(d.slots, 10);
@@ -1587,7 +1599,7 @@ route('POST', '/api/admin/hots/:id/reject', async (req, res, params) => {
   if (!r) return sendJSON(res, 404, { error: 'Pedido no encontrado' });
   if (r.status !== 'pending') return sendJSON(res, 409, { error: 'Este pedido ya fue respondido' });
   let reason = '';
-  try { const b = await readBody(req, 2048); if (b.length) reason = limpiarTexto(JSON.parse(b.toString('utf8')).reason, 300); } catch { /* sin motivo */ }
+  try { const b = await readBody(req, 2048); if (b.length) reason = limpiarTexto(jsonObjeto(b.toString('utf8')).reason, 300); } catch { /* sin motivo */ }
   db.prepare("UPDATE hot_requests SET status = 'rejected', reject_reason = ?, resolved_at = datetime('now') WHERE id = ?").run(reason, r.id);
   anotar(r.producer_id, 'Rechazó tu pedido de Hot', reason ? `Motivo: ${reason}` : '', r.track_id);
   sendJSON(res, 200, { ok: true });
@@ -1597,7 +1609,7 @@ route('POST', '/api/admin/hots/:id/reject', async (req, res, params) => {
 route('POST', '/api/admin/hots/gratis', async (req, res) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   let d;
-  try { d = JSON.parse((await readBody(req, 2048)).toString('utf8') || '{}'); }
+  try { d = jsonObjeto((await readBody(req, 2048)).toString('utf8') || '{}'); }
   catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   const semanas = leerSemanas(d.weeks);
   if (!semanas) return sendJSON(res, 400, { error: 'Elige 1, 2 o 4 semanas' });
@@ -1706,7 +1718,7 @@ route('POST', '/api/admin/plan-requests/:id/reject', async (req, res, params) =>
   let reason = '';
   try {
     const body = await readBody(req, 1024 * 2);
-    if (body.length) reason = String(JSON.parse(body.toString('utf8')).reason || '').slice(0, 300).trim();
+    if (body.length) reason = String(jsonObjeto(body.toString('utf8')).reason || '').slice(0, 300).trim();
   } catch { /* sin motivo */ }
   db.prepare("UPDATE plan_requests SET status = 'rejected', reject_reason = ?, resolved_at = datetime('now') WHERE id = ?").run(reason, r.id);
   anotar(r.producer_id, 'Rechazó tu compra de plan', reason ? `Motivo: ${reason}` : '');
@@ -1738,7 +1750,7 @@ route('GET', '/api/producers/:id/tracks', (req, res, params) => {
   }
   let tracks = db.prepare(`
     SELECT id, title, genre, description, cover_filename, duration_seconds, plays, likes,
-           price_label, price_cup, for_sale, is_exclusive, sold, created_at, producer_id
+           price_label, price_cup, for_sale, is_exclusive, sold, created_at, producer_id, onda
     FROM tracks WHERE producer_id = ? AND approval_status = 'approved' AND sold = 0 AND is_playlist = 0 AND is_pack = 0
     ORDER BY created_at DESC
   `).all(params.id);
@@ -1907,7 +1919,7 @@ route('POST', '/api/orders/qvapay', async (req, res) => {
   if (!rateLimit(req, 'orders', 40, 60 * 60 * 1000)) return sendJSON(res, 429, { error: 'Demasiados pedidos desde esta conexión. Espera un rato.' });
   if (!qvapayDisponible()) return sendJSON(res, 503, { error: 'El pago con QvaPay no está disponible en este momento.' });
   let d;
-  try { d = JSON.parse((await readBody(req, 4096)).toString('utf8') || '{}'); } catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
+  try { d = jsonObjeto((await readBody(req, 4096)).toString('utf8') || '{}'); } catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   const trackId = Number(d.trackId);
   const buyerName = limpiarTexto(d.buyerName, 100);
   const buyerPhone = limpiarTexto(d.buyerPhone, 40);
@@ -1978,7 +1990,7 @@ route('POST', '/api/pagos/qvapay/webhook', async (req, res) => {
   // si el importe no coincide, lo revisa el administrador
   if (Number.isFinite(monto) && monto + 0.009 < Number(order.paid_units)) {
     db.prepare("UPDATE orders SET status = 'pending', qvapay_error = ? WHERE id = ?")
-      .run(`QvaPay informó ${monto} y el pedido era de ${order.paid_units}.`, order.id);
+      .run(`QvaPay informó ${fmtMonto(monto, 'QVAPAY')} y el pedido era de ${fmtMonto(order.paid_units, 'QVAPAY')}.`, order.id);
     return sendJSON(res, 200, { received: true, review: true });
   }
   const r = aprobarPedido(db.prepare('SELECT * FROM orders WHERE id = ?').get(order.id), baseUrlFrom(req));
@@ -2024,7 +2036,7 @@ route('POST', '/api/tracks/:id/token', (req, res, params) => {
 async function leerVotante(req) {
   try {
     const body = await readBody(req, 1024);
-    const d = body.length ? JSON.parse(body.toString('utf8')) : {};
+    const d = body.length ? jsonObjeto(body.toString('utf8')) : {};
     const id = String(d.voterId || '').slice(0, 80);
     if (!/^[a-zA-Z0-9-]{16,80}$/.test(id)) return null;
     return crypto.createHash('sha256').update('zb-like|' + id).digest('hex');
@@ -2274,7 +2286,7 @@ route('POST', '/api/purchase/:token/reclamo', async (req, res, params) => {
   const order = findOrderByBuyerToken(params.token);
   if (!order) return sendJSON(res, 404, { error: 'No encontramos esta compra.' });
   let d;
-  try { d = JSON.parse((await readBody(req, 4096)).toString('utf8') || '{}'); } catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
+  try { d = jsonObjeto((await readBody(req, 4096)).toString('utf8') || '{}'); } catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   const texto = limpiarTexto(d.texto, 600);
   if (texto.length < 5) return sendJSON(res, 400, { error: 'Cuéntale al vendedor qué pasó.' });
   if (order.status === 'approved') return sendJSON(res, 409, { error: 'Esta compra ya fue aprobada.' });
@@ -2319,7 +2331,7 @@ route('GET', '/api/admin/confianza', (req, res) => {
 route('POST', '/api/admin/confianza', async (req, res) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   let d;
-  try { d = JSON.parse((await readBody(req, 4096)).toString('utf8') || '{}'); } catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
+  try { d = jsonObjeto((await readBody(req, 4096)).toString('utf8') || '{}'); } catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   const horas = Math.round(Number(d.horas));
   if (!Number.isFinite(horas) || horas < 1 || horas > 720) return sendJSON(res, 400, { error: 'El plazo para aprobar va de 1 a 720 horas.' });
   db.prepare('UPDATE platform_config SET titular_nombre = ?, titular_figura = ?, orden_horas = ? WHERE id = 1')
@@ -2364,7 +2376,7 @@ route('POST', '/api/admin/login', async (req, res) => {
   }
   try {
     const body = await readBody(req, 1024 * 10);
-    const { password } = JSON.parse(body.toString('utf8'));
+    const { password } = jsonObjeto(body.toString('utf8'));
     const a = Buffer.from(String(password || ''));
     const b = Buffer.from(ADMIN_PASSWORD);
     const ok = a.length === b.length && crypto.timingSafeEqual(a, b);
@@ -2402,7 +2414,7 @@ route('POST', '/api/producer/login', async (req, res) => {
   }
   try {
     const body = await readBody(req, 1024 * 10);
-    const { email, password } = JSON.parse(body.toString('utf8'));
+    const { email, password } = jsonObjeto(body.toString('utf8'));
     const correo = String(email || '').trim().toLowerCase().slice(0, 120);
     const claveCorreo = 'plogin-mail|' + correo;
     if (limiteAlcanzado(claveCorreo, 8)) {
@@ -2472,6 +2484,7 @@ route('GET', '/api/producer/tracks', (req, res) => {
     cover_filename: t.cover_filename, plays: t.plays, likes: t.likes, price_label: t.price_label, price_cup: t.price_cup,
     is_playlist: t.is_playlist, is_exclusive: t.is_exclusive, sold: t.sold, approval_status: t.approval_status,
     rejection_reason: t.rejection_reason, created_at: t.created_at, duration_seconds: t.duration_seconds,
+    onda: t.onda && t.onda !== '-' ? t.onda : '',
     licenses: getTrackLicenses(t.id),
     archivos: archivosDePista(t),
     ventas: db.prepare("SELECT COUNT(*) as c FROM orders WHERE track_id = ? AND status = 'approved'").get(t.id).c,
@@ -2492,7 +2505,7 @@ route('POST', '/api/producer/tracks/:id', async (req, res, params) => {
   if (track.is_pack) return sendJSON(res, 400, { error: 'Los Sample Packs se editan desde la pestaña Sample Packs.' });
   if (track.sold) return sendJSON(res, 409, { error: 'Este beat ya se vendió con licencia única y no se puede editar.' });
   let d;
-  try { d = JSON.parse((await readBody(req, 16 * 1024)).toString('utf8')); }
+  try { d = jsonObjeto((await readBody(req, 16 * 1024)).toString('utf8')); }
   catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   const full = producerFull(producer.id);
   const titulo = limpiarTexto(d.title, 120);
@@ -3178,7 +3191,7 @@ route('POST', '/api/purchase/:token/resena', async (req, res, params) => {
   if (!order) return sendJSON(res, 404, { error: 'No encontramos esta compra.' });
   if (order.status !== 'approved') return sendJSON(res, 409, { error: 'Puedes calificar cuando tu compra esté aprobada.' });
   let d;
-  try { d = JSON.parse((await readBody(req, 4096)).toString('utf8') || '{}'); } catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
+  try { d = jsonObjeto((await readBody(req, 4096)).toString('utf8') || '{}'); } catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   const estrellas = Math.round(Number(d.estrellas));
   if (!(estrellas >= 1 && estrellas <= 5)) return sendJSON(res, 400, { error: 'Elige de 1 a 5 estrellas.' });
   const texto = limpiarTexto(d.texto, 600);
@@ -3202,7 +3215,7 @@ route('POST', '/api/producer/resenas/:id/respuesta', async (req, res, params) =>
   const r = db.prepare('SELECT * FROM resenas WHERE id = ? AND producer_id = ?').get(params.id, producer.id);
   if (!r) return sendJSON(res, 404, { error: 'Reseña no encontrada' });
   let d;
-  try { d = JSON.parse((await readBody(req, 4096)).toString('utf8') || '{}'); } catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
+  try { d = jsonObjeto((await readBody(req, 4096)).toString('utf8') || '{}'); } catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   const texto = limpiarTexto(d.texto, 600);
   db.prepare("UPDATE resenas SET respuesta = ?, respuesta_at = CASE WHEN ? = '' THEN '' ELSE datetime('now') END WHERE id = ?").run(texto, texto, r.id);
   sendJSON(res, 200, { ok: true });
@@ -3219,7 +3232,7 @@ route('POST', '/api/admin/resenas/:id/ocultar', async (req, res, params) => {
   const r = db.prepare('SELECT * FROM resenas WHERE id = ?').get(params.id);
   if (!r) return sendJSON(res, 404, { error: 'Reseña no encontrada' });
   let d = {};
-  try { d = JSON.parse((await readBody(req, 2048)).toString('utf8') || '{}'); } catch { /* nada */ }
+  try { d = jsonObjeto((await readBody(req, 2048)).toString('utf8') || '{}'); } catch { /* nada */ }
   const ocultar = d.ocultar !== false;
   const motivo = limpiarTexto(d.motivo, 200);
   if (ocultar && motivo.length < 5) return sendJSON(res, 400, { error: 'Escribe el motivo (por ejemplo: insultos, datos personales).' });
@@ -3233,7 +3246,7 @@ route('POST', '/api/admin/producers/:id/identidad', async (req, res, params) => 
   const p = db.prepare('SELECT id, identidad_verificada_at FROM producers WHERE id = ?').get(params.id);
   if (!p) return sendJSON(res, 404, { error: 'Productor no encontrado' });
   let d = {};
-  try { d = JSON.parse((await readBody(req, 1024)).toString('utf8') || '{}'); } catch { /* nada */ }
+  try { d = jsonObjeto((await readBody(req, 1024)).toString('utf8') || '{}'); } catch { /* nada */ }
   const marcar = d.verificada !== false;
   db.prepare(`UPDATE producers SET identidad_verificada_at = ${marcar ? "datetime('now')" : "''"} WHERE id = ?`).run(p.id);
   anotar(p.id, marcar ? 'Verificó tu identidad' : 'Quitó la verificación de identidad', marcar ? 'Tu perfil muestra la insignia «Identidad verificada»' : '');
@@ -3266,7 +3279,7 @@ route('POST', '/api/purchase/:token/content-id', async (req, res, params) => {
   const order = findOrderByBuyerToken(params.token);
   if (!order || order.status !== 'approved') return sendJSON(res, 404, { error: 'Esta compra no existe o todavía no fue aprobada' });
   let d;
-  try { d = JSON.parse((await readBody(req, 4096)).toString('utf8') || '{}'); } catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
+  try { d = jsonObjeto((await readBody(req, 4096)).toString('utf8') || '{}'); } catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   const plataforma = PLATAFORMAS_CID.includes(d.plataforma) ? d.plataforma : '';
   const reclamante = limpiarTexto(d.reclamante, 150);
   if (!plataforma) return sendJSON(res, 400, { error: 'Elige dónde te saltó el reclamo.' });
@@ -3292,7 +3305,7 @@ route('POST', '/api/admin/reclamos-cid/:id/resolver', async (req, res, params) =
   const r = db.prepare('SELECT * FROM reclamos_cid WHERE id = ?').get(params.id);
   if (!r) return sendJSON(res, 404, { error: 'Reporte no encontrado' });
   let d = {};
-  try { d = JSON.parse((await readBody(req, 2048)).toString('utf8') || '{}'); } catch { /* nada */ }
+  try { d = jsonObjeto((await readBody(req, 2048)).toString('utf8') || '{}'); } catch { /* nada */ }
   const nota = limpiarTexto(d.nota, 300);
   if (nota.length < 5) return sendJSON(res, 400, { error: 'Escribe cómo se resolvió (lo ve el comprador).' });
   db.prepare("UPDATE reclamos_cid SET estado = 'resuelto', nota = ?, resuelto_at = datetime('now') WHERE id = ?").run(nota, r.id);
@@ -3323,6 +3336,10 @@ async function verificarOriginalidad(id) {
   candidatos.push(path.join(UPLOADS_AUDIO, t.audio_filename || '-'));
   const archivo = candidatos.find(f => fs.existsSync(f));
   if (!archivo) throw new Error('no se encontró el audio para verificar');
+  if (!t.onda) {
+    try { db.prepare('UPDATE tracks SET onda = ? WHERE id = ?').run((await onda.calcular(archivo)) || '-', id); }
+    catch (e) { console.error(`Onda de la pista ${id}:`, e.message); }
+  }
   const h = await originalidad.huella(archivo);
   if (h.length < 40) {
     // un audio de menos de ~6 segundos no tiene huella útil: se deja constancia y no bloquea
@@ -3396,6 +3413,24 @@ function revisarOriginalidadPendiente() {
     ORDER BY t.approval_status = 'pending' DESC, t.id DESC LIMIT 5`).all();
   for (const f of filas) programarOriginalidad(f.id);
 }
+// Pistas que todavía no tienen forma de onda (las subidas antes de esta función): de a pocas
+let ondasEnCurso = false;
+async function completarOndas() {
+  if (ondasEnCurso) return;
+  ondasEnCurso = true;
+  try {
+    for (const t of db.prepare("SELECT id, master_filename, mp3_filename, audio_filename FROM tracks WHERE onda = '' OR onda IS NULL ORDER BY id DESC LIMIT 20").all()) {
+      const candidatos = [t.master_filename, t.mp3_filename].filter(Boolean).map(f => path.join(UPLOADS_MASTERS, f));
+      candidatos.push(path.join(UPLOADS_AUDIO, t.audio_filename || '-'));
+      const archivo = candidatos.find(f => fs.existsSync(f));
+      let o = '-';
+      if (archivo) { try { o = (await onda.calcular(archivo)) || '-'; } catch (e) { console.error(`Onda de la pista ${t.id}:`, e.message); } }
+      db.prepare('UPDATE tracks SET onda = ? WHERE id = ?').run(o, t.id);
+    }
+  } finally { ondasEnCurso = false; }
+}
+setTimeout(completarOndas, 4000).unref();
+setInterval(completarOndas, 60 * 1000).unref();
 setTimeout(revisarOriginalidadPendiente, 6000).unref();
 setInterval(revisarOriginalidadPendiente, 60 * 1000).unref();
 
@@ -3483,7 +3518,7 @@ function packParaPanel(t, nombres) {
 
 async function editarPack(req, res, track, { volverARevision, anotarCambios }) {
   let d;
-  try { d = JSON.parse((await readBody(req, 16 * 1024)).toString('utf8') || '{}'); }
+  try { d = jsonObjeto((await readBody(req, 16 * 1024)).toString('utf8') || '{}'); }
   catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   const titulo = limpiarTexto(d.title, 120);
   if (!titulo) return sendJSON(res, 400, { error: 'El nombre no puede quedar vacío' });
@@ -3532,7 +3567,7 @@ route('POST', '/api/producer/packs', async (req, res) => {
   if (!planVigente(full)) return sendJSON(res, 403, { error: `Tu plan ${plan.label} está vencido. Renuévalo para volver a subir.` });
   if (!full.active) return sendJSON(res, 403, { error: 'Tu cuenta está desactivada. Renueva tu plan o contacta al administrador.' });
   let d;
-  try { d = JSON.parse((await readBody(req, 64 * 1024)).toString('utf8') || '{}'); }
+  try { d = jsonObjeto((await readBody(req, 64 * 1024)).toString('utf8') || '{}'); }
   catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   if (d.declaraAutoria !== true) {
     return sendJSON(res, 400, { error: 'Confirma la declaración de autoría del pack.' });
@@ -3584,7 +3619,7 @@ route('GET', '/api/admin/packs', (req, res) => {
 route('POST', '/api/admin/packs', async (req, res) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   let d;
-  try { d = JSON.parse((await readBody(req, 64 * 1024)).toString('utf8') || '{}'); }
+  try { d = jsonObjeto((await readBody(req, 64 * 1024)).toString('utf8') || '{}'); }
   catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   let r;
   try { r = await crearPackDesdeSubidas(d, 'admin', { watermark: false }); }
@@ -3608,7 +3643,7 @@ route('POST', '/api/admin/packs/:id', async (req, res, params) => {
 route('POST', '/api/admin/tracks', async (req, res) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   let d;
-  try { d = JSON.parse((await readBody(req, 64 * 1024)).toString('utf8') || '{}'); }
+  try { d = jsonObjeto((await readBody(req, 64 * 1024)).toString('utf8') || '{}'); }
   catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   let r;
   try {
@@ -3636,7 +3671,7 @@ route('POST', '/api/producer/tracks', async (req, res) => {
     return sendJSON(res, 403, { error: `Tu plan ${plan.label} permite ${plan.maxBeats} beats activos y ya tienes ${activos}. Elimina alguno o sube de plan para publicar más.` });
   }
   let d;
-  try { d = JSON.parse((await readBody(req, 64 * 1024)).toString('utf8') || '{}'); }
+  try { d = jsonObjeto((await readBody(req, 64 * 1024)).toString('utf8') || '{}'); }
   catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   if (d.declaraAutoria !== true) {
     return sendJSON(res, 400, { error: 'Marca la casilla donde declaras que el beat es tuyo y que tienes los derechos de todo lo que usa.' });
@@ -3747,7 +3782,7 @@ route('POST', '/api/admin/coincidencias/:id/retirar', async (req, res, params) =
   const t = db.prepare('SELECT id, title, producer_id, is_pack FROM tracks WHERE id = ?').get(params.id);
   if (!t) return sendJSON(res, 404, { error: 'No encontrada' });
   let d = {};
-  try { d = JSON.parse((await readBody(req, 2048)).toString('utf8') || '{}'); } catch { /* sin cuerpo */ }
+  try { d = jsonObjeto((await readBody(req, 2048)).toString('utf8') || '{}'); } catch { /* sin cuerpo */ }
   const motivo = limpiarTexto(d.motivo, 300) || 'Coincide con otra obra (verificación de originalidad)';
   db.prepare("UPDATE tracks SET approval_status = 'rejected', rejection_reason = ? WHERE id = ?").run(motivo, t.id);
   // decidido: deja de figurar como pendiente de revisión
@@ -3761,7 +3796,7 @@ route('POST', '/api/admin/coincidencias/:id/mantener', async (req, res, params) 
   const v = db.prepare('SELECT * FROM originalidad WHERE track_id = ?').get(params.id);
   if (!t || !v) return sendJSON(res, 404, { error: 'No encontrada' });
   let d = {};
-  try { d = JSON.parse((await readBody(req, 2048)).toString('utf8') || '{}'); } catch { /* sin cuerpo */ }
+  try { d = jsonObjeto((await readBody(req, 2048)).toString('utf8') || '{}'); } catch { /* sin cuerpo */ }
   const motivo = limpiarTexto(d.motivo, 300);
   if (motivo.length < 10) return sendJSON(res, 400, { error: 'Indica el motivo (mínimo 10 caracteres).' });
   db.prepare("UPDATE originalidad SET override_motivo = ?, override_at = datetime('now') WHERE track_id = ?").run(motivo, t.id);
@@ -3777,7 +3812,7 @@ route('POST', '/api/admin/coincidencias/:id/mantener', async (req, res, params) 
 route('POST', '/api/admin/originalidad/config', async (req, res) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   let d = {};
-  try { d = JSON.parse((await readBody(req, 1024)).toString('utf8') || '{}'); } catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
+  try { d = jsonObjeto((await readBody(req, 1024)).toString('utf8') || '{}'); } catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   db.prepare('UPDATE platform_config SET orig_auto_retiro = ? WHERE id = 1').run(d.autoRetiro === false ? 0 : 1);
   sendJSON(res, 200, { ok: true, autoRetiro: autoRetiroActivo() });
 });
@@ -3811,7 +3846,7 @@ function consumoAudd() {
 route('POST', '/api/admin/originalidad/consumo', async (req, res) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   let d;
-  try { d = JSON.parse((await readBody(req, 1024)).toString('utf8') || '{}'); } catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
+  try { d = jsonObjeto((await readBody(req, 1024)).toString('utf8') || '{}'); } catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   const incluidas = Number(d.incluidas);
   if (!Number.isInteger(incluidas) || incluidas < 1 || incluidas > 10000000) return sendJSON(res, 400, { error: 'Indica las consultas que incluye tu plan de AudD.' });
   db.prepare('UPDATE platform_config SET audd_incluidas = ? WHERE id = 1').run(incluidas);
@@ -3834,7 +3869,7 @@ route('POST', '/api/admin/tracks/:id/price', async (req, res, params) => {
 
   try {
     const body = await readBody(req, 1024 * 5);
-    const raw = JSON.parse(body.toString('utf8'));
+    const raw = jsonObjeto(body.toString('utf8'));
     const prices = {
       basic: parsePrecio(raw.priceBasic ?? raw.priceCup),
       premium: parsePrecio(raw.pricePremium),
@@ -3876,7 +3911,7 @@ route('POST', '/api/admin/tracks/:id/info', async (req, res, params) => {
   const track = db.prepare('SELECT id, is_playlist, title, genre, description, producer_id FROM tracks WHERE id = ?').get(params.id);
   if (!track) return sendJSON(res, 404, { error: 'No encontrada' });
   let d;
-  try { d = JSON.parse((await readBody(req, 8192)).toString('utf8')); }
+  try { d = jsonObjeto((await readBody(req, 8192)).toString('utf8')); }
   catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   const titulo = limpiarTexto(d.title, 120);
   if (!titulo) return sendJSON(res, 400, { error: 'El título no puede quedar vacío' });
@@ -3946,7 +3981,7 @@ route('POST', '/api/admin/profile', async (req, res) => {
   }
 
   db.prepare('UPDATE profile SET artist_name = ?, bio = ?, avatar_filename = ? WHERE id = 1')
-    .run(fields.artist_name || current.artist_name, fields.bio ?? current.bio, avatarFilename);
+    .run(limpiarTexto(fields.artist_name, 80) || current.artist_name, fields.bio != null ? limpiarTexto(fields.bio, 600) : current.bio, avatarFilename);
 
   sendJSON(res, 200, { ok: true });
 });
@@ -3963,7 +3998,7 @@ route('POST', '/api/admin/payment-info', async (req, res) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   try {
     const body = await readBody(req, 1024 * 20);
-    const { contactPhone, accounts } = JSON.parse(body.toString('utf8'));
+    const { contactPhone, accounts } = jsonObjeto(body.toString('utf8'));
 
     if (!Array.isArray(accounts)) {
       return sendJSON(res, 400, { error: 'Formato de cuentas inválido' });
@@ -4011,7 +4046,7 @@ route('POST', '/api/admin/social-links', async (req, res) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   try {
     const body = await readBody(req, 1024 * 20);
-    const { links } = JSON.parse(body.toString('utf8'));
+    const { links } = jsonObjeto(body.toString('utf8'));
 
     if (!Array.isArray(links)) {
       return sendJSON(res, 400, { error: 'Formato de redes sociales inválido' });
@@ -4053,7 +4088,7 @@ route('POST', '/api/admin/exchange-rates', async (req, res) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   try {
     const body = await readBody(req, 1024 * 10);
-    const { rates, planUsdRate } = JSON.parse(body.toString('utf8'));
+    const { rates, planUsdRate } = jsonObjeto(body.toString('utf8'));
     if (!Array.isArray(rates)) return sendJSON(res, 400, { error: 'Formato de tasas inválido' });
     if (planUsdRate !== undefined) {
       db.prepare('UPDATE platform_config SET plan_usd_rate = ? WHERE id = 1').run(Math.max(0, parsePrecio(planUsdRate, 4) || 0));
@@ -4093,7 +4128,7 @@ route('POST', '/api/admin/site-config', async (req, res) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   try {
     const body = await readBody(req, 1024 * 10);
-    const { promoText, promoActive, scheduleText, discountPercent } = JSON.parse(body.toString('utf8'));
+    const { promoText, promoActive, scheduleText, discountPercent } = jsonObjeto(body.toString('utf8'));
     const pct = parseFloat(String(discountPercent ?? '0').replace(',', '.'));
     if (!Number.isFinite(pct) || pct < 0 || pct > 90) {
       return sendJSON(res, 400, { error: 'El descuento debe ser un número entre 0 y 90' });
@@ -4117,7 +4152,7 @@ route('POST', '/api/admin/commission', async (req, res) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   try {
     const body = await readBody(req, 1024 * 5);
-    const { commissionPercent } = JSON.parse(body.toString('utf8'));
+    const { commissionPercent } = jsonObjeto(body.toString('utf8'));
     const clean = Math.max(0, Math.min(100, parseFloat(commissionPercent) || 0));
     db.prepare('UPDATE platform_config SET commission_percent = ? WHERE id = 1').run(clean);
     sendJSON(res, 200, { ok: true });
@@ -4150,7 +4185,7 @@ route('POST', '/api/admin/producers', async (req, res) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   try {
     const body = await readBody(req, 1024 * 5);
-    const { name, email, password, phone } = JSON.parse(body.toString('utf8'));
+    const { name, email, password, phone } = jsonObjeto(body.toString('utf8'));
     const cleanEmail = limpiarTexto(email, 120).toLowerCase();
     const cleanName = limpiarTexto(name, 80);
     const cleanPhone = String(phone || '').replace(/[^0-9+]/g, '').slice(0, 20);
@@ -4193,7 +4228,7 @@ route('POST', '/api/admin/producers/:id/password', async (req, res, params) => {
   const p = db.prepare('SELECT id FROM producers WHERE id = ?').get(params.id);
   if (!p) return sendJSON(res, 404, { error: 'Productor no encontrado' });
   let password = '';
-  try { password = String(JSON.parse((await readBody(req, 2048)).toString('utf8')).password || ''); }
+  try { password = String(jsonObjeto((await readBody(req, 2048)).toString('utf8')).password || ''); }
   catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   if (password.length < 6) return sendJSON(res, 400, { error: 'La contraseña debe tener al menos 6 caracteres' });
   const { hash, salt } = producerAuth.hashPassword(password);
@@ -4209,7 +4244,7 @@ route('POST', '/api/admin/producers/:id/plan', async (req, res, params) => {
   if (!p) return sendJSON(res, 404, { error: 'Productor no encontrado' });
   try {
     const body = await readBody(req, 1024 * 5);
-    const { plan, paidUntil } = JSON.parse(body.toString('utf8'));
+    const { plan, paidUntil } = jsonObjeto(body.toString('utf8'));
     if (!PRODUCER_PLANS[plan]) return sendJSON(res, 400, { error: 'Plan inválido' });
     const fechaValida = /^\d{4}-\d{2}-\d{2}$/.test(String(paidUntil || ''));
     if (plan !== 'free') {
@@ -4258,7 +4293,7 @@ route('POST', '/api/admin/platform-config', async (req, res) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   try {
     const body = await readBody(req, 1024 * 10);
-    const d = JSON.parse(body.toString('utf8'));
+    const d = jsonObjeto(body.toString('utf8'));
     const num = (v) => parseFloat(String(v ?? '').replace(',', '.'));
     const pro = num(d.planPriceProUsd), studio = num(d.planPriceStudioUsd);
     if (!(pro > 0) || !(studio > 0)) return sendJSON(res, 400, { error: 'Pon el precio mensual en USD de los planes Pro y Studio' });
@@ -4415,6 +4450,11 @@ function redondearMoneda(n, moneda) {
   const f = Math.pow(10, dec);
   return Math.round((Number(n) || 0) * f) / f;
 }
+// Importe para mostrar en textos: con coma decimal y los decimales de esa moneda (19,05 · 1500)
+function fmtMonto(n, moneda) {
+  const dec = decimalesMoneda(moneda);
+  return (Number(n) || 0).toLocaleString('es', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+}
 const ETIQUETAS_VIEJAS = { USDT_BEP20: 'USDT (BEP20)', USDT_TRC20: 'USDT (TRC20)', USDT_POLYGON: 'USDT (Polygon)', BNB_BEP20: 'BNB (BEP20)', SALDO_MOVIL: 'Saldo Móvil' };
 // Precio que sale en la licencia y en la verificación: lo calcula el servidor, nunca lo manda el comprador
 function etiquetaPrecioVenta(priceCup, pago) {
@@ -4522,7 +4562,7 @@ function movimientosProductor(producerId) {
       clave: 'venta:' + o.id, id: o.id, borrable: true,
       fecha: normalizarFecha(o.fecha), tipo: 'venta',
       titulo: `Venta · ${o.track_title}`,
-      detalle: `${LICENSE_LABELS[o.license_type] || o.license_type} · el comprador pagó ${redondearMoneda(o.paid_units || o.price_cup_at_sale, o.moneda)} ${etiquetaMoneda(o.moneda)} · comisión ${o.commission_percent_at_sale || 0}%`,
+      detalle: `${LICENSE_LABELS[o.license_type] || o.license_type} · el comprador pagó ${fmtMonto(o.paid_units || o.price_cup_at_sale, o.moneda)} ${etiquetaMoneda(o.moneda)} · comisión ${o.commission_percent_at_sale || 0}%`,
       moneda: o.moneda, label: etiquetaMoneda(o.moneda), unidades: Number(o.producer_earning_units) || 0,
       estado: antiguo ? 'cobrada antes' : '',
     });
@@ -4536,7 +4576,7 @@ function movimientosProductor(producerId) {
       clave: 'venta:' + o.id, id: o.id, borrable: false,
       fecha: normalizarFecha(o.created_at), tipo: 'venta',
       titulo: `Venta · ${o.track_title}`,
-      detalle: `${LICENSE_LABELS[o.license_type] || o.license_type} · el comprador pagó ${redondearMoneda(o.paid_units || o.price_cup_at_sale, o.moneda)} ${etiquetaMoneda(o.moneda)} · se suma cuando el administrador apruebe el pago`,
+      detalle: `${LICENSE_LABELS[o.license_type] || o.license_type} · el comprador pagó ${fmtMonto(o.paid_units || o.price_cup_at_sale, o.moneda)} ${etiquetaMoneda(o.moneda)} · se suma cuando el administrador apruebe el pago`,
       moneda: o.moneda, label: etiquetaMoneda(o.moneda), unidades: 0, estado: 'esperando aprobación',
     });
   }
@@ -4587,7 +4627,7 @@ function movimientosProductor(producerId) {
       fecha: normalizarFecha(w.created_at), tipo: 'retiro',
       titulo: 'Retiro de dinero',
       detalle: `Recibes ${Number(w.net_units).toLocaleString('es', { minimumFractionDigits: dec, maximumFractionDigits: dec })} ${w.currency_label || w.currency}` +
-        (w.fee_units ? ` (fee ${w.fee_units})` : '') + ` · ${w.account_text}` + (w.note ? ` · ${w.note}` : ''),
+        (w.fee_units ? ` (fee de red ${fmtMonto(w.fee_units, w.currency)})` : '') + ` · ${w.account_text}` + (w.note ? ` · ${w.note}` : ''),
       moneda, label: etiquetaMoneda(moneda), unidades: w.status === 'cancelled' ? 0 : -u, montoOriginal: -u,
       estado: estados[w.status] || w.status,
       comprobanteUrl: w.proof_filename ? `/api/producer/withdrawals/${w.id}/comprobante` : '',
@@ -4621,7 +4661,7 @@ function sinOcultos(lista, items, claveDe) {
 // accion 'ocultar' con las claves permitidas, o 'restaurar' para volver a mostrar todo
 async function cambiarHistorial(req, res, lista, permitidas) {
   let d;
-  try { d = JSON.parse((await readBody(req, 256 * 1024)).toString('utf8') || '{}'); }
+  try { d = jsonObjeto((await readBody(req, 256 * 1024)).toString('utf8') || '{}'); }
   catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   if (d.accion === 'restaurar') {
     const n = db.prepare('DELETE FROM historial_oculto WHERE lista = ?').run(lista).changes;
@@ -4779,7 +4819,7 @@ route('POST', '/api/producer/withdrawals', async (req, res) => {
   let currencyPedida = '';
   let montoPedido = null;
   try {
-    const body = JSON.parse((await readBody(req, 1024 * 2)).toString('utf8') || '{}');
+    const body = jsonObjeto((await readBody(req, 1024 * 2)).toString('utf8') || '{}');
     currency = String(body.currency || 'CUP').slice(0, 30);
     currencyPedida = String(body.currency || '').slice(0, 30);
     walletPedida = String(body.wallet || '').slice(0, 30);
@@ -4807,7 +4847,7 @@ route('POST', '/api/producer/withdrawals', async (req, res) => {
   // se puede retirar la cantidad que quiera, siempre que no pase de lo que tiene en esa billetera
   const monto = montoPedido == null ? b.unidades : redondearMoneda(montoPedido, b.code);
   if (!(monto > 0)) return sendJSON(res, 400, { error: 'Escribe cuánto quieres retirar.' });
-  if (monto > b.unidades + 1e-9) return sendJSON(res, 400, { error: `No puedes retirar más de lo que tienes: ${b.unidades} ${b.label}.` });
+  if (monto > b.unidades + 1e-9) return sendJSON(res, 400, { error: `No puedes retirar más de lo que tienes: ${fmtMonto(b.unidades, b.code)} ${b.label}.` });
   const calc = calcularRetiroBilletera(b, currency, monto);
   if (!calc.ok) return sendJSON(res, 400, { error: calc.error });
   const montoCup = b.code === 'CUP' ? monto : redondear(b.cupEquivalente * (monto / b.unidades));
@@ -4866,7 +4906,7 @@ route('POST', '/api/admin/withdrawals/:id/paid', async (req, res, params) => {
   let comprobante = '';
   try {
     const b = await readBody(req, Math.ceil(MAX_RECEIPT_BYTES * 1.4) + 4096);
-    if (b.length) { const d = JSON.parse(b.toString('utf8')); note = String(d.note || '').slice(0, 300).trim(); comprobante = String(d.comprobante || ''); }
+    if (b.length) { const d = jsonObjeto(b.toString('utf8')); note = String(d.note || '').slice(0, 300).trim(); comprobante = String(d.comprobante || ''); }
   } catch { return sendJSON(res, 400, { error: 'Solicitud inválida o imagen demasiado grande' }); }
   const w = db.prepare('SELECT * FROM producer_withdrawals WHERE id = ?').get(params.id);
   if (!w) return sendJSON(res, 404, { error: 'Retiro no encontrado' });
@@ -4878,7 +4918,7 @@ route('POST', '/api/admin/withdrawals/:id/paid', async (req, res, params) => {
   }
   db.prepare("UPDATE producer_withdrawals SET status = 'paid', note = ?, proof_filename = ?, resolved_at = datetime('now') WHERE id = ?").run(note, proof, w.id);
   const tarde = Date.now() > fechaUtc(w.due_at).getTime();
-  anotar(w.producer_id, 'Te pagó un retiro', `${w.net_units} ${w.currency_label || w.currency} a ${w.account_text}` +
+  anotar(w.producer_id, 'Te pagó un retiro', `${fmtMonto(w.net_units, w.currency)} ${w.currency_label || w.currency} a ${w.account_text}` +
     (proof ? ' · con captura del pago' : ' · sin captura del pago') + (tarde ? ' · fuera del plazo de tu plan' : '') + (note ? ` · nota: ${note}` : ''));
   db.prepare('UPDATE orders SET producer_paid = 1 WHERE withdrawal_id = ?').run(w.id);
   db.prepare('UPDATE producer_credits SET paid = 1 WHERE withdrawal_id = ?').run(w.id);
@@ -4888,13 +4928,13 @@ route('POST', '/api/admin/withdrawals/:id/paid', async (req, res, params) => {
 route('POST', '/api/admin/withdrawals/:id/cancel', async (req, res, params) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   let note = '';
-  try { const b = await readBody(req, 2048); if (b.length) note = String(JSON.parse(b.toString('utf8')).note || '').slice(0, 300).trim(); }
+  try { const b = await readBody(req, 2048); if (b.length) note = String(jsonObjeto(b.toString('utf8')).note || '').slice(0, 300).trim(); }
   catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   const w = db.prepare('SELECT * FROM producer_withdrawals WHERE id = ?').get(params.id);
   if (!w) return sendJSON(res, 404, { error: 'Retiro no encontrado' });
   if (w.status !== 'pending') return sendJSON(res, 409, { error: 'Este retiro ya fue resuelto' });
   db.prepare("UPDATE producer_withdrawals SET status = 'cancelled', note = ?, resolved_at = datetime('now') WHERE id = ?").run(note, w.id);
-  anotar(w.producer_id, 'Canceló un retiro', `${w.net_units} ${w.currency_label || w.currency} (el dinero volvió a tu saldo)` + (note ? ` · motivo: ${note}` : ''));
+  anotar(w.producer_id, 'Canceló un retiro', `${fmtMonto(w.net_units, w.currency)} ${w.currency_label || w.currency} (el dinero volvió a tu saldo)` + (note ? ` · motivo: ${note}` : ''));
   db.prepare('UPDATE orders SET withdrawal_id = NULL WHERE withdrawal_id = ?').run(w.id);
   db.prepare('UPDATE producer_credits SET withdrawal_id = NULL WHERE withdrawal_id = ?').run(w.id);
   sendJSON(res, 200, { ok: true });
@@ -5083,7 +5123,7 @@ route('POST', '/api/admin/tracks/:id/approve', async (req, res, params) => {
   // Verificación de originalidad obligatoria antes de publicar lo de un productor
   if (track.producer_id && track.approval_status !== 'approved') {
     let d = {};
-    try { const b = await readBody(req, 4096); if (b.length) d = JSON.parse(b.toString('utf8')); } catch { /* sin cuerpo */ }
+    try { const b = await readBody(req, 4096); if (b.length) d = jsonObjeto(b.toString('utf8')); } catch { /* sin cuerpo */ }
     let v = db.prepare('SELECT * FROM originalidad WHERE track_id = ?').get(track.id);
     if (!v || v.estado === 'pendiente') {
       // si está en curso, se espera un poco (casi siempre tarda unos segundos)
@@ -5121,7 +5161,7 @@ route('POST', '/api/admin/tracks/:id/reject', async (req, res, params) => {
   let reason = '';
   try {
     const body = await readBody(req, 1024 * 2);
-    if (body.length) reason = (JSON.parse(body.toString('utf8')).reason || '').slice(0, 300).trim();
+    if (body.length) reason = (jsonObjeto(body.toString('utf8')).reason || '').slice(0, 300).trim();
   } catch { /* rechazo sin motivo también es válido */ }
   db.prepare("UPDATE tracks SET approval_status = 'rejected', rejection_reason = ? WHERE id = ?").run(reason, params.id);
   anotar(track.producer_id, track.is_pack ? 'Rechazó tu Sample Pack' : 'Rechazó tu beat', `«${track.title}»` + (reason ? ` · motivo: ${reason}` : ''), track.id);
@@ -5154,7 +5194,7 @@ let restaurando = false;
 route('POST', '/api/admin/restore', async (req, res) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   let d;
-  try { d = JSON.parse((await readBody(req, 4096)).toString('utf8') || '{}'); }
+  try { d = jsonObjeto((await readBody(req, 4096)).toString('utf8') || '{}'); }
   catch { return sendJSON(res, 400, { error: 'Solicitud inválida. Actualiza la página del panel y vuelve a intentarlo.' }); }
   let up;
   try { up = tomarSubida(d.uploadId, 'admin', 'backup'); }
@@ -5207,7 +5247,7 @@ const MOTIVOS_DENUNCIA = { autor: 'El beat es mío y lo subió otra persona', sa
 route('POST', '/api/denuncias', async (req, res) => {
   if (!rateLimit(req, 'denuncia', 5, 60 * 60 * 1000)) return sendJSON(res, 429, { error: 'Ya enviaste varias denuncias. Intenta más tarde.' });
   let d;
-  try { d = JSON.parse((await readBody(req, 16 * 1024)).toString('utf8') || '{}'); }
+  try { d = jsonObjeto((await readBody(req, 16 * 1024)).toString('utf8') || '{}'); }
   catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   const beat = limpiarTexto(d.beat, 160), nombre = limpiarTexto(d.nombre, 80), contacto = limpiarTexto(d.contacto, 120), detalle = limpiarTexto(d.detalle, 1500);
   const motivo = Object.prototype.hasOwnProperty.call(MOTIVOS_DENUNCIA, d.motivo) ? d.motivo : '';
@@ -5281,7 +5321,7 @@ route('GET', '/api/admin/summary', (req, res, params, query) => {
 route('POST', '/api/admin/ventas/reiniciar-contador', async (req, res) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   let d = {};
-  try { const b = await readBody(req, 512); if (b.length) d = JSON.parse(b.toString('utf8')); } catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
+  try { const b = await readBody(req, 512); if (b.length) d = jsonObjeto(b.toString('utf8')); } catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   const valor = d.deshacer ? '' : sqlFecha(new Date());
   db.prepare('UPDATE platform_config SET stats_desde = ? WHERE id = 1').run(valor);
   sendJSON(res, 200, { ok: true, contadorDesde: valor ? normalizarFecha(valor) : '' });
@@ -5294,7 +5334,7 @@ route('POST', '/api/admin/ventas/reiniciar-contador', async (req, res) => {
 route('POST', '/api/admin/ventas/borrar-todo', async (req, res) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   let d = {};
-  try { d = JSON.parse((await readBody(req, 512)).toString('utf8') || '{}'); } catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
+  try { d = jsonObjeto((await readBody(req, 512)).toString('utf8') || '{}'); } catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   if (String(d.confirmar || '').trim().toUpperCase() !== 'BORRAR') return sendJSON(res, 400, { error: 'Escribe BORRAR para confirmar.' });
   const copia = path.join(DATA_ROOT, 'db', `respaldo-antes-de-borrar-ventas-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.db`);
   try { db.exec(`VACUUM INTO '${copia.replace(/'/g, "''")}'`); }
@@ -5351,7 +5391,7 @@ route('POST', '/api/admin/orders/:id/reject', async (req, res, params) => {
   if (!order) return sendJSON(res, 404, { error: 'Pedido no encontrado' });
   if (order.status !== 'pending') return sendJSON(res, 409, { error: 'Este pedido ya fue respondido' });
   let reason = '';
-  try { const b = await readBody(req, 2048); if (b.length) reason = limpiarTexto(JSON.parse(b.toString('utf8')).reason, 300); }
+  try { const b = await readBody(req, 2048); if (b.length) reason = limpiarTexto(jsonObjeto(b.toString('utf8')).reason, 300); }
   catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   db.prepare("UPDATE orders SET status = 'rejected', reject_reason = ?, rejected_at = datetime('now') WHERE id = ?").run(reason, order.id);
   anotar(order.producer_id, 'Rechazó un pago de tu beat', `«${order.track_title}» · ${LICENSE_LABELS[order.license_type] || order.license_type} · ${order.price_label}` + (reason ? ` · motivo: ${reason}` : ''), order.track_id);
@@ -5678,10 +5718,13 @@ function serveStatic(req, res, pathname, query) {
       '.png': 'image/png',
       '.ico': 'image/x-icon',
       '.webmanifest': 'application/manifest+json',
+      '.woff2': 'font/woff2',
+      '.txt': 'text/plain; charset=utf-8',
     };
     res.writeHead(200, {
       'Content-Type': types[ext] || 'application/octet-stream',
-      'Cache-Control': ext === '.svg' ? 'public, max-age=86400' : 'no-cache',
+      // las fuentes no cambian nunca (si cambian, cambia el nombre del archivo): se guardan un año
+      'Cache-Control': ext === '.woff2' ? 'public, max-age=31536000, immutable' : ext === '.svg' ? 'public, max-age=86400' : 'no-cache',
     });
     res.end(data);
   });

@@ -2,23 +2,24 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Panel de administración · Zona Beats</title>
-<meta name="theme-color" content="#0c0a12">
+<meta name="theme-color" content="#15101a">
 <meta name="robots" content="noindex">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preload" href="/fonts/atkinson-next-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/tokens.css">
-<link rel="stylesheet" href="/admin/admin.css">
 <link rel="stylesheet" href="/packs.css">
+<link rel="stylesheet" href="/admin/admin.css">
 </head>
 <body>
 
-  <!-- Pantalla de login -->
+  <!-- ===================== Entrada ===================== -->
   <div class="login-screen" id="login-screen">
-    <div class="login-box">
-      <div class="login-badge">ZONA BEATS</div>
+    <main class="login-box">
+      <div class="login-brand"><span class="dot" aria-hidden="true"></span>Zona Beats</div>
       <h1>Panel de administración</h1>
-      <p>Acceso exclusivo del administrador.</p>
+      <p class="login-sub">Acceso exclusivo del administrador.</p>
       <div class="field">
         <label for="password-input">Contraseña</label>
         <div class="password-field-wrap">
@@ -27,690 +28,912 @@
         </div>
       </div>
       <button class="btn-primary" id="login-btn">Entrar</button>
-      <div class="error-msg" id="login-error">Contraseña incorrecta.</div>
-    </div>
+      <div class="error-msg" id="login-error" role="alert">Contraseña incorrecta.</div>
+    </main>
   </div>
 
-  <!-- Dashboard -->
+  <!-- ===================== Panel ===================== -->
   <div class="admin-shell" id="admin-shell">
-    <div class="admin-topbar">
-      <div class="admin-brand"><span class="dot"></span> PANEL DE ADMINISTRACIÓN</div>
-      <div class="admin-topbar-actions">
-        <a class="btn-backup" href="/" target="_blank" rel="noopener">Ver tienda</a>
-        <button class="btn-logout" id="logout-btn">Cerrar sesión</button>
+    <header class="dash-rail">
+      <div class="rail-brand">
+        <span class="dot" aria-hidden="true"></span>
+        <span class="rb-name">Zona Beats</span>
+        <span class="rb-sub">Administración</span>
       </div>
+
+      <nav class="dash-nav" id="admin-nav" aria-label="Secciones del panel">
+        <button type="button" class="admin-nav-btn active" data-cat="ventas">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 3.5h12v17l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 11.5h6M9 15h3"/></svg>
+          <span class="nl">Ventas</span><span class="nav-badge" data-for="ventas"></span>
+        </button>
+        <button type="button" class="admin-nav-btn" data-cat="productores">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><path d="M15.5 5.6a3 3 0 0 1 0 5.8M17.6 14.3a5.4 5.4 0 0 1 2.9 4.7"/></svg>
+          <span class="nl">Productores</span><span class="nav-badge" data-for="productores"></span>
+        </button>
+        <button type="button" class="admin-nav-btn" data-cat="pagos">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><ellipse cx="12" cy="6.8" rx="7" ry="2.8"/><path d="M5 6.8v5c0 1.6 3.1 2.8 7 2.8s7-1.2 7-2.8v-5"/><path d="M5 11.8v5c0 1.6 3.1 2.8 7 2.8s7-1.2 7-2.8v-5"/></svg>
+          <span class="nl">Pagos</span><span class="nav-badge" data-for="pagos"></span>
+        </button>
+        <button type="button" class="admin-nav-btn" data-cat="musica">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="2.6"/><path d="M12 6.2a5.8 5.8 0 0 1 5.8 5.8"/></svg>
+          <span class="nl">Música</span><span class="nav-badge" data-for="musica"></span>
+        </button>
+        <button type="button" class="admin-nav-btn solo-pc" data-cat="tienda">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 9.5 5.5 4.5h13L20 9.5"/><path d="M4 9.5a2.7 2.7 0 0 0 5.3 0 2.7 2.7 0 0 0 5.4 0 2.7 2.7 0 0 0 5.3 0"/><path d="M5.5 12v7.5h13V12M10 19.5v-4h4v4"/></svg>
+          <span class="nl">Tienda y cobros</span>
+        </button>
+        <button type="button" class="admin-nav-btn solo-pc" data-cat="ajustes">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
+          <span class="nl">Ajustes</span><span class="nav-badge" data-for="ajustes"></span>
+        </button>
+        <button type="button" class="nav-mas solo-movil" id="nav-mas" aria-expanded="false" aria-controls="menu-mas">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="5.5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="18.5" cy="12" r="1.3"/></svg>
+          <span class="nl">Más</span><span class="nav-badge" id="nav-mas-badge"></span>
+        </button>
+      </nav>
+
+      <div class="rail-user">
+        <a class="btn-ver-tienda" href="/" target="_blank" rel="noopener" title="Ver tienda">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M14 4.5h5.5V10M19.5 4.5 11 13"/><path d="M18 14v4.5a1 1 0 0 1-1 1H5.5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1H10"/></svg>
+          <span class="lo-txt">Ver tienda</span>
+        </a>
+        <button type="button" class="btn-logout" id="logout-btn" title="Cerrar sesión" aria-label="Cerrar sesión">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M14.5 4.5h3A1.5 1.5 0 0 1 19 6v12a1.5 1.5 0 0 1-1.5 1.5h-3"/><path d="M10 8l-4 4 4 4M6 12h9"/></svg>
+          <span class="lo-txt">Cerrar sesión</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- En el teléfono, «Más» abre las secciones de uso ocasional -->
+    <div class="menu-mas" id="menu-mas" hidden>
+      <button type="button" class="admin-nav-btn" data-cat="tienda">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 9.5 5.5 4.5h13L20 9.5"/><path d="M4 9.5a2.7 2.7 0 0 0 5.3 0 2.7 2.7 0 0 0 5.4 0 2.7 2.7 0 0 0 5.3 0"/><path d="M5.5 12v7.5h13V12M10 19.5v-4h4v4"/></svg>
+        <span class="nl">Tienda y cobros</span>
+      </button>
+      <button type="button" class="admin-nav-btn" data-cat="ajustes">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
+        <span class="nl">Ajustes</span><span class="nav-badge" data-for="ajustes"></span>
+      </button>
     </div>
 
-    <nav class="admin-nav" id="admin-nav" aria-label="Secciones">
-      <button type="button" class="admin-nav-btn active" data-cat="ventas">Ventas <span class="nav-badge" data-for="ventas"></span></button>
-      <button type="button" class="admin-nav-btn" data-cat="productores">Productores <span class="nav-badge" data-for="productores"></span></button>
-      <button type="button" class="admin-nav-btn" data-cat="musica">Mi música</button>
-      <button type="button" class="admin-nav-btn" data-cat="packs">Sample Packs <span class="nav-badge" data-for="packs"></span></button>
-      <button type="button" class="admin-nav-btn" data-cat="tienda">Tienda y cobros</button>
-      <button type="button" class="admin-nav-btn" data-cat="ajustes">Ajustes</button>
-    </nav>
+    <main class="admin-main" id="contenido" tabindex="-1">
+      <div class="orig-alerta" id="orig-alerta" role="alert" hidden>
+        <div class="orig-alerta-txt"><strong id="orig-alerta-n"></strong><span id="orig-alerta-det">Quien las licencie puede recibir reclamos de Content ID.</span></div>
+        <button type="button" class="orig-alerta-btn" id="orig-alerta-btn">Revisar ahora</button>
+      </div>
 
-    <div class="orig-alerta" id="orig-alerta" role="alert" hidden>
-      <div class="orig-alerta-txt"><strong id="orig-alerta-n"></strong><span>Coinciden con canciones publicadas u otras obras de la tienda. Un artista que las licencie puede recibir reclamos de Content ID.</span></div>
-      <button type="button" class="orig-alerta-btn" id="orig-alerta-btn">Revisar ahora</button>
-    </div>
+      <!-- ===================== VENTAS ===================== -->
+      <section class="cat-page active" data-cat="ventas" aria-labelledby="t-ventas">
+        <header class="page-head">
+          <h1 id="t-ventas">Ventas</h1>
+          <div class="subtabs" data-grupo="ventas" role="group" aria-label="Partes de Ventas">
+            <button type="button" class="subtab active" data-sub="resumen">Resumen</button>
+            <button type="button" class="subtab" data-sub="comprobantes">Comprobantes <span class="n"></span></button>
+            <button type="button" class="subtab" data-sub="historial">Historial</button>
+          </div>
+        </header>
 
-    <main class="admin-main">
-
-      <div class="panel panel-prioridad" data-cat="musica" id="coincidencias-panel" hidden>
-        <div class="panel-header-row">
-          <h2>Coincidencias de originalidad</h2>
-          <span class="badge-count show" id="coincidencias-count"></span>
+        <div data-grupo-panel="ventas" data-sub="resumen">
+          <div class="panel summary-panel">
+            <h2 class="h-pc">Resumen</h2>
+            <div class="summary-grid" id="admin-summary"><div class="skel-wrap skel-filas-chicas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row sm"></div><div class="skel skel-row sm"></div></div></div>
+            <div class="subpanel-row">
+              <h3 class="subpanel-title">Por atender</h3>
+              <button type="button" class="btn-link" id="summary-refresh">Actualizar</button>
+            </div>
+            <div class="summary-pending" id="admin-pending"></div>
+            <details class="reset-ventas">
+              <summary>Reiniciar ventas</summary>
+              <div class="reset-opcion">
+                <strong>Reiniciar el contador</strong>
+                <p class="panel-hint compact">Los totales vuelven a cero. Las ventas se conservan en el historial.</p>
+                <div class="reset-acciones">
+                  <button type="button" class="btn-secondary" id="reset-contador">Reiniciar contador</button>
+                  <button type="button" class="btn-link" id="reset-deshacer" hidden>Volver a contar todo</button>
+                </div>
+              </div>
+              <div class="reset-opcion peligro">
+                <strong>Borrar todas las ventas (de prueba)</strong>
+                <p class="panel-hint compact">Elimina todas las ventas, licencias, bonos, retiros y saldos. Los beats vendidos con licencia única vuelven al catálogo; productores, beats y planes se mantienen. <a href="/api/admin/backup?tipo=datos" download>Descarga antes una copia de seguridad</a>.</p>
+                <button type="button" class="btn-delete" id="reset-borrar">Borrar todas las ventas…</button>
+              </div>
+            </details>
+          </div>
         </div>
-        <p class="panel-hint" id="coincidencias-hint"></p>
-        <div id="coincidencias-list"></div>
-      </div>
 
-      <div class="panel" data-cat="musica">
-        <h2>Subir nueva pista</h2>
-        <form id="upload-form">
-          <div class="upload-grid">
-            <div>
-              <div class="field">
-                <label for="title-input">Título</label>
-                <input type="text" id="title-input" placeholder="Nombre del set o track" required>
-              </div>
-              <div class="field">
-                <label for="genre-input">Género / etiqueta</label>
-                <input type="text" id="genre-input" placeholder="House, Reggaetón, Techno…">
-              </div>
-              <div class="field">
-                <label for="description-input">Descripción</label>
-                <textarea id="description-input" rows="3" maxlength="600" placeholder="BPM, tonalidad, vibra, referencias…"></textarea>
-              </div>
+        <div data-grupo-panel="ventas" data-sub="comprobantes" hidden>
+          <div class="panel">
+            <div class="panel-header-row">
+              <h2>Comprobantes de compra</h2>
+              <span class="badge-count" id="orders-count"></span>
+            </div>
+            <p class="panel-hint">Pagos pendientes de confirmar. Al aprobar, el artista recibe su licencia y sus archivos.</p>
+            <div id="orders-list"><div class="skel-wrap skel-filas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div></div></div>
+          </div>
+        </div>
 
+        <div data-grupo-panel="ventas" data-sub="historial" hidden>
+          <div class="panel">
+            <div class="panel-header-row">
+              <h2>Historial de compras</h2>
+              <span class="badge-count" id="history-count"></span>
+            </div>
+            <div class="buscar-fila">
+              <input type="search" id="history-search" class="history-search" placeholder="Buscar por nombre, teléfono, beat o número de licencia" aria-label="Buscar en el historial">
+              <div class="hist-tools" data-hist="compras">
+                <button type="button" class="hist-btn hist-download">Descargar</button>
+                <button type="button" class="hist-btn danger hist-clear">Borrar historial</button>
+                <button type="button" class="hist-btn hist-restore" hidden>Restaurar borrados</button>
+              </div>
+            </div>
+            <div id="history-list"><div class="skel-wrap skel-filas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== PRODUCTORES ===================== -->
+      <section class="cat-page" data-cat="productores" aria-labelledby="t-productores">
+        <header class="page-head">
+          <h1 id="t-productores">Productores</h1>
+          <div class="subtabs" data-grupo="productores" role="group" aria-label="Partes de Productores">
+            <button type="button" class="subtab active" data-sub="revisar">Revisar <span class="n"></span></button>
+            <button type="button" class="subtab" data-sub="cuentas">Cuentas <span class="n"></span></button>
+            <button type="button" class="subtab" data-sub="reclamos">Reclamos <span class="n"></span></button>
+            <button type="button" class="subtab" data-sub="resenas">Reseñas</button>
+          </div>
+        </header>
+
+        <div data-grupo-panel="productores" data-sub="revisar">
+          <div class="panel">
+            <div class="panel-header-row">
+              <h2>Beats de productores por revisar</h2>
+              <span class="badge-count" id="pending-tracks-count"></span>
+            </div>
+            <p class="panel-hint">Ningún beat de productor se publica sin tu aprobación.</p>
+            <div id="pending-tracks-list"><div class="skel-wrap skel-filas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row"></div><div class="skel skel-row"></div></div></div>
+          </div>
+        </div>
+
+        <div data-grupo-panel="productores" data-sub="cuentas" hidden>
+          <div class="panel">
+            <div class="panel-header-row">
+              <h2>Productores</h2>
+              <span class="badge-count" id="producers-count"></span>
+            </div>
+            <div class="prod-filtros" role="group" aria-label="Filtrar productores">
+              <button type="button" class="prod-filtro active" data-filtro="pendientes" aria-pressed="true">Por aprobar <span class="prod-filtro-n" id="prod-n-pend"></span></button>
+              <button type="button" class="prod-filtro" data-filtro="activos" aria-pressed="false">Aprobados <span class="prod-filtro-n" id="prod-n-act"></span></button>
+            </div>
+            <details class="crear-prod">
+              <summary>Crear un productor</summary>
+              <form id="create-producer-form" class="inline-form">
+                <div class="field">
+                  <label for="producer-name-input">Nombre</label>
+                  <input type="text" id="producer-name-input" placeholder="Nombre del productor" required>
+                </div>
+                <div class="field">
+                  <label for="producer-email-input">Correo</label>
+                  <input type="email" id="producer-email-input" placeholder="correo@ejemplo.com" required>
+                </div>
+                <div class="field">
+                  <label for="producer-phone-input">WhatsApp</label>
+                  <input type="tel" id="producer-phone-input" placeholder="Ej: 5355512345" inputmode="tel">
+                </div>
+                <div class="field">
+                  <label for="producer-password-input">Contraseña</label>
+                  <div class="password-field-wrap">
+                    <input type="password" id="producer-password-input" placeholder="Mín. 6 caracteres" required>
+                    <button type="button" class="btn-toggle-password" id="toggle-producer-password">Mostrar</button>
+                  </div>
+                </div>
+                <button type="submit" class="btn-primary">Crear productor</button>
+              </form>
+            </details>
+            <div id="producers-list"><div class="skel-wrap skel-filas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div></div></div>
+            <p class="panel-hint pie">Un productor desactivado no puede entrar ni publicar; sus ventas se conservan.</p>
+          </div>
+        </div>
+
+        <div data-grupo-panel="productores" data-sub="reclamos" hidden>
+          <div class="subtabs mini" data-grupo="reclamos" role="group" aria-label="Tipo de reclamo">
+            <button type="button" class="subtab active" data-sub="denuncias">Derechos de autor <span class="n"></span></button>
+            <button type="button" class="subtab" data-sub="cid">Content ID <span class="n"></span></button>
+          </div>
+          <div data-grupo-panel="reclamos" data-sub="denuncias">
+            <div class="panel" id="denuncias-panel">
+              <div class="panel-header-row">
+                <h2>Denuncias de derechos de autor</h2>
+                <span class="badge-count" id="denuncias-count"></span>
+              </div>
+              <p class="panel-hint">Reportes de posibles infracciones de derechos de autor.</p>
+              <div id="denuncias-list"></div>
+            </div>
+          </div>
+          <div data-grupo-panel="reclamos" data-sub="cid" hidden>
+            <div class="panel" id="cid-panel">
+              <div class="panel-header-row">
+                <h2>Reclamos de Content ID</h2>
+                <span class="badge-count" id="cid-count"></span>
+              </div>
+              <p class="panel-hint">Artistas con licencia que recibieron un reclamo en alguna plataforma. El productor debe liberarlo.</p>
+              <div id="cid-list"></div>
+            </div>
+          </div>
+        </div>
+
+        <div data-grupo-panel="productores" data-sub="resenas" hidden>
+          <div class="panel" id="resenas-panel">
+            <div class="panel-header-row">
+              <h2>Reseñas de compradores</h2>
+              <span class="badge-count" id="resenas-count"></span>
+            </div>
+            <p class="panel-hint">Reseñas de compras verificadas. Solo pueden ocultarse con un motivo.</p>
+            <div id="resenas-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== PAGOS ===================== -->
+      <section class="cat-page" data-cat="pagos" aria-labelledby="t-pagos">
+        <header class="page-head">
+          <h1 id="t-pagos">Pagos</h1>
+          <div class="subtabs" data-grupo="pagos" role="group" aria-label="Partes de Pagos">
+            <button type="button" class="subtab active" data-sub="retiros">Retiros <span class="n"></span></button>
+            <button type="button" class="subtab" data-sub="planes">Planes <span class="n"></span></button>
+            <button type="button" class="subtab" data-sub="hots">Hots <span class="n"></span></button>
+            <button type="button" class="subtab" data-sub="reglas">Reglas</button>
+          </div>
+        </header>
+
+        <div data-grupo-panel="pagos" data-sub="retiros">
+          <div class="panel">
+            <div class="panel-header-row">
+              <h2>Retiros de productores</h2>
+              <span class="badge-count" id="payouts-count"></span>
+            </div>
+            <div class="subtabs mini" data-grupo="retiros" role="group" aria-label="Retiros">
+              <button type="button" class="subtab active" data-sub="pedidos">Por pagar</button>
+              <button type="button" class="subtab" data-sub="sinpedir">Saldos sin pedir</button>
+              <button type="button" class="subtab" data-sub="pagados">Resueltos</button>
+            </div>
+            <div data-grupo-panel="retiros" data-sub="pedidos">
+              <p class="panel-hint">Solicitudes de retiro con su plazo de pago.</p>
+              <div id="payouts-list"><div class="skel-wrap skel-filas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row"></div></div></div>
+            </div>
+            <div data-grupo-panel="retiros" data-sub="sinpedir" hidden>
+              <p class="panel-hint">Saldos que los productores todavía no pidieron retirar.</p>
+              <div id="payouts-unrequested"><div class="skel-wrap skel-filas-chicas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row sm"></div></div></div>
+            </div>
+            <div data-grupo-panel="retiros" data-sub="pagados" hidden>
+              <div class="hist-tools" data-hist="retiros">
+                <button type="button" class="hist-btn hist-download">Descargar</button>
+                <button type="button" class="hist-btn danger hist-clear">Borrar historial</button>
+                <button type="button" class="hist-btn hist-restore" hidden>Restaurar borrados</button>
+              </div>
+              <div id="payouts-history"><div class="skel-wrap skel-filas-chicas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row sm"></div><div class="skel skel-row sm"></div><div class="skel skel-row sm"></div></div></div>
+            </div>
+          </div>
+        </div>
+
+        <div data-grupo-panel="pagos" data-sub="planes" hidden>
+          <div class="panel">
+            <div class="panel-header-row">
+              <h2>Compras de planes</h2>
+              <span class="badge-count" id="plan-requests-count"></span>
+            </div>
+            <div class="buscar-fila">
+              <p class="panel-hint">Compras y renovaciones de planes pendientes de confirmar.</p>
+              <div class="hist-tools" data-hist="planes">
+                <button type="button" class="hist-btn hist-download">Descargar</button>
+                <button type="button" class="hist-btn danger hist-clear">Borrar historial</button>
+                <button type="button" class="hist-btn hist-restore" hidden>Restaurar borrados</button>
+              </div>
+            </div>
+            <div id="plan-requests-list"><div class="skel-wrap skel-filas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row"></div><div class="skel skel-row"></div></div></div>
+          </div>
+        </div>
+
+        <div data-grupo-panel="pagos" data-sub="hots" hidden>
+          <div class="panel" id="hots-panel">
+            <div class="panel-header-row">
+              <h2><span aria-hidden="true">🔥</span> Hots</h2>
+              <span class="badge-count" id="hots-count"></span>
+            </div>
+            <div class="subtabs mini" data-grupo="hots" role="group" aria-label="Hots">
+              <button type="button" class="subtab active" data-sub="revisar">Por revisar</button>
+              <button type="button" class="subtab" data-sub="portada">En la portada</button>
+              <button type="button" class="subtab" data-sub="historial">Historial</button>
+            </div>
+            <div data-grupo-panel="hots" data-sub="revisar">
+              <div id="hots-pending"><div class="skel-wrap skel-filas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row"></div></div></div>
+            </div>
+            <div data-grupo-panel="hots" data-sub="portada" hidden>
+              <form class="hots-config" id="hots-config">
+                <label class="mini-field"><span>Precio por semana (USD)</span><input type="text" id="hot-price-usd" inputmode="decimal" placeholder="2"></label>
+                <label class="mini-field"><span>Cupos en la portada</span><input type="text" id="hot-slots" inputmode="numeric" placeholder="8"></label>
+                <button type="submit" class="btn-secondary">Guardar</button>
+              </form>
+              <p class="panel-hint compact" id="hots-status"></p>
+              <div id="hots-active"><div class="skel-wrap skel-filas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row sm"></div><div class="skel skel-row sm"></div></div></div>
+              <details class="hots-free">
+                <summary>Destacar un beat gratis</summary>
+                <div class="hots-free-row">
+                  <select id="hot-free-track" aria-label="Beat a destacar"></select>
+                  <select id="hot-free-weeks" aria-label="Por cuánto tiempo">
+                    <option value="1">1 semana</option><option value="2">2 semanas</option><option value="4">4 semanas</option>
+                  </select>
+                  <button type="button" class="btn-secondary" id="hot-free-btn">Destacar</button>
+                </div>
+              </details>
+            </div>
+            <div data-grupo-panel="hots" data-sub="historial" hidden>
+              <div class="hist-tools" data-hist="hots">
+                <button type="button" class="hist-btn hist-download">Descargar</button>
+                <button type="button" class="hist-btn danger hist-clear">Borrar historial</button>
+                <button type="button" class="hist-btn hist-restore" hidden>Restaurar borrados</button>
+              </div>
+              <div id="hots-history"></div>
+            </div>
+          </div>
+        </div>
+
+        <div data-grupo-panel="pagos" data-sub="reglas" hidden>
+          <div class="panel">
+            <h2>Planes, bonos y retiros</h2>
+            <form id="platform-config-form">
+              <div class="subtabs mini" data-grupo="reglas" role="group" aria-label="Reglas">
+                <button type="button" class="subtab active" data-sub="planes">Planes</button>
+                <button type="button" class="subtab" data-sub="plazos">Plazos de pago</button>
+                <button type="button" class="subtab" data-sub="bonos">Bonos</button>
+                <button type="button" class="subtab" data-sub="fees">Fee de red</button>
+              </div>
+              <div data-grupo-panel="reglas" data-sub="planes">
+                <p class="panel-hint">Comisiones: Free 30 %, Pro 20 %, Studio 10 %, según el plan vigente al aprobar cada venta.</p>
+                <div class="cfg-grid">
+                  <div class="field">
+                    <label for="admin-phone-input">Tu WhatsApp (lo ven los productores)</label>
+                    <input type="text" id="admin-phone-input" placeholder="Ej: 5355633280">
+                  </div>
+                  <div class="field">
+                    <label for="plan-pro-price-input">Plan Pro (USD por mes)</label>
+                    <input type="text" id="plan-pro-price-input" inputmode="decimal" placeholder="5">
+                    <span class="field-hint" id="plan-pro-cup"></span>
+                  </div>
+                  <div class="field">
+                    <label for="plan-studio-price-input">Plan Studio (USD por mes)</label>
+                    <input type="text" id="plan-studio-price-input" inputmode="decimal" placeholder="19">
+                    <span class="field-hint" id="plan-studio-cup"></span>
+                  </div>
+                </div>
+              </div>
+              <div data-grupo-panel="reglas" data-sub="plazos" hidden>
+                <p class="panel-hint">Plazo de pago desde que el productor solicita el retiro (1 día = 24 horas). Aplica a las solicitudes nuevas.</p>
+                <div class="cfg-grid">
+                  <div class="field">
+                    <label for="payout-days-free">Plan Free (días)</label>
+                    <input type="number" id="payout-days-free" min="1" max="60" step="1" inputmode="numeric" placeholder="14">
+                  </div>
+                  <div class="field">
+                    <label for="payout-days-pro">Plan Pro (días)</label>
+                    <input type="number" id="payout-days-pro" min="1" max="60" step="1" inputmode="numeric" placeholder="3">
+                  </div>
+                  <div class="field">
+                    <label for="payout-days-studio">Plan Studio (días)</label>
+                    <input type="number" id="payout-days-studio" min="1" max="60" step="1" inputmode="numeric" placeholder="1">
+                  </div>
+                </div>
+              </div>
+              <div data-grupo-panel="reglas" data-sub="bonos" hidden>
+                <div class="cfg-grid">
+                  <div class="field">
+                    <label for="likes-per-bonus">Me gusta por canción (Studio, Playlist)</label>
+                    <input type="text" id="likes-per-bonus" inputmode="numeric" placeholder="1000">
+                  </div>
+                  <div class="field">
+                    <label for="likes-bonus-cup">Bono por esos me gusta (CUP)</label>
+                    <input type="text" id="likes-bonus-cup" inputmode="decimal" placeholder="2000">
+                  </div>
+                  <div class="field">
+                    <label for="referrals-per-bonus">Referidos aprobados por bono</label>
+                    <input type="text" id="referrals-per-bonus" inputmode="numeric" placeholder="10">
+                  </div>
+                  <div class="field">
+                    <label for="referral-bonus-cup">Bono por referidos (CUP)</label>
+                    <input type="text" id="referral-bonus-cup" inputmode="decimal" placeholder="200">
+                  </div>
+                  <div class="field">
+                    <label for="referral-min-sales">Ventas mínimas para cobrar referidos (CUP)</label>
+                    <input type="text" id="referral-min-sales" inputmode="decimal" placeholder="500">
+                    <span class="field-hint">Ventas netas del productor.</span>
+                  </div>
+                  <div class="field">
+                    <label for="referral-min-beats">Beats mínimos para cobrar referidos</label>
+                    <input type="text" id="referral-min-beats" inputmode="numeric" placeholder="3">
+                    <span class="field-hint">Beats publicados. El bono se libera al cumplir ambos requisitos.</span>
+                  </div>
+                </div>
+              </div>
+              <div data-grupo-panel="reglas" data-sub="fees" hidden>
+                <p class="panel-hint">Cada productor cobra en la moneda en que se le compró. El fee de red se descuenta del retiro.</p>
+                <div id="payout-rates-list"></div>
+              </div>
+              <button type="submit" class="btn-primary btn-inline">Guardar reglas</button>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== MÚSICA ===================== -->
+      <section class="cat-page" data-cat="musica" aria-labelledby="t-musica">
+        <header class="page-head">
+          <h1 id="t-musica">Música</h1>
+          <div class="subtabs" data-grupo="musica" role="group" aria-label="Partes de Música">
+            <button type="button" class="subtab sub-alerta" data-sub="coincidencias" hidden>Coincidencias <span class="n"></span></button>
+            <button type="button" class="subtab active" data-sub="catalogo">Tu música</button>
+            <button type="button" class="subtab" data-sub="subir">Subir</button>
+            <button type="button" class="subtab" data-sub="packs">Packs <span class="n"></span></button>
+          </div>
+        </header>
+
+        <div data-grupo-panel="musica" data-sub="coincidencias" hidden>
+          <div class="panel panel-prioridad" id="coincidencias-panel" hidden>
+            <div class="panel-header-row">
+              <h2>Coincidencias de originalidad</h2>
+              <span class="badge-count show" id="coincidencias-count"></span>
+            </div>
+            <p class="panel-hint" id="coincidencias-hint"></p>
+            <div id="coincidencias-list"></div>
+          </div>
+        </div>
+
+        <div data-grupo-panel="musica" data-sub="catalogo">
+          <div class="panel">
+            <div class="panel-header-row">
+              <h2 class="h-pc">Tu música</h2>
+              <div class="admin-tabs" role="group" aria-label="Lista">
+                <button type="button" class="admin-tab active" data-list-section="catalog">Catálogo</button>
+                <button type="button" class="admin-tab" data-list-section="playlist">Playlist</button>
+                <button type="button" class="admin-tab" data-list-section="vip">Beats VIP</button>
+              </div>
+            </div>
+            <div id="track-list"><div class="skel-wrap skel-filas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div></div></div>
+          </div>
+        </div>
+
+        <div data-grupo-panel="musica" data-sub="subir" hidden>
+          <div class="subtabs mini" data-grupo="msubir" role="group" aria-label="Qué vas a subir">
+            <button type="button" class="subtab active" data-sub="pista">Pista</button>
+            <button type="button" class="subtab" data-sub="pack">Sample pack</button>
+          </div>
+          <div data-grupo-panel="msubir" data-sub="pista">
+            <div class="panel up-panel">
+              <ol class="stepper pk-stepper tres" id="aup-stepper" aria-label="Pasos para publicar tu pista">
+                <li><button type="button" class="stp on" data-paso="1" aria-current="step"><span class="stp-n">1</span><span class="stp-t">Datos</span></button></li>
+                <li><button type="button" class="stp" data-paso="2" disabled><span class="stp-n">2</span><span class="stp-t">Precios</span></button></li>
+                <li><button type="button" class="stp" data-paso="3" disabled><span class="stp-n">3</span><span class="stp-t">Archivos</span></button></li>
+              </ol>
+              <form id="upload-form" novalidate>
+                <div class="up-paso" data-paso="1" role="group" aria-label="Datos de la pista">
+                  <div class="field">
+                    <label for="title-input">Título</label>
+                    <input type="text" id="title-input" placeholder="Nombre del set o track" required>
+                  </div>
+                  <div class="field">
+                    <label for="genre-input">Género o etiqueta</label>
+                    <input type="text" id="genre-input" placeholder="House, reguetón, techno…">
+                  </div>
+                  <div class="field">
+                    <label for="description-input">Descripción</label>
+                    <textarea id="description-input" rows="2" maxlength="600" placeholder="BPM, tonalidad, vibra, referencias…"></textarea>
+                  </div>
+                  <div class="field checkbox-field">
+                    <label class="checkbox-label">
+                      <input type="checkbox" id="is-playlist-input">
+                      <span>Colaboración gratuita (se publica en la Playlist)</span>
+                    </label>
+                  </div>
+                  <div id="playlist-only-fields" style="display:none;">
+                    <div class="field">
+                      <label for="artist-credit-input">Artista(s) colaborador(es)</label>
+                      <input type="text" id="artist-credit-input" placeholder="Ej: Feat. Nombre del Artista">
+                    </div>
+                  </div>
+                </div>
+
+                <div class="up-paso" data-paso="2" role="group" aria-label="Precios" hidden>
+                  <p class="up-nota" id="aup-playlist-nota" hidden>Las colaboraciones de la Playlist no se venden: este paso no lleva precio.</p>
+                  <div id="catalog-only-fields">
+                    <div class="field checkbox-field">
+                      <label class="checkbox-label">
+                        <input type="checkbox" id="is-exclusive-input">
+                        <span>Vender esta pista solo como <strong>exclusiva</strong> (una sola vez)</span>
+                      </label>
+                    </div>
+                    <div id="license-mode-fields">
+                      <div class="lic-grid">
+                        <div class="field">
+                          <label for="price-basic-input">Básica <span class="opt">MP3</span></label>
+                          <div class="price-input"><input type="text" id="price-basic-input" inputmode="decimal" placeholder="Ej: 500"><span aria-hidden="true">CUP</span></div>
+                        </div>
+                        <div class="field">
+                          <label for="price-premium-input">Premium <span class="opt">MP3 + WAV</span></label>
+                          <div class="price-input"><input type="text" id="price-premium-input" inputmode="decimal" placeholder="Requiere WAV"><span aria-hidden="true">CUP</span></div>
+                        </div>
+                        <div class="field">
+                          <label for="price-unlimited-input">Ilimitada <span class="opt">MP3 + WAV + STEMS</span></label>
+                          <div class="price-input"><input type="text" id="price-unlimited-input" inputmode="decimal" placeholder="Requiere WAV y STEMS"><span aria-hidden="true">CUP</span></div>
+                        </div>
+                      </div>
+                      <p class="field-hint">Premium e Ilimitada admiten varias ventas. Deja vacía la licencia que no ofrezcas.</p>
+                    </div>
+                    <div id="exclusive-mode-fields" style="display:none;">
+                      <p class="exclusive-warning">Venta única: al venderse, la pista sale del catálogo y pasa a Beats VIP. No se combina con otras licencias y se entrega con WAV y STEMS.</p>
+                      <div class="field">
+                        <label for="price-exclusive-input">Precio exclusivo</label>
+                        <div class="price-input"><input type="text" id="price-exclusive-input" inputmode="decimal" placeholder="Ej: 5000"><span aria-hidden="true">CUP</span></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="up-paso" data-paso="3" role="group" aria-label="Archivos" hidden>
+                  <div class="files-grid">
+                    <div class="field file-field">
+                      <span class="ff-lbl" id="a-audio-lbl">Audio principal <span class="req-tag">obligatorio</span></span>
+                      <label class="file-drop" id="audio-drop">
+                        <span class="fd-ico" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M9 17.5V6l9-1.8v11"/><circle cx="6.8" cy="17.5" r="2.2"/><circle cx="15.8" cy="15.2" r="2.2"/></svg></span>
+                        <span class="fd-txt" id="audio-drop-label">MP3, WAV, M4A, OGG o FLAC · máx 250 MB</span>
+                        <span class="fd-btn" aria-hidden="true">Elegir</span>
+                        <input type="file" id="audio-input" accept=".mp3,.wav,.m4a,.ogg,.flac" required aria-labelledby="a-audio-lbl audio-drop-label">
+                      </label>
+                      <span class="field-hint">De este archivo salen el preview y el MP3 de entrega.</span>
+                    </div>
+                    <div class="field file-field" id="admin-wav-field">
+                      <span class="ff-lbl" id="a-wav-lbl">WAV <span class="req-tag" id="admin-wav-req" style="display:none;">obligatorio</span></span>
+                      <label class="file-drop" id="admin-wav-drop">
+                        <span class="fd-ico" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M3.5 12h2M7.5 8.5v7M11.5 5v14M15.5 8v8M19.5 10.5v3"/></svg></span>
+                        <span class="fd-txt" id="admin-wav-label">WAV en alta calidad · máx 1 GB</span>
+                        <span class="fd-btn" aria-hidden="true">Elegir</span>
+                        <input type="file" id="admin-wav-input" accept=".wav" aria-labelledby="a-wav-lbl admin-wav-label">
+                      </label>
+                      <span class="field-hint" id="admin-wav-note"></span>
+                    </div>
+                    <div class="field file-field" id="admin-stems-field">
+                      <span class="ff-lbl" id="a-stems-lbl">STEMS <span class="req-tag" id="admin-stems-req" style="display:none;">obligatorio</span></span>
+                      <label class="file-drop" id="admin-stems-drop">
+                        <span class="fd-ico" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M12 4.5 4 8.5l8 4 8-4z"/><path d="m4 12.5 8 4 8-4"/><path d="m4 16.5 8 4 8-4"/></svg></span>
+                        <span class="fd-txt" id="admin-stems-label">ZIP (o RAR/7Z) con las pistas separadas · máx 4 GB</span>
+                        <span class="fd-btn" aria-hidden="true">Elegir</span>
+                        <input type="file" id="admin-stems-input" accept=".zip,.rar,.7z" aria-labelledby="a-stems-lbl admin-stems-label">
+                      </label>
+                    </div>
+                    <div class="field file-field">
+                      <span class="ff-lbl" id="a-cover-lbl">Portada <span class="req-tag">obligatoria</span></span>
+                      <label class="file-drop cover-drop-wrap" id="cover-drop">
+                        <span class="fd-ico" aria-hidden="true"><img class="cover-preview" id="cover-preview" alt="" style="display:none;"><svg viewBox="0 0 24 24" focusable="false"><rect x="4" y="4" width="16" height="16" rx="2"/><circle cx="9" cy="9.5" r="1.6"/><path d="m5 18 5-5 3 3 2-2 4 4"/></svg></span>
+                        <span class="fd-txt" id="cover-drop-label">Cuadrada 3000x3000 px · JPG, PNG o WEBP · máx 8 MB</span>
+                        <span class="fd-btn" aria-hidden="true">Elegir</span>
+                        <input type="file" id="cover-input" accept=".jpg,.jpeg,.png,.webp" aria-labelledby="a-cover-lbl cover-drop-label">
+                      </label>
+                      <span class="field-hint warn" id="cover-note"></span>
+                    </div>
+                  </div>
+                  <div class="upload-progress-wrap" id="upload-progress-wrap" style="display:none;">
+                    <div class="upload-progress-track"><div class="upload-progress-fill" id="upload-progress-fill"></div></div>
+                    <div class="upload-progress-row">
+                      <div class="upload-progress-label" id="upload-progress-label" role="status" aria-live="polite">Subiendo… 0%</div>
+                      <button type="button" class="btn-link" id="upload-cancel">Pausar</button>
+                    </div>
+                    <p class="panel-hint upload-note">Si la conexión se interrumpe, la subida continúa donde quedó.</p>
+                  </div>
+                </div>
+
+                <div class="up-nav">
+                  <button type="button" class="btn-ghost" id="aup-prev" hidden>Atrás</button>
+                  <button type="button" class="btn-primary btn-inline" id="aup-next">Siguiente</button>
+                  <button type="submit" class="btn-primary btn-inline" id="upload-btn" hidden>Publicar pista</button>
+                </div>
+              </form>
+            </div>
+          </div>
+          <div data-grupo-panel="msubir" data-sub="pack" hidden>
+            <div class="panel up-panel">
+              <p class="panel-hint pk-warn" id="packs-almacen-aviso" hidden>El almacenamiento para packs pesados aún no está activo. Hasta entonces, los packs de varios GB pueden no descargarse completos con conexiones lentas.</p>
+              <div id="packs-form"></div>
+            </div>
+          </div>
+        </div>
+
+        <div data-grupo-panel="musica" data-sub="packs" hidden>
+          <div class="panel">
+            <div class="panel-header-row">
+              <h2>Sample packs</h2>
+              <span class="badge-count" id="packs-count"></span>
+            </div>
+            <p class="panel-hint">Loops, drums, one-shots y vocales a precio único. Los de productores Pro y Studio llegan aquí para su revisión, y los pendientes van primero.</p>
+            <div id="packs-list"></div>
+            <nav class="pager" id="packs-pager" aria-label="Páginas de packs" hidden></nav>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== TIENDA ===================== -->
+      <section class="cat-page" data-cat="tienda" aria-labelledby="t-tienda">
+        <header class="page-head">
+          <h1 id="t-tienda">Tienda y cobros</h1>
+          <div class="subtabs" data-grupo="tienda" role="group" aria-label="Partes de la tienda">
+            <button type="button" class="subtab active" data-sub="promos">Promos</button>
+            <button type="button" class="subtab" data-sub="monedas">Monedas</button>
+            <button type="button" class="subtab" data-sub="cobros">Cobros</button>
+            <button type="button" class="subtab" data-sub="perfil">Perfil</button>
+          </div>
+        </header>
+
+        <div data-grupo-panel="tienda" data-sub="promos">
+          <div class="panel">
+            <h2>Promociones y horario</h2>
+            <p class="panel-hint">Aparecen en la parte superior de la tienda.</p>
+            <form id="site-config-form">
               <div class="field checkbox-field">
                 <label class="checkbox-label">
-                  <input type="checkbox" id="is-playlist-input">
-                  <span>Colaboración gratuita (se publica en Playlist)</span>
+                  <input type="checkbox" id="promo-active-input">
+                  <span>Mostrar el banner de promoción</span>
                 </label>
               </div>
-
-              <div id="playlist-only-fields" style="display:none;">
+              <div class="field">
+                <label for="promo-text-input">Texto de la promoción</label>
+                <input type="text" id="promo-text-input" placeholder="Ej: 20% de descuento en beats exclusivos esta semana">
+              </div>
+              <div class="cfg-grid">
                 <div class="field">
-                  <label for="artist-credit-input">Artista(s) colaborador(es)</label>
-                  <input type="text" id="artist-credit-input" placeholder="Ej: Feat. Nombre del Artista">
+                  <label for="discount-input">Descuento del catálogo (%)</label>
+                  <input type="text" id="discount-input" placeholder="Ej: 20 (0 = sin descuento)" aria-describedby="discount-hint">
+                  <span class="field-hint" id="discount-hint">Se aplica a todo el catálogo mientras el banner esté activo, incluidos los beats de productores (su ganancia se calcula sobre el precio rebajado).</span>
+                </div>
+                <div class="field">
+                  <label for="schedule-text-input">Horario de atención</label>
+                  <input type="text" id="schedule-text-input" placeholder="Ej: Lun-Sáb 9am-8pm">
                 </div>
               </div>
+              <button type="submit" class="btn-primary btn-inline">Guardar</button>
+            </form>
+          </div>
+        </div>
 
-              <div id="catalog-only-fields">
-                <div class="field checkbox-field">
-                  <label class="checkbox-label">
-                    <input type="checkbox" id="is-exclusive-input">
-                    <span>Vender esta pista solo como <strong>Exclusiva</strong> (una sola vez)</span>
+        <div data-grupo-panel="tienda" data-sub="monedas" hidden>
+          <div class="panel">
+            <h2>Tasas de cambio</h2>
+            <p class="panel-hint">Los precios base están en CUP. Indica cuántos CUP vale cada moneda; con 0, no se muestra en la tienda.</p>
+            <form id="exchange-rates-form">
+              <div class="plan-usd-box">
+                <div class="rate-row">
+                  <label class="rate-row-label" for="plan-usd-rate">USD para planes y Hots</label>
+                  <div class="rate-row-input-wrap"><input type="text" id="plan-usd-rate" inputmode="decimal" placeholder="Ej: 400" aria-describedby="plan-usd-hint"><span>CUP</span></div>
+                </div>
+                <p class="panel-hint compact h-pc" id="plan-usd-hint">Fija el precio en CUP de los planes y los Hots. No es un método de pago.</p>
+              </div>
+              <div id="exchange-rates-list"><div class="skel-wrap skel-filas-chicas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row sm"></div><div class="skel skel-row sm"></div><div class="skel skel-row sm"></div></div></div>
+              <details class="add-currency">
+                <summary>Agregar otro método de pago o moneda</summary>
+                <div class="add-currency-row">
+                  <div class="field">
+                    <label for="new-currency-label">Nombre</label>
+                    <input type="text" id="new-currency-label" placeholder="Ej: Zelle, USD efectivo, Bizum, Transfermóvil EUR">
+                  </div>
+                  <div class="field">
+                    <label for="new-currency-rate">CUP por unidad</label>
+                    <input type="text" id="new-currency-rate" placeholder="Ej: 400">
+                  </div>
+                  <button type="button" class="btn-secondary" id="add-currency-btn">Agregar</button>
+                </div>
+                <p class="panel-hint compact">Cada moneda necesita su cuenta de cobro en «Cobros».</p>
+              </details>
+              <p class="panel-hint" id="qvapay-estado" hidden></p>
+              <button type="submit" class="btn-primary btn-inline">Guardar tasas</button>
+            </form>
+          </div>
+        </div>
+
+        <div data-grupo-panel="tienda" data-sub="cobros" hidden>
+          <div class="panel">
+            <h2>Cobros y ventas</h2>
+            <p class="panel-hint">Cuentas donde los artistas realizan sus pagos.</p>
+            <form id="payment-form">
+              <div class="field">
+                <label for="contact-phone-input">Teléfono de confirmación (WhatsApp)</label>
+                <input type="text" id="contact-phone-input" placeholder="Ej: 5355512345">
+              </div>
+              <span class="ff-lbl">Cuentas para transferencia</span>
+              <div id="accounts-list"></div>
+              <button type="button" class="btn-secondary btn-add" id="add-account-btn">Agregar cuenta</button>
+              <button type="submit" class="btn-primary btn-inline">Guardar datos de cobro</button>
+            </form>
+          </div>
+        </div>
+
+        <div data-grupo-panel="tienda" data-sub="perfil" hidden>
+          <div class="subtabs mini solo-movil-tabs" data-grupo="tperfil" role="group" aria-label="Perfil">
+            <button type="button" class="subtab active" data-sub="datos">Perfil público</button>
+            <button type="button" class="subtab" data-sub="redes">Redes sociales</button>
+          </div>
+          <div class="perfil-grid">
+            <div class="panel" data-grupo-panel="tperfil" data-sub="datos">
+              <h2>Perfil público</h2>
+              <form id="profile-form">
+                <div class="field">
+                  <label for="artist-name-input">Nombre artístico</label>
+                  <input type="text" id="artist-name-input" placeholder="Nombre artístico">
+                </div>
+                <div class="field">
+                  <label for="artist-bio-input">Biografía</label>
+                  <textarea id="artist-bio-input" rows="2" placeholder="Tu biografía artística…"></textarea>
+                </div>
+                <div class="field">
+                  <span class="ff-lbl" id="a-avatar-lbl">Foto de perfil <span class="opt">(opcional)</span></span>
+                  <label class="file-drop" id="avatar-drop">
+                    <span class="fd-ico" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><circle cx="12" cy="9" r="3.6"/><path d="M5 19.5a7 7 0 0 1 14 0"/></svg></span>
+                    <span class="fd-txt" id="avatar-drop-label">JPG, PNG o WEBP · máx 8MB</span>
+                    <span class="fd-btn" aria-hidden="true">Elegir</span>
+                    <input type="file" id="avatar-input" accept=".jpg,.jpeg,.png,.webp" aria-labelledby="a-avatar-lbl avatar-drop-label">
                   </label>
                 </div>
+                <button type="submit" class="btn-primary btn-inline">Guardar perfil</button>
+              </form>
+            </div>
+            <div class="panel" data-grupo-panel="tperfil" data-sub="redes" hidden>
+              <h2>Redes sociales</h2>
+              <p class="panel-hint">Aparecen bajo tu nombre en la tienda.</p>
+              <div id="social-links-list"></div>
+              <button type="button" class="btn-secondary btn-add" id="add-social-link-btn">Agregar red social</button>
+              <button type="button" class="btn-primary btn-inline" id="social-links-save-btn">Guardar redes sociales</button>
+            </div>
+          </div>
+        </div>
+      </section>
 
-                <div id="license-mode-fields">
-                  <p class="panel-hint" style="margin:0 0 10px;">Las licencias Premium e Ilimitada admiten varias ventas. Premium se entrega con WAV; Ilimitada, con WAV y STEMS.</p>
+      <!-- ===================== AJUSTES ===================== -->
+      <section class="cat-page" data-cat="ajustes" aria-labelledby="t-ajustes">
+        <header class="page-head">
+          <h1 id="t-ajustes">Ajustes</h1>
+          <div class="subtabs" data-grupo="ajustes" role="group" aria-label="Partes de Ajustes">
+            <button type="button" class="subtab active" data-sub="originalidad">Originalidad <span class="n"></span></button>
+            <button type="button" class="subtab" data-sub="titular">Titular</button>
+            <button type="button" class="subtab" data-sub="copias">Copias</button>
+            <button type="button" class="subtab" data-sub="tag">Tag de voz</button>
+          </div>
+        </header>
+
+        <div data-grupo-panel="ajustes" data-sub="originalidad">
+          <div class="panel" id="originalidad-panel">
+            <h2>Verificación de originalidad</h2>
+            <div class="audd-uso" id="audd-uso" hidden>
+              <div class="audd-uso-top">
+                <div><strong id="audd-quedan-canciones">—</strong><span>canciones disponibles para verificar</span></div>
+                <div class="audd-uso-sub" id="audd-quedan-txt"></div>
+              </div>
+              <div class="bar"><div class="bar-fill" id="audd-barra"></div></div>
+              <details class="audd-ajustes">
+                <summary>Plan de AudD y sincronización</summary>
+                <div class="cfg-grid">
                   <div class="field">
-                    <label for="price-basic-input">Básica (MP3) — CUP</label>
-                    <input type="text" id="price-basic-input" placeholder="Ej: 500">
+                    <label for="audd-incluidas">Consultas que incluye tu plan</label>
+                    <input type="number" id="audd-incluidas" min="1" step="1" inputmode="numeric" placeholder="300">
                   </div>
                   <div class="field">
-                    <label for="price-premium-input">Premium (MP3 + WAV) — CUP</label>
-                    <input type="text" id="price-premium-input" inputmode="decimal" placeholder="Requiere WAV">
-                  </div>
-                  <div class="field">
-                    <label for="price-unlimited-input">Ilimitada (MP3 + WAV + STEMS) — CUP</label>
-                    <input type="text" id="price-unlimited-input" inputmode="decimal" placeholder="Requiere WAV y STEMS">
+                    <label for="audd-usadas">Consultas usadas según el panel de AudD</label>
+                    <input type="number" id="audd-usadas" min="0" step="1" inputmode="numeric" placeholder="Opcional">
                   </div>
                 </div>
-
-                <div id="exclusive-mode-fields" style="display:none;">
-                  <p class="panel-hint exclusive-warning" style="margin:0 0 10px;">Venta única: al venderse, la pista sale del catálogo y pasa a Beats VIP. No se combina con otras licencias y se entrega con WAV y STEMS.</p>
-                  <div class="field">
-                    <label for="price-exclusive-input">Precio exclusivo — CUP</label>
-                    <input type="text" id="price-exclusive-input" placeholder="Ej: 5000">
-                  </div>
-                </div>
-              </div>
+                <p class="panel-hint compact">Cada canción gasta una consulta por cada 36 segundos de audio (unas 5 en un beat de 3 minutos). Al renovar el plan, o si el número no coincide con el de dashboard.audd.io, escribe ahí las usadas y guarda.</p>
+                <button type="button" class="btn-primary btn-inline" id="audd-guardar">Guardar</button>
+              </details>
             </div>
-            <div>
-              <div class="field">
-                <label>Archivo de audio <span class="req-tag">obligatorio</span></label>
-                <label class="file-drop" id="audio-drop">
-                  <span id="audio-drop-label">MP3, WAV, M4A, OGG o FLAC · máx 250 MB</span>
-                  <input type="file" id="audio-input" accept=".mp3,.wav,.m4a,.ogg,.flac" required>
-                </label>
-                <span class="field-hint">De este archivo salen el preview y el MP3 de entrega.</span>
-              </div>
-              <div class="field" id="admin-wav-field">
-                <label>Archivo WAV <span class="req-tag" id="admin-wav-req" style="display:none;">obligatorio</span></label>
-                <label class="file-drop" id="admin-wav-drop">
-                  <span id="admin-wav-label">WAV en alta calidad · máx 1 GB</span>
-                  <input type="file" id="admin-wav-input" accept=".wav">
-                </label>
-                <span class="field-hint" id="admin-wav-note"></span>
-              </div>
-              <div class="field" id="admin-stems-field">
-                <label>STEMS comprimidos <span class="req-tag" id="admin-stems-req" style="display:none;">obligatorio</span></label>
-                <label class="file-drop" id="admin-stems-drop">
-                  <span id="admin-stems-label">ZIP (o RAR/7Z) con las pistas separadas · máx 4 GB</span>
-                  <input type="file" id="admin-stems-input" accept=".zip,.rar,.7z">
-                </label>
-              </div>
-              <div class="field">
-                <label>Portada <span class="req-tag">obligatoria</span></label>
-                <label class="file-drop cover-drop-wrap" id="cover-drop">
-                  <img class="cover-preview" id="cover-preview" alt="" style="display:none;">
-                  <span id="cover-drop-label">Cuadrada 3000x3000 px · JPG, PNG o WEBP · máx 8 MB</span>
-                  <input type="file" id="cover-input" accept=".jpg,.jpeg,.png,.webp">
-                </label>
-                <span class="field-hint warn" id="cover-note"></span>
-              </div>
-            </div>
+            <p class="panel-hint" id="orig-estado">Cargando…</p>
+            <label class="orig-auto"><input type="checkbox" id="orig-auto-retiro"> Retirar automáticamente de la tienda las obras que coincidan con canciones publicadas</label>
+            <button type="button" class="btn-secondary" id="orig-probar" hidden>Probar conexión con AudD</button>
+            <p class="panel-hint compact" id="orig-probar-res" role="status"></p>
           </div>
-          <div class="upload-progress-wrap" id="upload-progress-wrap" style="display:none;">
-            <div class="upload-progress-track">
-              <div class="upload-progress-fill" id="upload-progress-fill"></div>
-            </div>
-            <div class="upload-progress-row">
-              <div class="upload-progress-label" id="upload-progress-label">Subiendo… 0%</div>
-              <button type="button" class="btn-link" id="upload-cancel">Pausar</button>
-            </div>
-            <p class="panel-hint upload-note">Si la conexión se interrumpe, la subida continúa donde quedó.</p>
-          </div>
-          <button type="submit" class="btn-primary" id="upload-btn" style="margin-top:8px;">Publicar pista</button>
-        </form>
-      </div>
-
-      <div class="panel" data-cat="packs">
-        <h2>Subir Sample Pack</h2>
-        <p class="panel-hint">Loops, drums, one-shots y vocales en un solo archivo, a precio único. Los packs de productores Pro y Studio llegan a esta lista para su revisión.</p>
-        <p class="panel-hint pk-warn" id="packs-almacen-aviso" hidden>El almacenamiento para packs pesados aún no está activo. Hasta entonces, los packs de varios GB pueden no descargarse completos con conexiones lentas.</p>
-        <div id="packs-form"></div>
-      </div>
-
-      <div class="panel" data-cat="packs">
-        <div class="panel-header-row">
-          <h2>Sample Packs</h2>
-          <span class="badge-count" id="packs-count"></span>
         </div>
-        <p class="panel-hint">Los pendientes de revisión aparecen primero.</p>
-        <div id="packs-list"></div>
-      </div>
 
-      <div class="panel" data-cat="tienda">
-        <h2>Promociones y horario</h2>
-        <p class="panel-hint">Aparecen en la parte superior de la tienda.</p>
-        <form id="site-config-form">
-          <div class="field checkbox-field">
-            <label class="checkbox-label">
-              <input type="checkbox" id="promo-active-input">
-              <span>Mostrar banner de promoción</span>
-            </label>
-          </div>
-          <div class="field">
-            <label for="promo-text-input">Texto de la promoción</label>
-            <input type="text" id="promo-text-input" placeholder="Ej: 20% de descuento en beats exclusivos esta semana">
-          </div>
-          <div class="field">
-            <label for="discount-input">Descuento del catálogo (%)</label>
-            <input type="text" id="discount-input" placeholder="Ej: 20 (0 = sin descuento)">
-            <p class="panel-hint" style="margin:6px 0 0;">El descuento se aplica a todo el catálogo mientras el banner esté activo, incluidos los beats de productores (su ganancia se calcula sobre el precio rebajado).</p>
-          </div>
-          <div class="field">
-            <label for="schedule-text-input">Horario de atención</label>
-            <input type="text" id="schedule-text-input" placeholder="Ej: Lun-Sáb 9am-8pm">
-          </div>
-          <button type="submit" class="btn-primary">Guardar</button>
-        </form>
-      </div>
-
-      <div class="panel" data-cat="tienda">
-        <h2>Tasas de cambio</h2>
-        <p class="panel-hint">
-          Los precios base están en CUP. Indica cuántos CUP vale cada moneda; con tasa 0, la moneda no se muestra en la tienda.
-        </p>
-        <form id="exchange-rates-form">
-          <div class="plan-usd-box">
-            <div class="field">
-              <label for="plan-usd-rate">Tasa del USD para los planes de productores (CUP por 1 USD)</label>
-              <input type="text" id="plan-usd-rate" inputmode="decimal" placeholder="Ej: 400">
-            </div>
-            <p class="panel-hint compact" id="plan-usd-hint">Se usa para el precio en CUP de los planes y los Hots. No es un método de pago.</p>
-          </div>
-          <div id="exchange-rates-list"><div class="skel-wrap skel-filas-chicas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row sm"></div><div class="skel skel-row sm"></div><div class="skel skel-row sm"></div></div></div>
-          <div class="add-currency-row">
-            <div class="field">
-              <label for="new-currency-label">Agregar otro método de pago / moneda</label>
-              <input type="text" id="new-currency-label" placeholder="Ej: Zelle, USD efectivo, Bizum, Transfermóvil EUR">
-            </div>
-            <div class="field">
-              <label for="new-currency-rate">CUP por unidad</label>
-              <input type="text" id="new-currency-rate" placeholder="Ej: 400">
-            </div>
-            <button type="button" class="btn-secondary" id="add-currency-btn">+ Agregar</button>
-          </div>
-          <p class="panel-hint" style="margin:6px 0 0;">Cada moneda necesita su cuenta de cobro en «Cobros y ventas».</p>
-          <p class="panel-hint compact" id="qvapay-estado" hidden></p>
-          <button type="submit" class="btn-primary" style="margin-top:16px;">Guardar tasas</button>
-        </form>
-      </div>
-
-      <div class="panel summary-panel" data-cat="ventas">
-        <div class="panel-header-row">
-          <h2>Resumen</h2>
-          <button type="button" class="btn-link" id="summary-refresh">Actualizar</button>
-        </div>
-        <div class="summary-grid" id="admin-summary"><div class="skel-wrap skel-filas-chicas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row sm"></div><div class="skel skel-row sm"></div></div></div>
-        <div class="summary-pending" id="admin-pending"></div>
-        <details class="reset-ventas">
-          <summary>Reiniciar ventas</summary>
-          <div class="reset-opcion">
-            <strong>Reiniciar el contador</strong>
-            <p class="panel-hint compact">Los totales vuelven a cero. Las ventas se conservan en el historial.</p>
-            <div class="reset-acciones">
-              <button type="button" class="btn-secondary" id="reset-contador">Reiniciar contador</button>
-              <button type="button" class="btn-link" id="reset-deshacer" hidden>Volver a contar todo</button>
-            </div>
-          </div>
-          <div class="reset-opcion peligro">
-            <strong>Borrar todas las ventas (de prueba)</strong>
-            <p class="panel-hint compact">Elimina todas las ventas, licencias, bonos, retiros y saldos. Los beats vendidos con licencia única vuelven al catálogo; productores, beats y planes se mantienen. <a href="/api/admin/backup?tipo=datos" download>Descarga antes una copia de seguridad</a>.</p>
-            <button type="button" class="btn-delete" id="reset-borrar">Borrar todas las ventas…</button>
-          </div>
-        </details>
-      </div>
-
-      <div class="panel" data-cat="ventas">
-        <div class="panel-header-row">
-          <h2>Comprobantes de compra</h2>
-          <span class="badge-count" id="orders-count"></span>
-        </div>
-        <p class="panel-hint">Pagos pendientes de confirmar. Al aprobar, el artista recibe su licencia y sus archivos.</p>
-        <div id="orders-list"><div class="skel-wrap skel-filas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div></div></div>
-      </div>
-
-      <div class="panel" data-cat="productores">
-        <div class="panel-header-row">
-          <h2>Beats de productores pendientes</h2>
-          <span class="badge-count" id="pending-tracks-count"></span>
-        </div>
-        <p class="panel-hint">Ningún beat de productor se publica sin tu aprobación.</p>
-        <div id="pending-tracks-list"><div class="skel-wrap skel-filas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row"></div><div class="skel skel-row"></div></div></div>
-      </div>
-
-      <div class="panel" data-cat="productores">
-        <div class="panel-header-row">
-          <h2>Productores</h2>
-          <span class="badge-count" id="producers-count"></span>
-        </div>
-        <p class="panel-hint">Solicitudes de alta y productores del sello. Un productor desactivado no puede entrar ni publicar; sus ventas se conservan.</p>
-
-        <form id="create-producer-form" class="inline-form">
-          <div class="field">
-            <label for="producer-name-input">Nombre</label>
-            <input type="text" id="producer-name-input" placeholder="Nombre del productor" required>
-          </div>
-          <div class="field">
-            <label for="producer-email-input">Correo</label>
-            <input type="email" id="producer-email-input" placeholder="correo@ejemplo.com" required>
-          </div>
-          <div class="field">
-            <label for="producer-phone-input">WhatsApp</label>
-            <input type="tel" id="producer-phone-input" placeholder="Ej: 5355512345" inputmode="tel">
-          </div>
-          <div class="field">
-            <label for="producer-password-input">Contraseña</label>
-            <div class="password-field-wrap">
-              <input type="password" id="producer-password-input" placeholder="Mín. 6 caracteres" required>
-              <button type="button" class="btn-toggle-password" id="toggle-producer-password">Mostrar</button>
-            </div>
-          </div>
-          <button type="submit" class="btn-primary">Crear productor</button>
-        </form>
-
-        <div class="prod-filtros" role="group" aria-label="Filtrar productores">
-          <button type="button" class="prod-filtro active" data-filtro="pendientes" aria-pressed="true">Productores pendientes <span class="prod-filtro-n" id="prod-n-pend"></span></button>
-          <button type="button" class="prod-filtro" data-filtro="activos" aria-pressed="false">Productores activos <span class="prod-filtro-n" id="prod-n-act"></span></button>
-        </div>
-        <div id="producers-list"><div class="skel-wrap skel-filas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div></div></div>
-      </div>
-
-      <div class="panel" data-cat="productores">
-        <h2>Planes, bonos y retiros</h2>
-        <p class="panel-hint">Comisiones: Free 30 %, Pro 20 %, Studio 10 %, según el plan vigente al aprobar cada venta.</p>
-        <form id="platform-config-form">
-          <div class="cfg-grid">
-            <div class="field">
-              <label for="admin-phone-input">Tu WhatsApp (lo ven los productores)</label>
-              <input type="text" id="admin-phone-input" placeholder="Ej: 5355633280">
-            </div>
-            <div class="field">
-              <label for="plan-pro-price-input">Plan Pro (USD / mes)</label>
-              <input type="text" id="plan-pro-price-input" inputmode="decimal" placeholder="5">
-              <span class="field-hint" id="plan-pro-cup"></span>
-            </div>
-            <div class="field">
-              <label for="plan-studio-price-input">Plan Studio (USD / mes)</label>
-              <input type="text" id="plan-studio-price-input" inputmode="decimal" placeholder="19">
-              <span class="field-hint" id="plan-studio-cup"></span>
-            </div>
-          </div>
-
-          <h3 class="subpanel-title">Días para pagar los retiros</h3>
-          <p class="panel-hint">Plazo de pago desde que el productor solicita el retiro (1 día = 24 horas). Aplica a las solicitudes nuevas.</p>
-          <div class="cfg-grid">
-            <div class="field">
-              <label for="payout-days-free">Plan Free (días)</label>
-              <input type="number" id="payout-days-free" min="1" max="60" step="1" inputmode="numeric" placeholder="14">
-            </div>
-            <div class="field">
-              <label for="payout-days-pro">Plan Pro (días)</label>
-              <input type="number" id="payout-days-pro" min="1" max="60" step="1" inputmode="numeric" placeholder="3">
-            </div>
-            <div class="field">
-              <label for="payout-days-studio">Plan Studio (días)</label>
-              <input type="number" id="payout-days-studio" min="1" max="60" step="1" inputmode="numeric" placeholder="1">
-            </div>
-          </div>
-
-          <h3 class="subpanel-title">Bonos</h3>
-          <div class="cfg-grid">
-            <div class="field">
-              <label for="likes-per-bonus">Me gusta por canción (Studio, Playlist)</label>
-              <input type="text" id="likes-per-bonus" inputmode="numeric" placeholder="1000">
-            </div>
-            <div class="field">
-              <label for="likes-bonus-cup">Bono por esos me gusta (CUP)</label>
-              <input type="text" id="likes-bonus-cup" inputmode="decimal" placeholder="2000">
-            </div>
-            <div class="field">
-              <label for="referrals-per-bonus">Referidos aprobados por bono</label>
-              <input type="text" id="referrals-per-bonus" inputmode="numeric" placeholder="10">
-            </div>
-            <div class="field">
-              <label for="referral-bonus-cup">Bono por referidos (CUP)</label>
-              <input type="text" id="referral-bonus-cup" inputmode="decimal" placeholder="200">
-            </div>
-            <div class="field">
-              <label for="referral-min-sales">Ventas mínimas para cobrar referidos (CUP)</label>
-              <input type="text" id="referral-min-sales" inputmode="decimal" placeholder="500">
-              <span class="field-hint">Ventas netas del productor.</span>
-            </div>
-            <div class="field">
-              <label for="referral-min-beats">Beats mínimos subidos para cobrar referidos</label>
-              <input type="text" id="referral-min-beats" inputmode="numeric" placeholder="3">
-              <span class="field-hint">Beats publicados en el catálogo. El bono se libera al cumplir ambos requisitos.</span>
-            </div>
-          </div>
-
-          <h3 class="subpanel-title">Fee de red en los retiros</h3>
-          <p class="panel-hint">Cada productor cobra en la moneda en que se le compró. El fee de red se descuenta del retiro.</p>
-          <div id="payout-rates-list"></div>
-
-          <button type="submit" class="btn-primary" style="margin-top:12px;">Guardar</button>
-        </form>
-      </div>
-
-      <div class="panel" data-cat="productores" id="denuncias-panel">
-        <div class="panel-header-row">
-          <h2>Denuncias de derechos de autor</h2>
-          <span class="badge-count" id="denuncias-count"></span>
-        </div>
-        <p class="panel-hint">Reportes de posibles infracciones de derechos de autor.</p>
-        <div id="denuncias-list"></div>
-      </div>
-
-      <div class="panel" data-cat="productores" id="cid-panel">
-        <div class="panel-header-row">
-          <h2>Reclamos de Content ID</h2>
-          <span class="badge-count" id="cid-count"></span>
-        </div>
-        <p class="panel-hint">Artistas con licencia que recibieron un reclamo en alguna plataforma. El productor debe liberarlo.</p>
-        <div id="cid-list"></div>
-      </div>
-
-      <div class="panel" data-cat="productores" id="resenas-panel">
-        <div class="panel-header-row">
-          <h2>Reseñas de compradores</h2>
-          <span class="badge-count" id="resenas-count"></span>
-        </div>
-        <p class="panel-hint">Reseñas de compras verificadas. Solo pueden ocultarse con un motivo.</p>
-        <div id="resenas-list"></div>
-      </div>
-
-      <div class="panel" data-cat="productores" id="hots-panel">
-        <div class="panel-header-row">
-          <h2><span aria-hidden="true">🔥</span> Hots</h2>
-          <span class="badge-count" id="hots-count"></span>
-        </div>
-        <p class="panel-hint">Espacios semanales en el carrusel de portada.</p>
-        <form class="hots-config" id="hots-config">
-          <label class="mini-field"><span>Precio por semana (USD)</span><input type="text" id="hot-price-usd" inputmode="decimal" placeholder="2"></label>
-          <label class="mini-field"><span>Cupos en la portada</span><input type="text" id="hot-slots" inputmode="numeric" placeholder="8"></label>
-          <button type="submit" class="btn-secondary">Guardar</button>
-        </form>
-        <p class="panel-hint compact" id="hots-status"></p>
-
-        <h3 class="subpanel-title">Por revisar</h3>
-        <div id="hots-pending"><div class="skel-wrap skel-filas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row"></div></div></div>
-        <h3 class="subpanel-title">En la portada</h3>
-        <div id="hots-active"><div class="skel-wrap skel-filas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row sm"></div><div class="skel skel-row sm"></div></div></div>
-
-        <details class="hots-free">
-          <summary>Destacar un beat gratis</summary>
-          <div class="hots-free-row">
-            <select id="hot-free-track" aria-label="Beat a destacar"></select>
-            <select id="hot-free-weeks" aria-label="Por cuánto tiempo">
-              <option value="1">1 semana</option><option value="2">2 semanas</option><option value="4">4 semanas</option>
-            </select>
-            <button type="button" class="btn-secondary" id="hot-free-btn">Destacar</button>
-          </div>
-        </details>
-
-        <details class="hots-history">
-          <summary>Historial de Hots</summary>
-          <div class="hist-tools" data-hist="hots">
-            <button type="button" class="hist-btn hist-download">⭳ Descargar</button>
-            <button type="button" class="hist-btn danger hist-clear">Borrar historial</button>
-            <button type="button" class="hist-btn hist-restore" hidden>Restaurar borrados</button>
-          </div>
-          <div id="hots-history"></div>
-        </details>
-      </div>
-
-      <div class="panel" data-cat="productores">
-        <div class="panel-header-row">
-          <h2>Compras de planes</h2>
-          <span class="badge-count" id="plan-requests-count"></span>
-        </div>
-        <p class="panel-hint">Compras y renovaciones de planes pendientes de confirmar.</p>
-        <div class="hist-tools" data-hist="planes">
-          <button type="button" class="hist-btn hist-download">⭳ Descargar</button>
-          <button type="button" class="hist-btn danger hist-clear">Borrar historial</button>
-          <button type="button" class="hist-btn hist-restore" hidden>Restaurar borrados</button>
-        </div>
-        <div id="plan-requests-list"><div class="skel-wrap skel-filas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row"></div><div class="skel skel-row"></div></div></div>
-      </div>
-
-      <div class="panel" data-cat="productores">
-        <div class="panel-header-row">
-          <h2>Retiros de productores</h2>
-          <span class="badge-count" id="payouts-count"></span>
-        </div>
-        <p class="panel-hint">Solicitudes de retiro con su plazo de pago.</p>
-        <div id="payouts-list"><div class="skel-wrap skel-filas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row"></div></div></div>
-        <h3 class="subpanel-title">Saldos que todavía no pidieron retirar</h3>
-        <div id="payouts-unrequested"><div class="skel-wrap skel-filas-chicas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row sm"></div></div></div>
-        <h3 class="subpanel-title">Retiros ya resueltos</h3>
-        <div class="hist-tools" data-hist="retiros">
-          <button type="button" class="hist-btn hist-download">⭳ Descargar</button>
-          <button type="button" class="hist-btn danger hist-clear">Borrar historial</button>
-          <button type="button" class="hist-btn hist-restore" hidden>Restaurar borrados</button>
-        </div>
-        <div id="payouts-history"><div class="skel-wrap skel-filas-chicas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row sm"></div><div class="skel skel-row sm"></div><div class="skel skel-row sm"></div></div></div>
-      </div>
-
-      <div class="panel" data-cat="ventas">
-        <div class="panel-header-row">
-          <h2>Historial de compras</h2>
-          <span class="badge-count" id="history-count"></span>
-        </div>
-        <p class="panel-hint">Ventas aprobadas y rechazadas, con su licencia y enlace de descarga.</p>
-        <input type="search" id="history-search" class="history-search" placeholder="Buscar por nombre, teléfono, beat o número de licencia">
-        <div class="hist-tools" data-hist="compras">
-          <button type="button" class="hist-btn hist-download">⭳ Descargar</button>
-          <button type="button" class="hist-btn danger hist-clear">Borrar historial</button>
-          <button type="button" class="hist-btn hist-restore" hidden>Restaurar borrados</button>
-        </div>
-        <div id="history-list"><div class="skel-wrap skel-filas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div></div></div>
-      </div>
-
-      <div class="panel" data-cat="ajustes" id="originalidad-panel">
-        <h2>Verificación de originalidad</h2>
-        <div class="audd-uso" id="audd-uso" hidden>
-          <div class="audd-uso-top">
-            <div><strong id="audd-quedan-canciones">—</strong><span>canciones disponibles para verificar</span></div>
-            <div class="audd-uso-sub" id="audd-quedan-txt"></div>
-          </div>
-          <div class="bar"><div class="bar-fill" id="audd-barra"></div></div>
-          <details class="audd-ajustes">
-            <summary>Plan de AudD y sincronización</summary>
+        <div data-grupo-panel="ajustes" data-sub="titular" hidden>
+          <div class="panel" id="confianza-panel">
+            <h2>Datos de la tienda y confianza</h2>
+            <p class="panel-hint">Datos del titular que se muestran en la tienda y en los comprobantes de pedido.</p>
             <div class="cfg-grid">
               <div class="field">
-                <label for="audd-incluidas">Consultas que incluye tu plan</label>
-                <input type="number" id="audd-incluidas" min="1" step="1" inputmode="numeric" placeholder="300">
+                <label for="conf-titular">Nombre del titular</label>
+                <input type="text" id="conf-titular" maxlength="120" placeholder="Ej: Larry Pérez">
               </div>
               <div class="field">
-                <label for="audd-usadas">Consultas usadas según el panel de AudD</label>
-                <input type="number" id="audd-usadas" min="0" step="1" inputmode="numeric" placeholder="Opcional">
+                <label for="conf-figura">Figura legal <span class="opt">(opcional)</span></label>
+                <input type="text" id="conf-figura" maxlength="200" placeholder="Ej: Trabajador por cuenta propia, licencia N.º …">
+              </div>
+              <div class="field">
+                <label for="conf-horas">Plazo para aprobar una compra (horas)</label>
+                <input type="text" id="conf-horas" inputmode="numeric" placeholder="24" aria-describedby="conf-horas-hint">
+                <span class="field-hint" id="conf-horas-hint">Tiempo máximo para confirmar un pago.</span>
               </div>
             </div>
-            <p class="panel-hint compact">Cada canción gasta una consulta por cada 36 segundos de audio (unas 5 en un beat de 3 minutos). Al renovar el plan, o si el número no coincide con el de dashboard.audd.io, escribe ahí las usadas y guarda.</p>
-            <button type="button" class="btn-primary btn-inline" id="audd-guardar">Guardar</button>
-          </details>
-        </div>
-        <p class="panel-hint" id="orig-estado">Cargando…</p>
-        <label class="orig-auto"><input type="checkbox" id="orig-auto-retiro"> Retirar automáticamente de la tienda las obras que coincidan con canciones publicadas</label>
-        <button type="button" class="btn-secondary" id="orig-probar" hidden>Probar conexión con AudD</button>
-        <p class="panel-hint compact" id="orig-probar-res" role="status"></p>
-      </div>
-
-      <div class="panel" data-cat="ajustes" id="confianza-panel">
-        <h2>Datos de la tienda y confianza</h2>
-        <p class="panel-hint">Datos del titular que se muestran en la tienda y en los comprobantes de pedido.</p>
-        <div class="field">
-          <label for="conf-titular">Nombre del titular</label>
-          <input type="text" id="conf-titular" maxlength="120" placeholder="Ej: Larry Pérez">
-        </div>
-        <div class="field">
-          <label for="conf-figura">Figura legal</label>
-          <input type="text" id="conf-figura" maxlength="200" placeholder="Ej: Trabajador por cuenta propia, licencia N.º …">
-          <span class="field-hint">Opcional.</span>
-        </div>
-        <div class="field">
-          <label for="conf-horas">Plazo para aprobar una compra (horas)</label>
-          <input type="text" id="conf-horas" inputmode="numeric" placeholder="24">
-          <span class="field-hint">Tiempo máximo para confirmar un pago.</span>
-        </div>
-        <button type="button" class="btn-primary" id="conf-save">Guardar</button>
-      </div>
-
-      <div class="panel" data-cat="ajustes">
-        <h2>Copias de seguridad</h2>
-        <p class="panel-hint">Guarda copias con regularidad en un lugar seguro.</p>
-        <div class="backup-actions">
-          <a class="btn-primary btn-inline" href="/api/admin/backup?tipo=datos" download>Backup de datos</a>
-          <a class="btn-secondary btn-inline" href="/api/admin/backup?tipo=completo" download>Backup completo</a>
-        </div>
-        <p class="panel-hint"><strong>Datos:</strong> ventas, licencias, productores, saldos e imágenes.<br>
-          <strong>Completo:</strong> incluye además todos los audios, WAV y STEMS.</p>
-        <h3 class="subpanel-title">Restaurar un backup</h3>
-        <p class="panel-hint">Reemplaza la información actual por la de la copia.</p>
-        <label class="file-drop" id="restore-drop">
-          <span id="restore-label">Elegir el archivo .zip del backup</span>
-          <input type="file" id="restore-input" accept=".zip,application/zip">
-        </label>
-        <div class="upload-progress-wrap" id="restore-progress" style="display:none;">
-          <div class="upload-progress-track"><div class="upload-progress-fill" id="restore-fill"></div></div>
-          <div class="upload-progress-label" id="restore-status">Subiendo… 0%</div>
-        </div>
-      </div>
-
-      <div class="panel" data-cat="ajustes">
-        <div class="panel-header-row">
-          <h2>Marca de agua (productores Free)</h2>
-          <span class="badge-count" id="watermark-status-badge"></span>
-        </div>
-        <p class="panel-hint">
-          Tag de voz que suena en los previews de productores Free. Tu catálogo y los planes Pro y Studio no lo llevan.
-        </p>
-        <p class="panel-hint" style="margin-top:-8px;">
-          Aplica a los beats que se publiquen a partir de ahora.
-        </p>
-
-        <div class="field">
-          <label>Audio de la marca de agua</label>
-          <label class="file-drop" id="watermark-voice-drop">
-            <span id="watermark-voice-drop-label">MP3, WAV, M4A, OGG o FLAC · máx. 10 MB</span>
-            <input type="file" id="watermark-voice-input" accept=".mp3,.wav,.m4a,.ogg,.flac">
-          </label>
-        </div>
-
-        <div class="upload-grid">
-          <div class="field">
-            <label for="watermark-interval-input">Repetir cada (segundos)</label>
-            <input type="text" id="watermark-interval-input" placeholder="Ej: 20" value="20">
-          </div>
-          <div class="field">
-            <label for="watermark-volume-input">Volumen (0.05 a 1)</label>
-            <input type="text" id="watermark-volume-input" placeholder="Ej: 0.35" value="0.35">
+            <button type="button" class="btn-primary btn-inline" id="conf-save">Guardar</button>
           </div>
         </div>
 
-        <div class="watermark-actions">
-          <button type="button" class="btn-secondary" id="watermark-preview-btn" style="display:none;">▶ Escuchar la voz actual</button>
-          <button type="button" class="btn-delete" id="watermark-remove-btn" style="display:none;">Quitar marca de agua</button>
-        </div>
-        <audio id="watermark-preview-audio" style="display:none;"></audio>
-
-        <button type="button" class="btn-primary" id="watermark-save-btn" style="margin-top:16px;">Guardar configuración</button>
-      </div>
-
-      <div class="panel" data-cat="musica">
-        <div class="panel-header-row">
-          <h2>Tu música</h2>
-        </div>
-        <div class="admin-tabs">
-          <button type="button" class="admin-tab active" data-list-section="catalog">Catálogo</button>
-          <button type="button" class="admin-tab" data-list-section="playlist">Playlist</button>
-          <button type="button" class="admin-tab" data-list-section="vip">Beats VIP</button>
-        </div>
-        <div id="track-list"><div class="skel-wrap skel-filas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div></div></div>
-      </div>
-
-      <div class="panel" data-cat="tienda">
-        <h2>Cobros y ventas</h2>
-        <p class="panel-hint">Cuentas donde los artistas realizan sus pagos.</p>
-        <form id="payment-form">
-          <div class="field">
-            <label for="contact-phone-input">Teléfono de confirmación (WhatsApp)</label>
-            <input type="text" id="contact-phone-input" placeholder="Ej: 5355512345">
-          </div>
-
-          <label>Cuentas para transferencia</label>
-          <div id="accounts-list"></div>
-          <button type="button" class="btn-secondary" id="add-account-btn">+ Agregar cuenta</button>
-
-          <button type="submit" class="btn-primary" style="margin-top:16px;">Guardar datos de cobro</button>
-        </form>
-      </div>
-
-      <div class="panel" data-cat="tienda">
-        <h2>Perfil público</h2>
-        <form id="profile-form">
-          <div class="field">
-            <label for="artist-name-input">Nombre artístico</label>
-            <input type="text" id="artist-name-input" placeholder="Nombre artístico">
-          </div>
-          <div class="field">
-            <label for="artist-bio-input">Biografía</label>
-            <textarea id="artist-bio-input" rows="3" placeholder="Tu biografía artística…"></textarea>
-          </div>
-          <div class="field">
-            <label>Foto de perfil (opcional)</label>
-            <label class="file-drop" id="avatar-drop">
-              <span id="avatar-drop-label">JPG, PNG o WEBP · máx 8MB</span>
-              <input type="file" id="avatar-input" accept=".jpg,.jpeg,.png,.webp">
+        <div data-grupo-panel="ajustes" data-sub="copias" hidden>
+          <div class="panel">
+            <h2>Copias de seguridad</h2>
+            <p class="panel-hint">Guarda copias con regularidad en un lugar seguro.</p>
+            <div class="backup-actions">
+              <a class="btn-primary btn-inline" href="/api/admin/backup?tipo=datos" download>Backup de datos</a>
+              <a class="btn-secondary btn-inline" href="/api/admin/backup?tipo=completo" download>Backup completo</a>
+            </div>
+            <p class="panel-hint"><strong>Datos:</strong> ventas, licencias, productores, saldos e imágenes.<br>
+              <strong>Completo:</strong> incluye además todos los audios, WAV y STEMS.</p>
+            <h3 class="subpanel-title">Restaurar un backup</h3>
+            <p class="panel-hint">Reemplaza la información actual por la de la copia.</p>
+            <label class="file-drop" id="restore-drop">
+              <span class="fd-ico" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M4.5 8 12 4.5 19.5 8v8L12 19.5 4.5 16z"/><path d="M4.5 8 12 11.5 19.5 8M12 11.5v8"/></svg></span>
+              <span class="fd-txt" id="restore-label">Elegir el archivo .zip del backup</span>
+              <span class="fd-btn" aria-hidden="true">Elegir</span>
+              <input type="file" id="restore-input" accept=".zip,application/zip" aria-labelledby="restore-label">
             </label>
+            <div class="upload-progress-wrap" id="restore-progress" style="display:none;">
+              <div class="upload-progress-track"><div class="upload-progress-fill" id="restore-fill"></div></div>
+              <div class="upload-progress-label" id="restore-status" role="status" aria-live="polite">Subiendo… 0%</div>
+            </div>
           </div>
-          <button type="submit" class="btn-primary">Guardar perfil</button>
-        </form>
-      </div>
+        </div>
 
-      <div class="panel" data-cat="tienda">
-        <h2>Redes sociales</h2>
-        <p class="panel-hint">Aparecen bajo tu nombre en la tienda.</p>
-
-        <div id="social-links-list"></div>
-        <button type="button" class="btn-secondary" id="add-social-link-btn">+ Agregar red social</button>
-
-        <button type="button" class="btn-primary" id="social-links-save-btn" style="margin-top:16px;">Guardar redes sociales</button>
-      </div>
+        <div data-grupo-panel="ajustes" data-sub="tag" hidden>
+          <div class="panel">
+            <div class="panel-header-row">
+              <h2>Tag de voz (productores Free)</h2>
+              <span class="badge-count" id="watermark-status-badge"></span>
+            </div>
+            <p class="panel-hint">Suena en los previews de los productores Free y se aplica a los beats que se publiquen a partir de ahora. Tu catálogo y los planes Pro y Studio no lo llevan.</p>
+            <div class="field">
+              <span class="ff-lbl" id="a-wm-lbl">Audio del tag</span>
+              <label class="file-drop" id="watermark-voice-drop">
+                <span class="fd-ico" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5"/></svg></span>
+                <span class="fd-txt" id="watermark-voice-drop-label">MP3, WAV, M4A, OGG o FLAC · máx. 10 MB</span>
+                <span class="fd-btn" aria-hidden="true">Elegir</span>
+                <input type="file" id="watermark-voice-input" accept=".mp3,.wav,.m4a,.ogg,.flac" aria-labelledby="a-wm-lbl watermark-voice-drop-label">
+              </label>
+            </div>
+            <div class="cfg-grid">
+              <div class="field">
+                <label for="watermark-interval-input">Repetir cada (segundos)</label>
+                <input type="text" id="watermark-interval-input" placeholder="Ej: 20" value="20">
+              </div>
+              <div class="field">
+                <label for="watermark-volume-input">Volumen (0,05 a 1)</label>
+                <input type="text" id="watermark-volume-input" placeholder="Ej: 0.35" value="0.35">
+              </div>
+            </div>
+            <div class="watermark-actions">
+              <button type="button" class="btn-secondary" id="watermark-preview-btn" style="display:none;">Escuchar el tag actual</button>
+              <button type="button" class="btn-delete" id="watermark-remove-btn" style="display:none;">Quitar el tag</button>
+            </div>
+            <audio id="watermark-preview-audio" style="display:none;"></audio>
+            <button type="button" class="btn-primary btn-inline" id="watermark-save-btn">Guardar configuración</button>
+          </div>
+        </div>
+      </section>
 
     </main>
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <!-- Modal para ver el comprobante en tamaño completo -->
-  <div class="receipt-modal-overlay" id="receipt-modal-overlay">
+  <!-- Comprobante en tamaño completo -->
+  <div class="receipt-modal-overlay" id="receipt-modal-overlay" role="dialog" aria-modal="true" aria-label="Comprobante">
     <div class="receipt-modal-box">
       <button class="modal-close" id="receipt-modal-close" type="button" aria-label="Cerrar">&times;</button>
       <img id="receipt-modal-img" src="" alt="Comprobante">
     </div>
   </div>
 
-  <!-- Modal para editar título/género/descripción de una pista -->
-  <div class="receipt-modal-overlay" id="edit-track-overlay">
+  <!-- Editar título, género y descripción de una pista -->
+  <div class="receipt-modal-overlay" id="edit-track-overlay" role="dialog" aria-modal="true" aria-labelledby="edit-track-heading">
     <div class="receipt-modal-box edit-track-box">
       <button class="modal-close" id="edit-track-close" type="button" aria-label="Cerrar">&times;</button>
       <h3 id="edit-track-heading">Editar pista</h3>
@@ -719,12 +942,12 @@
         <input type="text" id="edit-track-title" maxlength="120">
       </div>
       <div class="field">
-        <label for="edit-track-genre">Género / etiqueta</label>
+        <label for="edit-track-genre">Género o etiqueta</label>
         <input type="text" id="edit-track-genre" maxlength="60">
       </div>
       <div class="field">
         <label for="edit-track-description">Descripción</label>
-        <textarea id="edit-track-description" rows="4" maxlength="1000"></textarea>
+        <textarea id="edit-track-description" rows="3" maxlength="1000"></textarea>
       </div>
       <div class="field" id="edit-track-credit-field">
         <label for="edit-track-credit">Artista(s) colaborador(es)</label>
@@ -735,7 +958,6 @@
   </div>
 
   <script src="/ui.js"></script>
-
   <script src="/subidas.js"></script>
   <script src="/historial.js"></script>
   <script src="/packs.js"></script>

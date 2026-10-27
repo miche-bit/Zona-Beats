@@ -1,69 +1,98 @@
 /* ==========================================================
-   Zona Beats — design tokens (tienda, portal y panel)
-   Todos los colores, radios, tipografías, espacios y tiempos
-   salen de aquí. Cada página solo cambia su color de acento.
+   Zona Beats — base visual compartida (tienda, portal y panel)
+   Noche habanera: fondo ciruela oscuro y tres colores con un solo
+   significado cada uno — rosa = acción, oro = dinero, menta = suena / listo.
+   Tipografía: Atkinson Hyperlegible Next (lectura cómoda, cifras y códigos
+   que no se confunden) y Anton solo para la marca.
    ========================================================== */
+
+/* ---------- Fuentes (servidas desde el propio sitio) ---------- */
+@font-face {
+  font-family: 'Atkinson Next';
+  font-style: normal; font-display: swap; font-weight: 200 800;
+  src: url(/fonts/atkinson-next-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Atkinson Next';
+  font-style: normal; font-display: swap; font-weight: 200 800;
+  src: url(/fonts/atkinson-next-latin-ext.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Atkinson Mono';
+  font-style: normal; font-display: swap; font-weight: 200 800;
+  src: url(/fonts/atkinson-mono-latin.woff2) format('woff2');
+}
+@font-face {
+  font-family: 'Anton';
+  font-style: normal; font-display: swap; font-weight: 400;
+  src: url(/fonts/anton-latin.woff2) format('woff2');
+}
+
 :root {
   /* Superficies */
-  --bg: #0c0a12;
-  --bg-rgb: 12, 10, 18;
-  --bg-elevated: #17131f;
-  --bg-card: #1c1826;
-  --bg-card-hover: #241f31;
-  --line: #2a2436;
-  --line-strong: #3a3249;
-  --shade-rgb: 6, 5, 10;          /* fondos de modales */
+  --bg: #15101a;
+  --bg-rgb: 21, 16, 26;
+  --bg-elevated: #1a1420;
+  --bg-card: #1e1724;
+  --bg-card-hover: #282030;
+  --line: #33293d;
+  --line-strong: #463a51;
+  --shade-rgb: 8, 6, 11;          /* fondos de modales */
   --white-rgb: 255, 255, 255;
   --black-rgb: 0, 0, 0;
 
-  /* Texto (todos cumplen contraste AA sobre --bg-card) */
-  --text: #f3efe9;
-  --text-dim: #a89fb5;
-  --text-faint: #958ca3;
-  --on-bright: #0c0a12;           /* texto sobre fondos claros (turquesa, amarillo, rosa) */
+  /* Texto (todos pasan AA sobre cualquier superficie) */
+  --text: #f5eff6;
+  --text-dim: #bdb2c8;
+  --text-faint: #a096ad;
+  --on-bright: #15101a;           /* texto sobre rosa, oro o menta */
   --white: #ffffff;
 
   /* Estados */
-  --live: #3dffe0;
-  --live-rgb: 61, 255, 224;
-  --ok: #4ade80;
-  --warn: #ffc13d;
-  --warn-rgb: 255, 193, 61;
-  --danger: #ff5d5d;
-  --danger-rgb: 255, 93, 93;
+  --live: #4fe3c1;                /* menta: suena, en línea, aprobado */
+  --live-rgb: 79, 227, 193;
+  --ok: #4fe3c1;
+  --gold: #f2c14e;                /* oro: precios y dinero */
+  --gold-rgb: 242, 193, 78;
+  --warn: #ffb347;
+  --warn-rgb: 255, 179, 71;
+  --danger: #ff6b6b;
+  --danger-rgb: 255, 107, 107;
   --whatsapp: #25d366;
   --orange: #ff8a3d;
 
   /* Marca */
   --pink: #ff3d7f;
   --pink-rgb: 255, 61, 127;
-  --pink-hi: #ff5c92;
-  --pink-dim: #c22e60;
-  --violet: #6d4df2;
-  --violet-rgb: 109, 77, 242;
-  --violet-hi: #8f6fff;
-  --violet-dim: #5c3fd6;
-  --violet-ink: #a18bff;
+  --pink-hi: #ff5c93;
+  --pink-dim: #b8325f;
+  --violet: #6b4df2;
+  --violet-rgb: 107, 77, 242;
+  --violet-hi: #7f63ff;
+  --violet-dim: #5238c9;
+  --violet-ink: #a992ff;
 
-  /* Acento de la página (tienda y panel: rosa) */
+  /* Acento de la página (tienda y panel: rosa; el portal lo cambia a violeta) */
   --accent: var(--pink);
   --accent-rgb: var(--pink-rgb);
   --accent-hi: var(--pink-hi);
   --accent-dim: var(--pink-dim);
-  --accent-ink: var(--pink);      /* acento usado como color de texto */
+  --accent-ink: var(--pink-hi);   /* acento usado como color de texto */
   --on-accent: var(--on-bright);  /* texto sobre el acento */
-  --accent-glow: rgba(var(--accent-rgb), 0.35);
+  --accent-glow: rgba(var(--accent-rgb), 0.3);
   --focus: var(--live);
 
-  /* Radios */
-  --r-xs: 3px;
+  /* Radios: chico para controles, mediano para filas, grande para ventanas */
+  --r-xs: 4px;
   --r-sm: 6px;
-  --r-md: 8px;
-  --r-lg: 12px;
-  --r-xl: 18px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 20px;
   --r-pill: 999px;
   --r-round: 50%;
-  --radius: 10px;
+  --radius: 12px;
 
   /* Espacios */
   --s-1: 4px;
@@ -73,14 +102,17 @@
   --s-5: 24px;
   --s-6: 32px;
 
-  /* Tipografía */
-  --font-body: 'Inter', -apple-system, system-ui, sans-serif;
-  --font-display: 'Anton', 'Impact', sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
-  --fs-xs: 11px;
-  --fs-sm: 12.5px;
-  --fs-md: 14px;
-  --fs-lg: 17px;
+  /* Tipografía (escala 1,2 sobre 15 px) */
+  --font-body: 'Atkinson Next', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Anton', 'Impact', 'Arial Narrow', sans-serif;
+  --font-mono: 'Atkinson Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  --fs-xs: 12px;
+  --fs-sm: 13.5px;
+  --fs-md: 15px;
+  --fs-lg: 18px;
+  --fs-xl: 21.5px;
+  --fs-2xl: 26px;
+  --fs-3xl: 31px;
 
   /* Movimiento */
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
@@ -90,27 +122,29 @@
 
   /* Profundidad */
   --shadow-sm: 0 2px 8px rgba(var(--black-rgb), 0.3);
-  --shadow-lg: 0 24px 60px rgba(var(--black-rgb), 0.6);
+  --shadow-lg: 0 24px 60px rgba(var(--black-rgb), 0.55);
 
   /* Tamaño mínimo de lo que se toca (WCAG 2.5.8) */
   --tap: 24px;
+
+  color-scheme: dark;
 }
 
+/* Cifras alineadas en precios, saldos y tiempos */
+.num, [data-num] { font-variant-numeric: tabular-nums; }
+
 /* ---------- Accesibilidad ---------- */
-/* Foco visible con teclado en todo lo interactivo */
 :focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offset: 0; }
 
-/* Solo para lectores de pantalla */
 .sr-only {
   position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
 
-/* Saltar al contenido */
 .skip-link {
   position: absolute; left: var(--s-2); top: -60px; z-index: 10000;
   background: var(--live); color: var(--on-bright); font-weight: 700;
@@ -118,7 +152,6 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offs
 }
 .skip-link:focus { top: var(--s-2); }
 
-/* Quien pidió menos movimiento en su sistema */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.001ms !important;
@@ -127,6 +160,110 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offs
     scroll-behavior: auto !important;
   }
 }
+
+/* ---------- Forma de onda (tienda, reproductor y paneles) ---------- */
+/* El SVG lo arma ZBUI.onda(): una capa gris y otra de color recortada según --p (0%–100%) */
+.wf { position: relative; display: block; height: 28px; min-width: 0; }
+.wf svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.wf .wf-base { fill: rgba(var(--white-rgb), 0.2); }
+.wf .wf-fill { fill: var(--accent); clip-path: inset(0 calc(100% - var(--p, 0%)) 0 0); transition: clip-path 0.25s linear; }
+.wf.wf-quieta .wf-fill { transition: none; }
+.wf-vacia { height: 3px; border-radius: var(--r-pill); background: rgba(var(--white-rgb), 0.16); align-self: center; position: relative; overflow: hidden; }
+.wf-vacia::after { content: ''; position: absolute; inset: 0; width: var(--p, 0%); background: var(--accent); }
+
+/* ---------- Subpestañas: una parte de la sección a la vez ---------- */
+.subtabs {
+  display: flex; gap: 4px; padding: 4px; margin: 0 0 var(--s-4);
+  background: var(--bg-card); border: 1px solid var(--line); border-radius: var(--r-pill);
+  overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+}
+.subtabs::-webkit-scrollbar { display: none; }
+.subtab {
+  flex: 1 0 auto; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 38px; padding: 6px 14px; border: 0; border-radius: var(--r-pill); background: transparent;
+  font: 600 var(--fs-sm)/1.2 var(--font-body); color: var(--text-dim); white-space: nowrap; cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.subtab:hover { color: var(--text); }
+.subtab.active { background: var(--bg-card-hover); color: var(--text); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.subtab .n {
+  min-width: 20px; height: 20px; padding: 0 6px; border-radius: var(--r-pill);
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--accent); color: var(--on-accent); font-size: 11.5px; font-weight: 700;
+}
+.subtab .n:empty { display: none; }
+/* si la tira no cabe, se compacta antes de desplazarse de lado (lo decide ui.js) */
+.subtabs.apretada { gap: 2px; }
+.subtabs.apretada .subtab { padding-left: 8px; padding-right: 8px; gap: 4px; font-size: 13px; }
+.subtabs.apretada .subtab .n { min-width: 17px; height: 17px; padding: 0 4px; font-size: 10.5px; }
+.subtabs.muy-apretada .subtab { padding-left: 6px; padding-right: 6px; gap: 3px; font-size: 12px; }
+.subtabs.muy-apretada .subtab .n { min-width: 16px; height: 16px; padding: 0 3px; }
+[data-grupo-panel][hidden] { display: none !important; }
+
+/* ---------- Pasos de un formulario (subir beat, subir pack) ---------- */
+/* Barra segmentada con el nombre de cada paso debajo; el paso actual se ilumina */
+.stepper {
+  list-style: none; margin: 0 0 18px; padding: 0;
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px;
+}
+.pk-stepper { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.stp {
+  width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 6px; row-gap: 7px; align-items: center;
+  padding: 2px 0; border: 0; background: none; text-align: left; cursor: pointer;
+  font: 700 var(--fs-xs)/1.3 var(--font-body); color: var(--text-faint);
+}
+.stp:disabled { cursor: default; }
+.stp::before { content: ''; grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--line); transition: background var(--dur) var(--ease); }
+.stp-n { font-variant-numeric: tabular-nums; }
+.stp-t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stp.hecho { color: var(--text-dim); }
+.stp.hecho::before { background: rgba(var(--accent-rgb), 0.55); }
+.stp.on { color: var(--text); }
+.stp.on::before { background: var(--accent); box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.5); }
+.stp.salta { opacity: 0.55; }
+.stp:not(:disabled):not(.on):hover { color: var(--text); }
+
+/* ---------- Elegir archivo ---------- */
+/* <label class="file-drop"><span class="fd-ico"/><span class="fd-txt"/><span class="fd-btn"/><input type="file"></label>
+   El campo queda oculto a la vista pero se puede alcanzar con el teclado. */
+.file-drop {
+  position: relative; display: flex; align-items: center; gap: 12px; min-height: 56px; margin: 0; padding: 8px 10px 8px 8px;
+  border: 1px dashed var(--line-strong); border-radius: var(--r-md); background: rgba(var(--white-rgb), 0.02);
+  color: var(--text-dim); cursor: pointer; text-align: left; text-transform: none; letter-spacing: 0;
+  font: 500 var(--fs-sm)/1.35 var(--font-body);
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.file-drop:hover { border-color: rgba(var(--accent-rgb), 0.6); background: rgba(var(--accent-rgb), 0.05); }
+.file-drop:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
+.file-drop input[type="file"] { position: absolute; width: 1px; height: 1px; min-height: 0; padding: 0; margin: 0; border: 0; opacity: 0; pointer-events: none; overflow: hidden; }
+.fd-ico {
+  width: 40px; height: 40px; flex-shrink: 0; overflow: hidden; display: grid; place-items: center;
+  border-radius: var(--r-sm); background: var(--bg-card-hover); color: var(--accent-ink);
+}
+.fd-ico svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.fd-ico img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fd-txt { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.fd-btn {
+  flex-shrink: 0; padding: 5px 12px; border-radius: var(--r-pill); border: 1px solid var(--line-strong);
+  color: var(--text); font-size: var(--fs-xs); font-weight: 700; white-space: nowrap;
+}
+.file-drop.has-file { border-style: solid; border-color: rgba(var(--live-rgb), 0.55); color: var(--text); }
+.file-drop.has-file .fd-ico { color: var(--live); background: rgba(var(--live-rgb), 0.1); }
+.file-drop.has-file .fd-btn { font-size: 0; }
+.file-drop.has-file .fd-btn::before { content: 'Cambiar'; font-size: var(--fs-xs); }
+.file-drop.required { border-color: rgba(var(--warn-rgb), 0.65); }
+.file-drop.required .fd-ico { color: var(--warn); }
+
+/* ---------- Paginador ---------- */
+.pager { display: flex; align-items: center; justify-content: center; gap: var(--s-2); padding: var(--s-3) 0 var(--s-1); }
+.pager[hidden] { display: none; }
+.pager button {
+  min-width: 40px; height: 40px; padding: 0 12px; border-radius: var(--r-pill);
+  border: 1px solid var(--line); background: var(--bg-card); color: var(--text); font: 600 var(--fs-sm) var(--font-body); cursor: pointer;
+}
+.pager button:hover:not(:disabled) { border-color: var(--line-strong); background: var(--bg-card-hover); }
+.pager button:disabled { opacity: 0.4; cursor: default; }
+.pager .pager-txt { min-width: 76px; text-align: center; color: var(--text-dim); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
 
 /* ---------- Skeletons (mientras carga) ---------- */
 .skel-list { display: flex; flex-direction: column; gap: var(--s-2); }
@@ -145,7 +282,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offs
 }
 .skel-row { height: 64px; }
 .skel-row.sm { height: 44px; }
-.skel-card { aspect-ratio: 1 / 1.25; }
+.skel-card { height: 64px; }
 .skel-line { height: 12px; border-radius: var(--r-xs); }
 .skel-chip { display: inline-block; width: 90px; height: 30px; border-radius: var(--r-pill); vertical-align: middle; }
 @keyframes skel-brillo { to { transform: translateX(100%); } }
@@ -154,33 +291,26 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offs
 .skel-wrap { display: flex; flex-direction: column; gap: var(--s-2); }
 .skel-wrap.skel-plaquitas { flex-direction: row; flex-wrap: wrap; }
 .skel-wrap.skel-lineas { gap: var(--s-3); padding: var(--s-2) 0; }
-/* dentro de una grilla, las tarjetas de carga ocupan las celdas de la grilla */
 .skel-wrap.skel-tarjetas { display: contents; }
 
-/* ---------- Movimiento: crossfade, elemento compartido, lupa y desenfoque ---------- */
-:root { --t-cross: 0.24s; --t-viaje: 0.38s; --blur-fondo: 10px; --blur-foco: 1.5px; }
-/* 1. Crossfade al cambiar de sección / pestaña / categoría */
+/* ---------- Movimiento: crossfade y elemento compartido ---------- */
+:root { --t-cross: 0.22s; --t-viaje: 0.36s; --blur-fondo: 10px; }
 ::view-transition-old(root), ::view-transition-new(root) { animation-duration: var(--t-cross); animation-timing-function: var(--ease, ease); }
-/* 2. Elemento compartido: el título y la foto viajan de la tarjeta a la página */
 ::view-transition-group(zb-titulo), ::view-transition-group(zb-avatar) { animation-duration: var(--t-viaje); animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1); }
 ::view-transition-old(zb-titulo), ::view-transition-new(zb-titulo) { height: 100%; width: auto; object-fit: contain; object-position: left center; }
 ::view-transition-old(zb-avatar), ::view-transition-new(zb-avatar) { height: 100%; width: 100%; object-fit: cover; border-radius: 50%; }
-/* 3. Lupa: la escala la pone ui.js; aquí solo el punto de apoyo y la suavidad */
 .hero-social a, [data-lupa] > * { transform-origin: 50% 100%; will-change: transform; position: relative; }
-/* 4. Desenfoque: con una ventana abierta, todo lo de atrás se desenfoca */
+/* Con una ventana abierta, lo de atrás se desenfoca */
 .modal-overlay, .plan-modal-overlay, .receipt-modal-overlay {
   -webkit-backdrop-filter: blur(var(--blur-fondo)) saturate(0.85) !important;
   backdrop-filter: blur(var(--blur-fondo)) saturate(0.85) !important;
 }
-/* …y al señalar una tarjeta, las demás se apartan para que el ojo sepa dónde mirar */
+/* Al señalar una tarjeta con el ratón, las demás se apartan para que el ojo sepa dónde mirar */
 @media (hover: hover) and (pointer: fine) {
-  .track-grid > .track-card, .producers-grid > .producer-card, .hots-track > * {
-    transition: filter 0.22s var(--ease, ease), opacity 0.22s var(--ease, ease), transform 0.2s var(--ease, ease), border-color 0.2s, background 0.2s, box-shadow 0.2s;
+  .producers-grid > .producer-card, .hots-track > *, .tracklist > .track-row {
+    transition: filter 0.22s var(--ease, ease), opacity 0.22s var(--ease, ease), background 0.2s, border-color 0.2s;
   }
-  .track-grid:has(> .track-card:hover) > .track-card:not(:hover):not(:focus-within),
   .producers-grid:has(> .producer-card:hover) > .producer-card:not(:hover):not(:focus-within),
-  .hots-track:has(> :hover) > :not(:hover):not(:focus-within) {
-    filter: blur(var(--blur-foco));
-    opacity: 0.62;
-  }
+  .hots-track:has(> :hover) > :not(:hover):not(:focus-within) { filter: blur(1.5px); opacity: 0.62; }
+  .tracklist:has(> .track-row:hover) > .track-row:not(:hover):not(:focus-within):not(.playing) { opacity: 0.6; }
 }

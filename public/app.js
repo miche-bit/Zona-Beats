@@ -7,7 +7,6 @@
   const iconPlay = document.getElementById('icon-play');
   const iconPause = document.getElementById('icon-pause');
   const progressTrack = document.getElementById('progress-track');
-  const progressFill = document.getElementById('progress-fill');
   const timeCurrent = document.getElementById('time-current');
   const timeTotal = document.getElementById('time-total');
   const trackGrid = document.getElementById('track-grid');
@@ -20,9 +19,9 @@
   const sectionTitle = document.getElementById('section-title');
   const searchInput = document.getElementById('search-input');
   const currencySelect = document.getElementById('currency-select');
-  const paymentMethodsRail = document.getElementById('payment-methods-rail');
   const paymentMethodsList = document.getElementById('payment-methods-list');
-  const catalogLayout = document.querySelector('.catalog-layout');
+  const trackPager = document.getElementById('track-pager');
+  const genreChips = document.getElementById('genre-chips');
 
   const buyBtn = document.getElementById('player-buy-btn');
   const buyPriceLabel = document.getElementById('player-buy-price');
@@ -83,7 +82,7 @@
   async function loadProfile() {
     const res = await fetch('/api/profile');
     const { profile } = await res.json();
-    document.getElementById('artist-name').textContent = profile.artist_name || '';
+    document.getElementById('artist-name').textContent = profile.artist_name || 'Zona Beats';
     document.getElementById('artist-bio').textContent = profile.bio || '';
     document.title = profile.artist_name ? `${profile.artist_name} · Zona Beats` : 'Zona Beats';
     if (profile.avatar_filename) {
@@ -238,6 +237,8 @@
   const producersGrid = document.getElementById('producers-grid');
   const producerDetail = document.getElementById('producer-detail');
 
+  const TITULOS = { catalog: 'Beats', playlist: 'Playlist', vip: 'Beats VIP', packs: 'Sample Packs', producers: 'Productores' };
+  const BUSCAR = { catalog: 'Buscar beats', playlist: 'Buscar en la Playlist', vip: 'Buscar beats VIP', packs: 'Buscar packs' };
   document.querySelectorAll('.section-tab').forEach((tab) => {
     tab.addEventListener('click', () => {
       const section = tab.dataset.section;
@@ -247,22 +248,19 @@
       currentSection = section;
 
       document.querySelectorAll('.section-tab').forEach(t => t.classList.toggle('active', t === tab));
-
-      const titles = { catalog: 'Catálogo', playlist: 'Playlist', vip: 'Beats VIP', packs: 'Sample Packs', producers: 'Productores' };
-      sectionTitle.textContent = titles[section];
+      sectionTitle.textContent = TITULOS[section];
 
       const isProducers = section === 'producers';
-      catalogLayout.classList.toggle('no-sidebar', section === 'playlist' || isProducers);
-      paymentMethodsRail.style.display = (section === 'playlist' || isProducers) ? 'none' : 'block';
       trackGrid.style.display = isProducers ? 'none' : '';
       searchBarWrap.style.display = isProducers ? 'none' : '';
       producersGrid.style.display = isProducers ? 'grid' : 'none';
       producerDetail.style.display = 'none';
+      if (!isProducers) producersPager.hidden = true;
+      trackPager.hidden = true;
+      verHots();
       trackCount.textContent = '';
-
-      searchInput.placeholder = section === 'playlist'
-        ? 'Buscar por nombre o género…'
-        : section === 'packs' ? 'Buscar pack por nombre, tipo o productor…' : 'Buscar por nombre, género o precio…';
+      if (!isProducers) searchInput.placeholder = BUSCAR[section] || 'Buscar';
+      pintarGeneros();
 
       if (isProducers) {
         // el aviso «Aún no hay…» es de las otras secciones: en Productores no se muestra
@@ -272,10 +270,10 @@
         return;
       }
       if (!seccionesCargadas.has(section)) {
-        // mientras llega la lista: skeletons, no el aviso de «no hay pistas»
+        // mientras llega la lista: filas de carga, no el aviso de «no hay pistas»
         emptyState.style.display = 'none';
         noResultsState.style.display = 'none';
-        ZBUI.mostrarSkeleton(trackGrid, 'tarjetas', 8);
+        ZBUI.mostrarSkeleton(trackGrid, 'filas', 6);
       } else {
         renderCurrentSection();
       }
@@ -304,21 +302,44 @@
 
     if (!ordenados.length) {
       producersGrid.innerHTML = '<div class="empty-hint">Aún no hay productores.</div>';
+      ZBUI.paginar(producersPager, 0, 0, 1);
       return;
     }
+    listaProductores = ordenados;
+    pintarProductores();
+  }
 
-    producersGrid.innerHTML = ordenados.map(p => `
-      <div class="producer-card" data-id="${p.id}" role="button" tabindex="0" aria-label="Ver los beats de ${escapeHtml(p.name)}">
-        <button type="button" class="fav-btn ${favs.includes(p.id) ? 'active' : ''}" data-fav="${p.id}" aria-label="Favorito" aria-pressed="${favs.includes(p.id)}">
-          <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
-        </button>
+  // Productores por páginas: las tarjetas que caben en la pantalla
+  const producersPager = document.getElementById('producers-pager');
+  let listaProductores = [];
+  let paginaProductores = 0;
+  function pintarProductores() {
+    const lista = listaProductores;
+    paginaProductores = ZBUI.paginarEncajado(producersGrid, producersPager, lista.length, paginaProductores,
+      mqAncho.matches ? 9 : 6, (p) => { paginaProductores = p; pintarProductores(); },
+      (desde, hasta) => tarjetasProductores(lista.slice(desde, hasta))).pagina;
+  }
+  function tarjetasProductores(ordenados) {
+    const favs = getFavProducers();
+    producersGrid.innerHTML = ordenados.map(p => {
+      const ins = p.insignias || {};
+      const datos = [p.beats + ' beat' + (p.beats === 1 ? '' : 's')];
+      if (ins.ventasEntregadas > 0) datos.push(ins.ventasEntregadas + ' venta' + (ins.ventasEntregadas === 1 ? '' : 's'));
+      if (ins.resenas && ins.resenas.total) datos.push('★ ' + numEs(ins.resenas.promedio));
+      return `
+      <div class="producer-card" data-id="${p.id}">
+        <button type="button" class="card-hit" aria-label="Ver los beats de ${escapeHtml(p.name)}"></button>
         ${p.avatar ? `<img class="producer-avatar" src="/api/producer/avatar/${p.id}?s=300" alt="" loading="lazy">` : `<div class="producer-avatar producer-avatar-fallback">${escapeHtml((p.name||'?').charAt(0).toUpperCase())}</div>`}
-        <div class="producer-card-name">${escapeHtml(p.name)}</div>
-        <div class="producer-card-bio">${escapeHtml(p.bio || '')}</div>
-        <div class="producer-card-count">${p.beats} beat${p.beats === 1 ? '' : 's'}</div>
-        ${insigniasHtml(p.insignias)}
-      </div>
-    `).join('');
+        <div class="pc-info">
+          <div class="producer-card-name">${escapeHtml(p.name)}${ins.identidadVerificada ? '<span class="prod-verif" title="Identidad verificada"><span aria-hidden="true">✓</span><span class="sr-only"> (identidad verificada)</span></span>' : ''}</div>
+          <div class="producer-card-bio">${escapeHtml(p.bio || '')}</div>
+          <div class="producer-card-count">${escapeHtml(datos.join(' · '))}</div>
+        </div>
+        <button type="button" class="fav-btn ${favs.includes(p.id) ? 'active' : ''}" data-fav="${p.id}" aria-label="Favorito" aria-pressed="${favs.includes(p.id)}">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+        </button>
+      </div>`;
+    }).join('');
 
     producersGrid.querySelectorAll('.fav-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
@@ -331,9 +352,6 @@
     });
     producersGrid.querySelectorAll('.producer-card').forEach(card => {
       card.addEventListener('click', () => openProducerDetail(Number(card.dataset.id), card));
-      card.addEventListener('keydown', (e) => {
-        if ((e.key === 'Enter' || e.key === ' ') && e.target === card) { e.preventDefault(); card.click(); }
-      });
     });
   }
 
@@ -356,22 +374,25 @@
     const card = producersGrid.querySelector('.producer-card[data-id="' + id + '"]');
     ZBUI.viaje(
       { 'zb-titulo': producerDetail.querySelector('.producer-detail-head h2'), 'zb-avatar': producerDetail.querySelector('.producer-avatar-lg') },
-      () => { producerDetail.style.display = 'none'; producersGrid.style.display = 'grid'; },
+      () => { producerDetail.style.display = 'none'; producersGrid.style.display = 'grid'; producersPager.hidden = !pagerProdVisible; },
       () => card ? { 'zb-titulo': card.querySelector('.producer-card-name'), 'zb-avatar': card.querySelector('.producer-avatar') } : {}
     );
   }
 
+  let pagerProdVisible = false;
   async function openProducerDetail(id, card) {
     const nombreCard = card ? card.querySelector('.producer-card-name') : null;
     const fotoCard = card ? card.querySelector('.producer-avatar') : null;
     await ZBUI.viaje(
       { 'zb-titulo': nombreCard, 'zb-avatar': fotoCard },
       () => {
+        pagerProdVisible = !producersPager.hidden;
+        producersPager.hidden = true;
         producersGrid.style.display = 'none';
         producerDetail.style.display = 'block';
         producerDetail.innerHTML = (card
           ? cabeceraProductor(id, nombreCard.textContent, fotoCard && fotoCard.tagName === 'IMG', card.querySelector('.producer-card-bio').textContent, '')
-          : ZBUI.skeleton('lineas', 3)) + '<div class="track-grid">' + ZBUI.skeleton('tarjetas', 4) + '</div>';
+          : ZBUI.skeleton('lineas', 3)) + '<div class="tracklist">' + ZBUI.skeleton('filas', 4) + '</div>';
         const atras = producerDetail.querySelector('.back-to-producers');
         if (atras) atras.addEventListener('click', () => volverAProductores(id));
       },
@@ -389,17 +410,25 @@
     }).join('');
 
     producerDetail.innerHTML = cabeceraProductor(producer.id, producer.name, producer.avatar, producer.bio, socialHtml, producer.insignias)
-      + '<div class="track-grid" id="producer-track-grid"></div>';
+      + '<div class="tracklist" id="producer-track-grid"></div><nav class="pager" id="producer-pager" aria-label="Páginas de beats del productor" hidden></nav>';
 
     producerDetail.querySelector('.back-to-producers').addEventListener('click', () => volverAProductores(producer.id));
 
     const grid = document.getElementById('producer-track-grid');
-    const savedSection = currentSection;
-    currentSection = 'catalog';
-    renderTracks(tracks, tracks.length, grid);
-    currentSection = savedSection;
-
-    if (!tracks.length) grid.innerHTML = '<div class="empty-hint">Sin beats disponibles por ahora.</div>';
+    if (!tracks.length) { grid.innerHTML = '<div class="empty-hint">Este productor no tiene beats a la venta ahora mismo.</div>'; return; }
+    // sus beats, por páginas que caben en la pantalla
+    let paginaDetalle = 0;
+    const pintarDetalle = () => {
+      paginaDetalle = ZBUI.paginarEncajado(grid, document.getElementById('producer-pager'), tracks.length, paginaDetalle, porPagina(),
+        (p) => { paginaDetalle = p; pintarDetalle(); },
+        (desde, hasta) => {
+          const savedSection = currentSection;
+          currentSection = 'catalog';
+          renderTracks(tracks.slice(desde, hasta), tracks.length, grid, { total: tracks.length, desde });
+          currentSection = savedSection;
+        }, 'prod' + producer.id + '|' + tracks.length).pagina;
+    };
+    pintarDetalle();
   }
 
   async function loadTracksForSection(section) {
@@ -416,6 +445,8 @@
     clearTimeout(searchDebounceTimer);
     searchDebounceTimer = setTimeout(() => {
       searchQuery = searchInput.value.trim().toLowerCase();
+      if (paginas[currentSection] != null) paginas[currentSection] = 0;
+      verHots();
       renderCurrentSection();
     }, 200);
   });
@@ -428,11 +459,87 @@
     return haystacks.some(h => h.includes(searchQuery));
   }
 
+  // ---------- Lista de beats con páginas y filtro de género ----------
+  const paginas = { catalog: 0, playlist: 0, vip: 0, packs: 0 };
+  const generos = { catalog: '', playlist: '', vip: '', packs: '' };
+  const mqAncho = window.matchMedia('(min-width: 900px)');
+  const porPagina = () => (mqAncho.matches ? 12 : 8);
+  const normalizar = (t) => String(t || '').trim().toLowerCase();
+
+  function filtrados(section) {
+    const g = generos[section];
+    return (tracksBySection[section] || []).filter(t => matchesSearch(t) && (!g || normalizar(t.genre) === g));
+  }
+  function pintarGeneros() {
+    if (currentSection === 'producers') { genreChips.innerHTML = ''; return; }
+    const cuenta = new Map();
+    (tracksBySection[currentSection] || []).forEach((t) => {
+      const g = normalizar(t.genre);
+      if (!g) return;
+      const v = cuenta.get(g) || { n: 0, txt: String(t.genre).trim() };
+      v.n++; cuenta.set(g, v);
+    });
+    const lista = [...cuenta.entries()].sort((a, b) => b[1].n - a[1].n).slice(0, 8);
+    if (lista.length < 2) { genreChips.innerHTML = ''; generos[currentSection] = ''; return; }
+    const activo = generos[currentSection];
+    genreChips.innerHTML = '<button type="button" class="genre-chip' + (!activo ? ' active' : '') + '" data-g="">Todos</button>' +
+      lista.map(([g, v]) => '<button type="button" class="genre-chip' + (activo === g ? ' active' : '') + '" data-g="' + escapeHtml(g) + '">' + escapeHtml(v.txt) + '</button>').join('');
+  }
+  genreChips.addEventListener('click', (e) => {
+    const b = e.target.closest('.genre-chip');
+    if (!b) return;
+    generos[currentSection] = b.dataset.g || '';
+    paginas[currentSection] = 0;
+    pintarGeneros();
+    verHots();
+    renderCurrentSection();
+  });
+
+  // filas por página de cada sección (lo que cabe en la pantalla, medido al pintar)
+  const tams = {};
   function renderCurrentSection() {
-    if (!seccionesCargadas.has(currentSection)) return; // sigue el skeleton hasta que llegue la lista
-    const allTracks = tracksBySection[currentSection] || [];
-    const filtered = allTracks.filter(matchesSearch);
-    renderTracks(filtered, allTracks.length);
+    if (!seccionesCargadas.has(currentSection)) return; // sigue la carga hasta que llegue la lista
+    const seccion = currentSection;
+    const todos = tracksBySection[seccion] || [];
+    const lista = filtrados(seccion);
+    const firma = [seccion, generos[seccion] || '', searchQuery, lista.length, hotsSection.hidden ? 0 : 1].join('|');
+    ZBUI.encajar(trackGrid, porPagina(), (tam) => {
+      // si cambia el tamaño de página, sigue a la vista la primera fila
+      if (tams[seccion] && tams[seccion] !== tam) paginas[seccion] = Math.floor((paginas[seccion] * tams[seccion]) / tam);
+      tams[seccion] = tam;
+      const total = Math.max(1, Math.ceil(lista.length / tam));
+      if (paginas[seccion] >= total) paginas[seccion] = total - 1;
+      const desde = paginas[seccion] * tam;
+      renderTracks(lista.slice(desde, desde + tam), todos.length, null, { total: lista.length, desde });
+      pintarPager(lista.length, tam);
+    }, firma);
+  }
+  function pintarPager(n, tam) {
+    const total = Math.ceil(n / tam);
+    if (total <= 1 || currentSection === 'producers') { trackPager.hidden = true; trackPager.innerHTML = ''; return; }
+    const p = paginas[currentSection];
+    trackPager.hidden = false;
+    trackPager.innerHTML = '<button type="button" data-p="' + (p - 1) + '"' + (p === 0 ? ' disabled' : '') + ' aria-label="Página anterior">‹</button>' +
+      '<span class="pager-txt">' + (p + 1) + ' de ' + total + '</span>' +
+      '<button type="button" data-p="' + (p + 1) + '"' + (p >= total - 1 ? ' disabled' : '') + ' aria-label="Página siguiente">›</button>';
+  }
+  trackPager.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-p]');
+    if (!b || b.disabled) return;
+    paginas[currentSection] = Number(b.dataset.p);
+    ZBUI.transicion(() => renderCurrentSection());
+    // si la lista quedó arriba de la pantalla, se vuelve a su comienzo
+    const arriba = trackGrid.getBoundingClientRect().top + window.scrollY - 90;
+    if (window.scrollY > arriba) window.scrollTo({ top: arriba, behavior: 'smooth' });
+  });
+  mqAncho.addEventListener('change', () => { if (currentSection !== 'producers') renderCurrentSection(); });
+  // lleva la página a la que contiene esa pista (al compartir un enlace o al pasar a la siguiente)
+  function mostrarPaginaDe(id) {
+    if (!(currentSection in paginas)) return;
+    const idx = filtrados(currentSection).findIndex(t => Number(t.id) === Number(id));
+    if (idx < 0) return;
+    const p = Math.floor(idx / (tams[currentSection] || porPagina()));
+    if (p !== paginas[currentSection]) { paginas[currentSection] = p; renderCurrentSection(); }
   }
 
   // Quién hizo cada tema: en Playlist van los artistas (la colaboración); en Catálogo y VIP, género y productor.
@@ -463,128 +570,84 @@
     return (conComa ? ', ' : '') + partes.join(' · ');
   }
 
-  function renderTracks(tracks, totalBeforeFilter, targetGrid) {
+  const ICONO_CORAZON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>';
+  const ICONO_PLAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>';
+
+  function renderTracks(tracks, totalBeforeFilter, targetGrid, pag) {
     const grid = targetGrid || trackGrid;
     grid.innerHTML = '';
-    const esPacks = !targetGrid && currentSection === 'packs';
-    trackCount.textContent = !tracks.length ? '' : esPacks ? `${tracks.length} PACK${tracks.length === 1 ? '' : 'S'}` : `${tracks.length} PISTA${tracks.length === 1 ? '' : 'S'}`;
-
-    const hasSearch = Boolean(searchQuery);
     const enDetalleProductor = Boolean(targetGrid);
-    emptyState.style.display = (!enDetalleProductor && !totalBeforeFilter && !hasSearch) ? 'block' : 'none';
-    noResultsState.style.display = (!enDetalleProductor && totalBeforeFilter > 0 && tracks.length === 0) ? 'block' : 'none';
+    const seccion = enDetalleProductor ? 'catalog' : currentSection;
+    const esPacks = seccion === 'packs';
+    const cuantos = pag ? pag.total : tracks.length;
+    if (!enDetalleProductor) {
+      trackCount.textContent = !cuantos ? '' : cuantos + ' ' + (esPacks ? (cuantos === 1 ? 'pack' : 'packs') : (cuantos === 1 ? 'beat' : 'beats'));
+    }
 
-    if (currentSection === 'vip') {
+    const hasSearch = Boolean(searchQuery) || Boolean(generos[seccion]);
+    emptyState.style.display = (!enDetalleProductor && !totalBeforeFilter && !hasSearch) ? 'block' : 'none';
+    noResultsState.style.display = (!enDetalleProductor && totalBeforeFilter > 0 && cuantos === 0) ? 'block' : 'none';
+
+    if (seccion === 'vip') {
       emptyStateTitle.textContent = 'Aún no hay Beats VIP';
       emptyStateText.textContent = 'Aquí aparecen los beats vendidos en exclusiva.';
-    } else if (currentSection === 'packs') {
+    } else if (esPacks) {
       emptyStateTitle.textContent = 'Aún no hay Sample Packs';
       emptyStateText.textContent = 'Loops, drums y one-shots para tus producciones, muy pronto.';
-    } else if (currentSection === 'playlist') {
+    } else if (seccion === 'playlist') {
       emptyStateTitle.textContent = 'Playlist vacía';
       emptyStateText.textContent = 'Todavía no hay colaboraciones gratuitas publicadas.';
     } else {
-      emptyStateTitle.textContent = 'Aún no hay pistas';
-      emptyStateText.textContent = 'Está preparando el primer set. Vuelve pronto.';
+      emptyStateTitle.textContent = 'Aún no hay beats';
+      emptyStateText.textContent = 'Se está preparando el primer set. Vuelve pronto.';
     }
 
-    tracks.forEach((track) => {
-      track._section = track._section || currentSection;
-      const card = document.createElement('button');
-      card.className = 'track-card';
-      card.dataset.id = track.id;
-      card.setAttribute('aria-label', `Reproducir ${track.title}`);
+    const desde = pag ? pag.desde : 0;
+    tracks.forEach((track, i) => {
+      track._section = track._section || seccion;
+      const row = document.createElement('div');
+      row.className = 'track-row' + (Number(track.id) === Number(currentTrackId) ? ' playing' : '');
+      row.dataset.id = track.id;
 
-      const coverHtml = track.cover_filename
-        ? `<img src="/api/cover/${track.id}?s=600" alt="" loading="lazy" decoding="async" draggable="false">`
-        : `<div class="track-cover-fallback">${(track.title || '?').charAt(0).toUpperCase()}</div>`;
+      const cover = track.cover_filename
+        ? `<img src="/api/cover/${track.id}?s=160" alt="" loading="lazy" decoding="async" draggable="false">`
+        : `<span class="tr-cover-fallback">${escapeHtml((track.title || '?').charAt(0).toUpperCase())}</span>`;
+      const badge = track.is_pack ? '<span class="tr-badge">Pack</span>' : (track.is_exclusive ? '<span class="tr-badge tr-badge-ex">Exclusiva</span>' : '');
 
-      // Créditos debajo del título: artistas (solo Playlist), género y quién lo produjo (también el admin)
-      const creditos = creditosHtml(track, currentSection);
-
-      const exclusiveBadge = track.is_pack
-        ? `<div class="track-exclusive-badge track-pack-badge">Sample Pack</div>`
-        : track.is_exclusive ? `<div class="track-exclusive-badge">★ Exclusiva</div>` : '';
-      const vipOwner = currentSection === 'vip'
-        ? `<div class="track-vip-owner">${track.vip_owner ? 'Dueño: ' + escapeHtml(track.vip_owner) : 'Dueño anónimo'}</div>`
-        : '';
-
-      let priceChip = '';
-      if ((currentSection === 'catalog' || currentSection === 'packs') && track.for_sale && track.price_cup > 0) {
+      let fin = '';
+      if ((seccion === 'catalog' || esPacks) && track.for_sale && track.price_cup > 0) {
         const priceText = formatPriceInCurrency(track.price_cup, selectedCurrency);
-        const multipleLicenses = (track.licenses || []).length > 1;
-        const label = multipleLicenses ? `Desde ${priceText}` : priceText;
+        const multiples = (track.licenses || []).length > 1;
         const tieneDescuento = discountPercent > 0 && track.original_cup && track.original_cup > track.price_cup;
-        const originalText = tieneDescuento ? formatPriceInCurrency(track.original_cup, selectedCurrency) : '';
-        priceChip = `
-          <div class="track-price-chip">
-            <svg viewBox="0 0 24 24"><path d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12L8.1 13h7.45c.75 0 1.41-.41 1.75-1.03L20.9 4H4.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z"/></svg>
-            ${tieneDescuento ? `<span class="price-strike">${escapeHtml(originalText)}</span>` : ''}
-            <span title="${escapeHtml(label)}">${escapeHtml(label)}</span>
-          </div>
-        `;
-      } else if (currentSection === 'vip' && track.price_cup > 0) {
-        const priceText = formatPriceInCurrency(track.price_cup, selectedCurrency);
-        priceChip = `
-          <div class="track-price-chip track-price-chip-sold">
-            <span title="Vendida en ${escapeHtml(priceText)}">Vendida · ${escapeHtml(priceText)}</span>
-          </div>
-        `;
-      }
-
-      let playlistStats = '';
-      if (currentSection === 'playlist') {
+        fin = `<button type="button" class="tr-buy" aria-label="Comprar ${escapeHtml(track.title)}, ${multiples ? 'desde ' : ''}${escapeHtml(priceText)}">` +
+          (multiples ? '<span class="tr-desde">desde</span>' : '') +
+          (tieneDescuento ? `<s class="price-strike">${escapeHtml(formatPriceInCurrency(track.original_cup, selectedCurrency))}</s>` : '') +
+          `<span class="tr-price">${escapeHtml(priceText)}</span></button>`;
+      } else if (seccion === 'vip') {
+        fin = '<span class="tr-sold">Vendida' + (track.price_cup > 0 ? '<span class="tr-price-sold">' + escapeHtml(formatPriceInCurrency(track.price_cup, selectedCurrency)) + '</span>' : '') + '</span>';
+      } else if (seccion === 'playlist') {
         const liked = isTrackLiked(track.id);
-        playlistStats = `
-          <div class="track-stats">
-            <button type="button" class="track-like-btn${liked ? ' liked' : ''}" data-track-id="${track.id}" aria-label="Me gusta">
-              <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
-              <span class="track-like-count">${track.likes || 0}</span>
-            </button>
-            <span class="track-plays-count">
-              <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-              ${track.plays || 0}
-            </span>
-          </div>
-        `;
+        fin = `<span class="track-stats"><button type="button" class="track-like-btn${liked ? ' liked' : ''}" data-track-id="${track.id}" aria-label="Me gusta" aria-pressed="${liked}">${ICONO_CORAZON}<span class="track-like-count">${track.likes || 0}</span></button>` +
+          `<span class="track-plays-count" title="Reproducciones">${ICONO_PLAY}${track.plays || 0}</span></span>`;
       }
+      const vip = seccion === 'vip' ? `<div class="track-vip-owner">${track.vip_owner ? 'Dueño: ' + escapeHtml(track.vip_owner) : 'Dueño anónimo'}</div>` : '';
 
-      card.innerHTML = `
-        <div class="track-cover-wrap">
-          ${coverHtml}
-          ${exclusiveBadge}
-          <div class="play-overlay">
-            <div class="play-btn-circle">
-              <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-            </div>
-          </div>
-        </div>
-        <div class="track-info-row">
-          <div class="track-title">${escapeHtml(track.title)}</div>
-          ${priceChip}
-        </div>
-        ${creditos}
-        ${vipOwner}
-        ${playlistStats}
-      `;
-      card.addEventListener('click', () => playTrack(track));
-      // se puede escuchar con el teclado (Enter o espacio)
-      card.tabIndex = 0;
-      card.setAttribute('role', 'button');
-      card.setAttribute('aria-label', 'Escuchar ' + track.title + creditosTexto(track, currentSection, true));
-      card.addEventListener('keydown', (e) => {
-        if ((e.key === 'Enter' || e.key === ' ') && e.target === card) { e.preventDefault(); playTrack(track); }
-      });
-
-      const likeBtn = card.querySelector('.track-like-btn');
-      if (likeBtn) {
-        likeBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          toggleLike(track.id, likeBtn);
-        });
-      }
-
-      grid.appendChild(card);
+      row.innerHTML =
+        `<span class="tr-num" aria-hidden="true"><span class="tr-n">${String(desde + i + 1).padStart(2, '0')}</span><span class="eq-mini"><span></span><span></span><span></span><span></span></span></span>` +
+        `<span class="tr-cover">${cover}<span class="tr-play" aria-hidden="true">${ICONO_PLAY}</span></span>` +
+        `<div class="tr-main"><div class="tr-title"><span class="tr-title-txt">${escapeHtml(track.title)}</span>${badge}</div>${creditosHtml(track, seccion)}${vip}</div>` +
+        `<span class="tr-wave">${ZBUI.onda(track.onda)}</span>` +
+        `<span class="tr-dur">${track.duration_seconds ? formatTime(track.duration_seconds) : ''}</span>` +
+        `<span class="tr-end">${fin}</span>` +
+        '<button type="button" class="card-hit"></button>';
+      // toda la fila reproduce; el botón que la cubre la hace usable con teclado y lector de pantalla
+      row.querySelector('.card-hit').setAttribute('aria-label', 'Escuchar ' + track.title + creditosTexto(track, seccion, true));
+      row.addEventListener('click', () => playTrack(track));
+      const buy = row.querySelector('.tr-buy');
+      if (buy) buy.addEventListener('click', (e) => { e.stopPropagation(); openBuyModal(track); });
+      const likeBtn = row.querySelector('.track-like-btn');
+      if (likeBtn) likeBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleLike(track.id, likeBtn); });
+      grid.appendChild(row);
     });
   }
 
@@ -615,9 +678,16 @@
     </div>`;
   }
 
+  const hotsALaVista = () => hotsLista.length > 0 && currentSection === 'catalog' && !searchQuery && !generos.catalog;
+  // muestra u oculta la franja según la sección; las listas vuelven a medir el sitio que queda
+  function verHots() {
+    const ver = hotsALaVista();
+    if (hotsSection.hidden === !ver) return;
+    if (ver) pintarHots(); else { cancelAnimationFrame(hotsMov.raf); hotsSection.hidden = true; }
+  }
   function pintarHots() {
     cancelAnimationFrame(hotsMov.raf);
-    if (!hotsLista.length) { hotsSection.hidden = true; return; }
+    if (!hotsALaVista()) { hotsSection.hidden = true; return; }
     hotsSection.hidden = false;
     hotsTrack.classList.remove('is-loop');
     hotsTrack.innerHTML = hotsLista.map(t => tarjetaHot(t, false)).join('');
@@ -705,6 +775,8 @@
       hotsLista = (await res.json()).hots || [];
     } catch { hotsLista = []; }
     pintarHots();
+    // con o sin la franja, la lista vuelve a medir el sitio que le queda
+    if (seccionesCargadas.has(currentSection)) renderCurrentSection();
   }
 
   // Identificador anónimo de este dispositivo para que cada persona cuente un solo «me gusta» por pista
@@ -752,6 +824,7 @@
 
       setTrackLiked(trackId, !alreadyLiked);
       btn.classList.toggle('liked', !alreadyLiked);
+      btn.setAttribute('aria-pressed', String(!alreadyLiked));
       btn.querySelector('.track-like-count').textContent = likes;
 
       const track = tracksBySection.playlist.find(t => t.id === trackId);
@@ -764,8 +837,10 @@
   }
 
   function markPlayingCard(trackId) {
-    document.querySelectorAll('.track-card').forEach((card) => {
-      card.classList.toggle('playing', Number(card.dataset.id) === Number(trackId));
+    document.querySelectorAll('.track-row').forEach((row) => {
+      const suena = Number(row.dataset.id) === Number(trackId);
+      row.classList.toggle('playing', suena);
+      if (!suena) { const w = row.querySelector('.tr-wave'); if (w) w.style.removeProperty('--p'); }
     });
   }
 
@@ -784,7 +859,16 @@
       const pc = document.getElementById('player-credits');
       if (pc) pc.textContent = creditosTexto(track, track._section || currentSection, false);
       playerCover.src = track.cover_filename ? `/api/cover/${track.id}?s=160` : '';
+      // la onda del beat es la barra de avance
+      progressTrack.innerHTML = ZBUI.onda(track.onda, 'wf-player');
+      progressTrack.style.setProperty('--p', '0%');
+      progressTrack.setAttribute('aria-valuenow', '0');
       playerBar.classList.add('active');
+      if (!document.body.classList.contains('con-reproductor')) {
+        document.body.classList.add('con-reproductor');
+        ZBUI.reencajar();
+        mostrarPaginaDe(track.id);
+      }
       markPlayingCard(track.id);
 
       actualizarBotonCompra(track);
@@ -808,8 +892,9 @@
     } else if (canBuy) {
       const priceText = formatPriceInCurrency(track.price_cup, selectedCurrency);
       const multipleLicenses = (track.licenses || []).length > 1;
-      buyPriceLabel.textContent = multipleLicenses ? `Desde ${priceText}` : priceText;
-      buyPriceLabel.title = buyPriceLabel.textContent;
+      // «Desde» va aparte: en teléfonos se oculta para que el precio se lea entero
+      buyPriceLabel.innerHTML = (multipleLicenses ? '<span class="pb-desde">Desde </span>' : '') + escapeHtml(priceText);
+      buyPriceLabel.title = (multipleLicenses ? 'Desde ' : '') + priceText;
       buyBtn.style.display = 'inline-flex';
       buyBtn.onclick = () => openBuyModal(track);
       downloadBtn.style.display = 'none';
@@ -865,10 +950,13 @@
     }
     caja.innerHTML = '<div class="rev-head"><strong>' + (d.total ? estrellasTxt(d.promedio) + ' ' + numEs(d.promedio) + ' de 5' : 'Sin reseñas visibles') + '</strong>' +
       '<span>' + d.total + ' reseña' + (d.total === 1 ? '' : 's') + ' de compradores verificados' + (d.ocultas ? ' · ' + d.ocultas + ' oculta' + (d.ocultas === 1 ? '' : 's') + ' por moderación' : '') + '</span></div>' +
-      d.resenas.slice(0, 6).map(r => '<div class="rev-item"><div class="rev-top"><span class="rev-stars" aria-label="' + r.estrellas + ' de 5">' + estrellasTxt(r.estrellas) + '</span> <strong>' + escapeHtml(r.nombre) + '</strong> <span class="rev-check">compra verificada</span></div>' +
+      '<div class="rev-list" id="desc-rev-list">' +
+      d.resenas.slice(0, 30).map(r => '<div class="rev-item"><div class="rev-top"><span class="rev-stars" aria-label="' + r.estrellas + ' de 5">' + estrellasTxt(r.estrellas) + '</span> <strong>' + escapeHtml(r.nombre) + '</strong> <span class="rev-check">compra verificada</span></div>' +
         (r.texto ? '<p>' + escapeHtml(r.texto) + '</p>' : '') +
-        (r.respuesta ? '<p class="rev-reply"><strong>Respuesta del productor:</strong> ' + escapeHtml(r.respuesta) + '</p>' : '') + '</div>').join('');
+        (r.respuesta ? '<p class="rev-reply"><strong>Respuesta del productor:</strong> ' + escapeHtml(r.respuesta) + '</p>' : '') + '</div>').join('') + '</div>';
     caja.hidden = false;
+    // las reseñas por páginas: las que caben en la ventana
+    ZBUI.paginarDom(document.getElementById('desc-rev-list'), { porPagina: () => 4, filas: '.rev-item', etiqueta: 'Páginas de reseñas', caja: descOverlay.querySelector('.modal-box') });
   }
   async function compartirPista(track, labelEl) {
     const url = enlacePista(track);
@@ -878,7 +966,7 @@
     } catch (e) { if (e && e.name === 'AbortError') return; }
     try {
       await navigator.clipboard.writeText(url);
-      if (labelEl) { const prev = labelEl.textContent; labelEl.textContent = '¡Enlace copiado!'; setTimeout(() => { labelEl.textContent = prev; }, 1800); }
+      if (labelEl) { const prev = labelEl.textContent; labelEl.textContent = '¡Enlace copiado!'; labelEl.classList.add('pl-flash'); setTimeout(() => { labelEl.textContent = prev; labelEl.classList.remove('pl-flash'); }, 1800); }
     } catch {
       prompt('Copia este enlace para compartir:', url);
     }
@@ -916,8 +1004,9 @@
     if (tab && seccion !== currentSection) tab.click();
     track._section = seccion;
     setTimeout(() => {
-      const card = document.querySelector('.track-card[data-id="' + id + '"]');
-      if (card) { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); card.classList.add('shared-highlight'); setTimeout(() => card.classList.remove('shared-highlight'), 3000); }
+      mostrarPaginaDe(id);
+      const fila = document.querySelector('.track-row[data-id="' + id + '"]');
+      if (fila) { fila.scrollIntoView({ behavior: 'smooth', block: 'center' }); fila.classList.add('shared-highlight'); setTimeout(() => fila.classList.remove('shared-highlight'), 3000); }
       abrirDescripcion(track, true);
     }, 400);
   }
@@ -941,7 +1030,11 @@
   audioEl.addEventListener('timeupdate', () => {
     if (!audioEl.duration) return;
     const pct = (audioEl.currentTime / audioEl.duration) * 100;
-    progressFill.style.width = `${pct}%`;
+    progressTrack.style.setProperty('--p', pct.toFixed(2) + '%');
+    progressTrack.setAttribute('aria-valuenow', String(Math.round(pct)));
+    progressTrack.setAttribute('aria-valuetext', formatTime(audioEl.currentTime) + ' de ' + formatTime(audioEl.duration));
+    const ondaFila = document.querySelector('.track-row.playing .tr-wave');
+    if (ondaFila) ondaFila.style.setProperty('--p', pct.toFixed(2) + '%');
     timeCurrent.textContent = formatTime(audioEl.currentTime);
     timeTotal.textContent = formatTime(audioEl.duration);
   });
@@ -952,14 +1045,21 @@
     const idx = list.findIndex(t => t.id === currentTrackId);
     if (idx !== -1 && idx < list.length - 1) {
       playTrack(list[idx + 1]);
+      mostrarPaginaDe(list[idx + 1].id);
     }
   });
 
   progressTrack.addEventListener('click', (e) => {
     if (!audioEl.duration) return;
     const rect = progressTrack.getBoundingClientRect();
-    const pct = (e.clientX - rect.left) / rect.width;
+    const pct = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
     audioEl.currentTime = pct * audioEl.duration;
+  });
+  // con el teclado: flechas para adelantar o atrasar 5 segundos
+  progressTrack.addEventListener('keydown', (e) => {
+    if (!audioEl.duration || (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft')) return;
+    e.preventDefault();
+    audioEl.currentTime = Math.min(audioEl.duration, Math.max(0, audioEl.currentTime + (e.key === 'ArrowRight' ? 5 : -5)));
   });
 
   // Si el token venció se pide otro UNA vez; si el archivo está dañado no se reintenta en bucle.
@@ -1020,11 +1120,27 @@
   const LICENSE_ORDER = ['basic', 'premium', 'unlimited', 'exclusive', 'pack'];
 
   let selectedLicenseType = null;
+  const buyBox = document.getElementById('buy-box');
+  const buyNextBtn = document.getElementById('buy-next-btn');
+  const buyResumen = document.getElementById('buy-resumen');
+  function irPaso(n) {
+    buyBox.dataset.paso = String(n);
+    buyBox.scrollTop = 0;
+  }
+  buyNextBtn.addEventListener('click', () => { if (selectedLicenseType) irPaso(2); });
+  document.getElementById('buy-back-btn').addEventListener('click', () => irPaso(1));
+  // Pago → Tus datos (cada paso cabe en la pantalla del teléfono)
+  const pagoNextBtn = document.getElementById('pago-next-btn');
+  pagoNextBtn.addEventListener('click', () => { if (pagoListo()) irPaso(3); });
+  document.getElementById('buy-back-pago').addEventListener('click', () => irPaso(2));
 
   function openBuyModal(track) {
     activeModalTrack = track;
     modalTrackTitle.textContent = track.title;
     selectedLicenseType = null;
+    irPaso(1);
+    buyNextBtn.disabled = true;
+    buyNextBtn.textContent = 'Elige una licencia';
 
     const licenseList = document.getElementById('modal-license-list');
     const licenses = (track.licenses || []).slice().sort((a, b) => LICENSE_ORDER.indexOf(a.license_type) - LICENSE_ORDER.indexOf(b.license_type));
@@ -1078,6 +1194,8 @@
     orderSubmitBtn.classList.add('disabled');
 
     modalOverlay.classList.add('active');
+    // si solo hay una licencia, ya queda elegida
+    if (licenses.length === 1) selectLicense(licenses[0].license_type);
   }
 
   function selectLicense(type) {
@@ -1141,6 +1259,10 @@
     vipPublicWrap.style.display = type === 'exclusive' ? 'flex' : 'none';
     if (type !== 'exclusive') vipPublicInput.checked = false;
     updateSubmitButtonState();
+    const etiqueta = (LICENSE_INFO[type] || {}).label || type;
+    buyNextBtn.disabled = false;
+    buyNextBtn.textContent = 'Continuar con ' + etiqueta;
+    buyResumen.textContent = 'Licencia ' + etiqueta + ' · ' + modalPrice.textContent;
   }
 
   const telefonoValido = (v) => String(v || '').replace(/[^0-9]/g, '').length >= 8;
@@ -1156,10 +1278,16 @@
       ? 'Al continuar, se abrirá QvaPay para completar el pago con tu saldo.'
       : textoInstrucciones;
   }
+  const txValido = () => String(document.getElementById('tx-ref-input').value || '').replace(/[^A-Za-z0-9]/g, '').length >= 4;
+  const pagoListo = () => esPagoQvapay() || (txValido() && Boolean(receiptFile));
   function updateSubmitButtonState() {
     const qv = esPagoQvapay();
-    const txOk = qv || String(document.getElementById('tx-ref-input').value || '').replace(/[^A-Za-z0-9]/g, '').length >= 4;
+    const txOk = qv || txValido();
     const pagoOk = qv || receiptFile;
+    // botón del paso «Pago»: dice qué falta
+    pagoNextBtn.disabled = !pagoListo();
+    pagoNextBtn.textContent = qv ? 'Continuar' : !receiptFile ? 'Adjunta el comprobante' : !txOk ? 'Escribe el número de la transacción' : 'Continuar';
+    document.getElementById('pago-resumen').textContent = qv ? 'Pago con QvaPay' : 'Pago: comprobante adjunto';
     const ready = selectedLicenseType && buyerNameInput.value.trim() && telefonoValido(buyerPhoneInput.value) && txOk && pagoOk && termsAcceptInput.checked;
     orderSubmitBtn.disabled = !ready;
     orderSubmitBtn.classList.toggle('disabled', !ready);
@@ -1244,8 +1372,8 @@
     const file = await comprimirFoto(original);
     receiptFile = file;
     receiptDrop.classList.add('has-receipt');
-    receiptDropText.style.display = 'none';
-    receiptDropText.textContent = 'Toca para subir la foto del comprobante';
+    receiptDropText.style.display = 'block';
+    receiptDropText.textContent = 'Comprobante adjunto · toca para cambiarlo';
     if (receiptPreview.src && receiptPreview.src.startsWith('blob:')) URL.revokeObjectURL(receiptPreview.src);
     receiptPreview.src = URL.createObjectURL(file);
     receiptPreview.style.display = 'block';
@@ -1303,6 +1431,7 @@
 
       orderForm.style.display = 'none';
       modalSuccess.style.display = 'block';
+      irPaso(4);
 
       if (paymentInfo.contactPhone) {
         const message = encodeURIComponent(
@@ -1436,14 +1565,22 @@
     }
     if (cambio) escribirCompras(lista);
     actualizarBotonCompras();
-    if (purchasesOverlay.classList.contains('active')) pintarCompras();
+    // mientras la persona escribe una reseña o un reclamo no se repinta
+    if (purchasesOverlay.classList.contains('active') && !purchasesList.contains(document.activeElement)) pintarCompras();
     clearTimeout(comprasTimer);
     // tras volver de QvaPay se consulta más seguido hasta que llegue la confirmación
     if (hayPendientes) comprasTimer = setTimeout(revisarCompras, pagoEnCurso ? 5000 : 30000);
   }
 
-  function pintarCompras() {
+  // qué fichas de «Mis compras» dejó abiertas la persona (por defecto, la más reciente)
+  const comprasAbiertas = new Map();
+  let firmaCompras = '';
+  function pintarCompras(forzar) {
     const lista = compras();
+    // si nada cambió no se repinta (no se pierde lo que se está escribiendo ni el desplazamiento)
+    const firma = JSON.stringify(lista.map(c => [c.token, comprasEstado[c.token] || null]));
+    if (!forzar && firma === firmaCompras) return;
+    firmaCompras = firma;
     if (!lista.length) {
       purchasesList.innerHTML = '<p class="purchases-hint">Aún no tienes compras en este dispositivo.</p>';
       return;
@@ -1454,9 +1591,10 @@
       if (n >= 1024 * 1024 * 1024) return ' · ' + (n / 1024 / 1024 / 1024).toLocaleString('es', { maximumFractionDigits: 1 }) + ' GB';
       return ' · ' + Math.max(1, Math.round(n / 1024 / 1024)) + ' MB';
     };
-    purchasesList.innerHTML = lista.map((c) => {
+    const CHIP = { approved: ['ok', 'Lista'], pending: ['pend', 'En revisión'], esperando_pago: ['pend', 'Sin pagar'], rejected: ['bad', 'No aprobada'], missing: ['bad', 'No encontrada'] };
+    purchasesList.innerHTML = lista.map((c, idx) => {
       const d = comprasEstado[c.token] || {};
-      const fecha = new Date(c.createdAt || d.createdAt || Date.now()).toLocaleDateString('es', { day: '2-digit', month: 'short', year: 'numeric' });
+      const fecha = new Date(d.createdAt || c.createdAt || Date.now()).toLocaleDateString('es', { day: '2-digit', month: 'short', year: 'numeric' });
       let estado = '<span class="purchase-status pending">Comprobando…</span>';
       let acciones = '';
       if (d.status === 'pending') {
@@ -1514,7 +1652,7 @@
         extras += '<details class="purchase-more"' + (rs ? '' : ' open') + '><summary>' + (rs ? 'Tu reseña: ' + estrellasTxt(rs.estrellas) : 'Califica tu compra') + '</summary>' +
           (rs && rs.oculta ? '<span class="purchase-meta">Tu reseña no está visible.</span>' :
           '<div class="rev-form" data-token="' + c.token + '"><div class="rev-pick" role="radiogroup" aria-label="Estrellas">' +
-            [1, 2, 3, 4, 5].map(n => '<button type="button" role="radio" class="rev-star' + (rs && rs.estrellas >= n ? ' on' : '') + '" data-n="' + n + '" aria-checked="' + (rs && rs.estrellas === n) + '" aria-label="' + n + ' estrella' + (n === 1 ? '' : 's') + '">★</button>').join('') +
+            [1, 2, 3, 4, 5].map(n => '<button type="button" role="radio" class="rev-star' + (rs && rs.estrellas >= n ? ' on' : '') + '" data-n="' + n + '" aria-checked="' + String(Boolean(rs && rs.estrellas === n)) + '" aria-label="' + n + ' estrella' + (n === 1 ? '' : 's') + '">★</button>').join('') +
           '</div><label class="sr-only" for="rev-txt-' + idT + '">Tu opinión</label><textarea id="rev-txt-' + idT + '" maxlength="600" placeholder="¿Qué te pareció? (opcional)">' + escapeHtml(rs ? rs.texto : '') + '</textarea>' +
           '<button type="button" class="rev-send">' + (rs ? 'Cambiar reseña' : 'Publicar reseña') + '</button></div>') + '</details>';
         if (d.contentId) {
@@ -1535,14 +1673,25 @@
       if (comprobante && d.status === 'esperando_pago' && acciones) acciones = acciones.replace('</div>', comprobante + '</div>');
       else if (comprobante && d.status !== 'approved') acciones = '<div class="purchase-actions">' + comprobante + '</div>';
       else if (comprobante) acciones = acciones.replace('</div>', comprobante + '</div>');
-      return '<div class="purchase-card' + (d.status === 'approved' ? ' is-approved' : (d.status === 'rejected' ? ' is-rejected' : '')) + '">' +
-        '<div class="purchase-title">' + escapeHtml(c.title || d.trackTitle || 'Beat') + '</div>' +
-        '<div class="purchase-meta">Licencia ' + escapeHtml(String(c.license || d.licenseLabel || '').replace(/^Licencia (de )?/i, '')) + ' · ' + fecha + '</div>' +
+      const chip = CHIP[d.status] || ['pend', 'Comprobando'];
+      const abierta = comprasAbiertas.has(c.token) ? comprasAbiertas.get(c.token) : idx === 0;
+      return '<details class="purchase-card' + (d.status === 'approved' ? ' is-approved' : (d.status === 'rejected' ? ' is-rejected' : '')) + '" data-token="' + c.token + '"' + (abierta ? ' open' : '') + '>' +
+        '<summary class="purchase-sum"><span class="purchase-sum-main"><span class="purchase-title">' + escapeHtml(c.title || d.trackTitle || 'Beat') + '</span>' +
+        '<span class="purchase-meta">Licencia ' + escapeHtml(String(c.license || d.licenseLabel || '').replace(/^Licencia (de )?/i, '')) + ' · ' + fecha + '</span></span>' +
+        '<span class="purchase-chip ' + chip[0] + '">' + chip[1] + '</span></summary>' +
+        '<div class="purchase-body">' +
         (codigo ? '<div class="purchase-code">Pedido ' + escapeHtml(codigo) + '</div>' : '') +
         estado + acciones + extras + reclamo +
         '<button type="button" class="purchase-forget" data-token="' + c.token + '">Quitar de este dispositivo</button>' +
-        '</div>';
+        '</div></details>';
     }).join('');
+    purchasesList.querySelectorAll('details.purchase-card').forEach((dt) => {
+      dt.addEventListener('toggle', () => {
+        comprasAbiertas.set(dt.dataset.token, dt.open);
+        // una compra abierta a la vez: así «Mis compras» cabe sin desplazarse
+        if (dt.open) purchasesList.querySelectorAll('details.purchase-card[open]').forEach((o) => { if (o !== dt) o.open = false; });
+      });
+    });
     purchasesList.querySelectorAll('.rev-form').forEach((f) => {
       let elegidas = (f.querySelectorAll('.rev-star.on') || []).length;
       f.querySelectorAll('.rev-star').forEach((b) => b.addEventListener('click', () => {
@@ -1555,7 +1704,7 @@
         const r = await fetch('/api/purchase/' + f.dataset.token + '/resena', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ estrellas: elegidas, texto: f.querySelector('textarea').value }) });
         const d = await r.json().catch(() => ({}));
         if (!r.ok) { alert(d.error || 'No se pudo publicar.'); ev.target.disabled = false; return; }
-        await revisarCompras(); pintarCompras();
+        await revisarCompras(); pintarCompras(true);
       });
     });
     purchasesList.querySelectorAll('.cid-form').forEach((f) => {
@@ -1567,7 +1716,7 @@
         const r = await fetch('/api/purchase/' + f.dataset.token + '/content-id', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plataforma: pl.value, reclamante: rc.value, enlace: ln.value }) });
         const d = await r.json().catch(() => ({}));
         if (!r.ok) { alert(d.error || 'No se pudo enviar.'); ev.target.disabled = false; return; }
-        await revisarCompras(); pintarCompras();
+        await revisarCompras(); pintarCompras(true);
       });
     });
     purchasesList.querySelectorAll('.purchase-reclamar').forEach((b) => b.addEventListener('click', async () => {
@@ -1582,19 +1731,22 @@
         const tel = String(d.adminPhone || '').replace(/[^0-9]/g, '');
         if (tel) window.open('https://wa.me/' + tel + '?text=' + encodeURIComponent('Hola, hice un reclamo por mi pedido ' + (d.codigo || '') + ': ' + texto), '_blank', 'noopener');
         await revisarCompras();
-        pintarCompras();
+        pintarCompras(true);
       } catch { alert('No hay conexión. Intenta de nuevo.'); b.disabled = false; }
     }));
     purchasesList.querySelectorAll('.purchase-forget').forEach((b) => b.addEventListener('click', () => {
       if (!confirm('¿Quitar esta compra de este dispositivo? Solo podrás recuperarla con su enlace privado.')) return;
       escribirCompras(compras().filter(x => x.token !== b.dataset.token));
-      pintarCompras(); actualizarBotonCompras();
+      pintarCompras(true); actualizarBotonCompras();
     }));
   }
 
+  // «Mis compras» por páginas: las fichas que caben en la ventana
+  ZBUI.paginarDom(purchasesList, { porPagina: () => 6, filas: '.purchase-card', etiqueta: 'Páginas de compras', caja: document.querySelector('#purchases-overlay .modal-box') });
+
   function abrirCompras() {
     modalOverlay.classList.remove('active');
-    pintarCompras();
+    pintarCompras(true);
     purchasesOverlay.classList.add('active');
   }
   purchasesBtn.addEventListener('click', () => { abrirCompras(); revisarCompras(); });
@@ -1659,6 +1811,27 @@
       $t('trust-contacto-card').hidden = false;
     }
   }
+
+  // ---------- Quién vende: columna lateral en el ordenador, hoja «Info» en el teléfono ----------
+  const lado = document.getElementById('lado');
+  const ladoExtra = document.getElementById('lado-extra');
+  const infoOverlay = document.getElementById('info-overlay');
+  const infoCuerpo = document.getElementById('info-cuerpo');
+  const infoBtn = document.getElementById('info-btn');
+  const mqLado = window.matchMedia('(min-width: 900px) and (min-height: 700px)');
+  function abrirInfo() { infoOverlay.classList.add('active'); infoBtn.setAttribute('aria-expanded', 'true'); }
+  function cerrarInfo() { infoOverlay.classList.remove('active'); infoBtn.setAttribute('aria-expanded', 'false'); }
+  function ubicarInfo() {
+    if (mqLado.matches) {
+      cerrarInfo();
+      if (ladoExtra.parentElement !== lado) lado.appendChild(ladoExtra);
+    } else if (ladoExtra.parentElement !== infoCuerpo) infoCuerpo.appendChild(ladoExtra);
+  }
+  infoBtn.addEventListener('click', abrirInfo);
+  document.getElementById('info-close').addEventListener('click', cerrarInfo);
+  infoOverlay.addEventListener('click', (e) => { if (e.target === infoOverlay) cerrarInfo(); });
+  mqLado.addEventListener('change', ubicarInfo);
+  ubicarInfo();
 
   async function init() {
     loadConfianza();

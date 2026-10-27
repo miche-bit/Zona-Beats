@@ -113,24 +113,77 @@
     uploadProgressLabel.textContent = label;
   }
 
-  // ---------- Navegación por categorías ----------
-  function abrirCategoria(cat) {
-    // crossfade entre categorías
+  // ---------- Navegación: secciones y subpestañas ----------
+  // Seis secciones; cada una muestra una sola parte a la vez, para no tener que bajar.
+  const CATEGORIAS = ['ventas', 'productores', 'pagos', 'musica', 'tienda', 'ajustes'];
+  // nombres de antes y atajos → sección/subpestaña
+  const ALIAS_CAT = {
+    packs: 'musica/packs', coincidencias: 'musica/coincidencias', originalidad: 'ajustes/originalidad',
+    retiros: 'pagos/retiros', planes: 'pagos/planes', hots: 'pagos/hots', reglas: 'pagos/reglas',
+  };
+  const menuMas = document.getElementById('menu-mas');
+  const navMas = document.getElementById('nav-mas');
+  function cerrarMas() { menuMas.hidden = true; navMas.setAttribute('aria-expanded', 'false'); }
+  function abrirCategoria(destino) {
+    const ruta = String(ALIAS_CAT[destino] || destino || 'ventas').split('/');
+    const cat = CATEGORIAS.includes(ruta[0]) ? ruta[0] : 'ventas';
+    const sub = ruta[1] || '';
+    const antes = document.querySelector('.cat-page.active');
+    // crossfade entre secciones
     ZBUI.transicion(() => {
-      document.querySelectorAll('.admin-nav-btn').forEach(b => b.classList.toggle('active', b.dataset.cat === cat));
-      document.querySelectorAll('.admin-main > .panel').forEach(p => p.classList.toggle('cat-hidden', p.dataset.cat !== cat));
+      document.querySelectorAll('.admin-nav-btn').forEach(b => { const on = b.dataset.cat === cat; b.classList.toggle('active', on); if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
+      navMas.classList.toggle('active', cat === 'tienda' || cat === 'ajustes');
+      document.querySelectorAll('.cat-page').forEach(p => p.classList.toggle('active', p.dataset.cat === cat));
+      if (sub) ZBUI.irSub(cat, sub, { silencio: true });
     });
+    cerrarMas();
     try { sessionStorage.setItem('zb_admin_cat', cat); } catch { /* sin almacenamiento */ }
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (antes && antes.dataset.cat !== cat) window.scrollTo({ top: 0 });
   }
   document.querySelectorAll('.admin-nav-btn').forEach(b => b.addEventListener('click', () => abrirCategoria(b.dataset.cat)));
-  let navCounts = { ventas: 0, productores: {} };
+  navMas.addEventListener('click', () => {
+    const abrir = menuMas.hidden;
+    menuMas.hidden = !abrir;
+    navMas.setAttribute('aria-expanded', String(abrir));
+    if (abrir) { const b = menuMas.querySelector('.admin-nav-btn'); if (b) b.focus({ preventScroll: true }); }
+  });
+  document.addEventListener('click', (e) => { if (!menuMas.hidden && !menuMas.contains(e.target) && !navMas.contains(e.target)) cerrarMas(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !menuMas.hidden) { cerrarMas(); navMas.focus(); } });
+  // Cualquier botón con data-ir="seccion/sub" lleva a esa parte del panel
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest && e.target.closest('[data-ir]');
+    if (!b || !adminShell.contains(b)) return;
+    e.preventDefault();
+    abrirCategoria(b.dataset.ir);
+  });
+
+  // Contadores: cada pendiente se suma a su subpestaña y a su sección
+  const NAV_MAPA = {
+    'ventas:': ['ventas', 'comprobantes'],
+    'productores:aprobar': ['productores', 'cuentas'],
+    'productores:beats': ['productores', 'revisar'],
+    'productores:denuncias': ['productores', 'reclamos', 'reclamos', 'denuncias'],
+    'productores:contentid': ['productores', 'reclamos', 'reclamos', 'cid'],
+    'productores:planes': ['pagos', 'planes'],
+    'productores:hots': ['pagos', 'hots'],
+    'productores:retiros': ['pagos', 'retiros'],
+    'musica:coincidencias': ['musica', 'coincidencias'],
+    'musica:packs': ['musica', 'packs'],
+    'ajustes:audd': ['ajustes', 'originalidad'],
+  };
+  const conteos = {};
+  const sumar = (o) => Object.values(o || {}).reduce((a, b) => a + (Number(b) || 0), 0);
   function actualizarNav(cat, key, n) {
-    if (cat === 'ventas') navCounts.ventas = n;
-    else navCounts.productores[key] = n;
-    const setB = (c, v) => { const el = document.querySelector('.nav-badge[data-for="' + c + '"]'); if (el) { el.textContent = v ? String(v) : ''; } };
-    setB('ventas', navCounts.ventas);
-    setB('productores', Object.values(navCounts.productores).reduce((a, b) => a + b, 0));
+    const [c, sub, grupoInterno, subInterna] = NAV_MAPA[cat + ':' + (key || '')] || [cat, ''];
+    const clave = c + '/' + sub;
+    conteos[clave] = conteos[clave] || {};
+    conteos[clave][key || '_'] = Number(n) || 0;
+    if (sub) ZBUI.contarSub(c, sub, sumar(conteos[clave]));
+    if (grupoInterno) ZBUI.contarSub(grupoInterno, subInterna, Number(n) || 0);
+    const totalDe = (categoria) => Object.keys(conteos).filter(k => k.startsWith(categoria + '/')).reduce((t, k) => t + sumar(conteos[k]), 0);
+    document.querySelectorAll('.nav-badge[data-for="' + c + '"]').forEach(el => { const t = totalDe(c); el.textContent = t ? String(t) : ''; });
+    const mas = totalDe('tienda') + totalDe('ajustes');
+    document.getElementById('nav-mas-badge').textContent = mas ? String(mas) : '';
   }
 
   async function loadConfianzaAdmin() {
@@ -155,7 +208,7 @@
   let packsUI = null;
   function showApp() {
     loginScreen.style.display = 'none';
-    adminShell.style.display = 'block';
+    adminShell.classList.add('on');
     let cat = 'ventas';
     try { cat = sessionStorage.getItem('zb_admin_cat') || 'ventas'; } catch { /* nada */ }
     abrirCategoria(cat);
@@ -184,7 +237,9 @@
         modo: 'admin', form: document.getElementById('packs-form'), lista: document.getElementById('packs-list'),
         cuenta: document.getElementById('packs-count'), aviso: (msg, err) => showToast(msg, err), sesionVencida: showLogin,
         avisoAlmacen: document.getElementById('packs-almacen-aviso'),
-        alCargar: (d) => { const b = document.querySelector('.nav-badge[data-for="packs"]'); if (b) b.textContent = d.pendientes ? String(d.pendientes) : ''; },
+        pager: document.getElementById('packs-pager'), porPagina: () => ZBUI.filasPorPagina(4, 6), pasos: true,
+        alEnviar: () => abrirCategoria('musica/packs'),
+        alCargar: (d) => actualizarNav('musica', 'packs', d.pendientes || 0),
       });
     } else packsUI.cargar();
     loadPayouts();
@@ -193,7 +248,7 @@
 
   function showLogin() {
     loginScreen.style.display = 'flex';
-    adminShell.style.display = 'none';
+    adminShell.classList.remove('on');
   }
 
   async function checkAuth() {
@@ -258,6 +313,7 @@
     const prev = document.getElementById('cover-preview');
     const aviso = document.getElementById('cover-note');
     prev.style.display = 'none';
+    coverDrop.classList.remove('con-portada');
     aviso.textContent = '';
     const f = coverInput.files[0];
     if (!f || !window.ZBSubidas) return;
@@ -266,6 +322,7 @@
     if (prev.src && prev.src.startsWith('blob:')) URL.revokeObjectURL(prev.src);
     prev.src = m.url;
     prev.style.display = 'block';
+    coverDrop.classList.add('con-portada');
     if (Math.abs(m.w - m.h) > Math.max(m.w, m.h) * 0.02) aviso.textContent = 'La portada mide ' + m.w + 'x' + m.h + ' px: no es cuadrada y se mostrará recortada.';
     else if (m.w < 1000) aviso.textContent = 'La portada mide ' + m.w + 'x' + m.h + ' px: se verá borrosa. Lo ideal es 3000x3000 px.';
   });
@@ -342,16 +399,77 @@
     audioDrop.classList.remove('has-file');
     coverDrop.classList.remove('has-file');
     document.getElementById('cover-preview').style.display = 'none';
+    coverDrop.classList.remove('con-portada');
     document.getElementById('cover-note').textContent = '';
     actualizarArchivosAdmin();
+    pasoMaxA = 1;
+    irPasoA(1);
   }
+
+  // ---------- Publicar pista en tres pasos: datos → precios → archivos ----------
+  let pasoA = 1;
+  let pasoMaxA = 1;
+  const siguienteA = (n) => (n === 1 && isPlaylistInput.checked ? 3 : n + 1);
+  const anteriorA = (n) => (n === 3 && isPlaylistInput.checked ? 1 : n - 1);
+  function irPasoA(n, enfocar) {
+    pasoA = Math.min(3, Math.max(1, n));
+    pasoMaxA = Math.max(pasoMaxA, pasoA);
+    const pl = isPlaylistInput.checked;
+    ZBUI.transicion(() => {
+      uploadForm.querySelectorAll('.up-paso').forEach(c => { c.hidden = Number(c.dataset.paso) !== pasoA; });
+      document.querySelectorAll('#aup-stepper .stp').forEach(b => {
+        const k = Number(b.dataset.paso);
+        b.classList.toggle('on', k === pasoA); b.classList.toggle('hecho', k < pasoA);
+        b.classList.toggle('salta', k === 2 && pl);
+        b.disabled = subiendo || k > pasoMaxA || (k === 2 && pl);
+        if (k === pasoA) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current');
+      });
+      const t2 = document.querySelector('#aup-stepper .stp[data-paso="2"] .stp-t');
+      if (t2) t2.textContent = pl ? 'Sin precio' : 'Precios';
+      document.getElementById('aup-playlist-nota').hidden = !pl;
+      document.getElementById('aup-prev').hidden = pasoA === 1;
+      document.getElementById('aup-prev').disabled = subiendo;
+      document.getElementById('aup-next').hidden = pasoA === 3;
+      uploadBtn.hidden = pasoA !== 3;
+    });
+    if (enfocar) {
+      const caja = uploadForm.querySelector('.up-paso[data-paso="' + pasoA + '"]');
+      if (caja) { caja.setAttribute('tabindex', '-1'); setTimeout(() => caja.focus({ preventScroll: true }), 30); }
+    }
+  }
+  function problemaPasoA(n) {
+    const pl = isPlaylistInput.checked;
+    if (n === 1 && !titleInput.value.trim()) return { msg: 'Ponle título a la pista.', el: titleInput };
+    if (n === 2 && !pl) {
+      if (isExclusiveInput.checked) { if (!numPos(priceExclusiveInput.value)) return { msg: 'Ponle el precio exclusivo a la pista.', el: priceExclusiveInput }; }
+      else if (![priceBasicInput, pricePremiumInput, priceUnlimitedInput].some(el => numPos(el.value))) return { msg: 'Ponle precio a al menos una licencia (Básica, Premium o Ilimitada).', el: priceBasicInput };
+    }
+    return null;
+  }
+  function avanzarA() {
+    const p = problemaPasoA(pasoA);
+    if (p) { showToast(p.msg, true); p.el.focus({ preventScroll: true }); return; }
+    irPasoA(siguienteA(pasoA), true);
+  }
+  document.getElementById('aup-next').addEventListener('click', avanzarA);
+  document.getElementById('aup-prev').addEventListener('click', () => { if (!subiendo) irPasoA(anteriorA(pasoA), true); });
+  document.getElementById('aup-stepper').addEventListener('click', (e) => {
+    const b = e.target.closest('.stp');
+    if (!b || b.disabled || subiendo) return;
+    const destino = Number(b.dataset.paso);
+    for (let k = pasoA; k < destino; k++) { const p = problemaPasoA(k); if (p) { irPasoA(k, true); showToast(p.msg, true); return; } }
+    irPasoA(destino, true);
+  });
+  isPlaylistInput.addEventListener('change', () => irPasoA(pasoA));
 
   uploadForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (subiendo) return;
+    // Enter en un campo de los primeros pasos = «Siguiente»
+    if (pasoA < 3) { avanzarA(); return; }
     const Z = window.ZBSubidas;
     if (!Z) { showToast('Error al iniciar la subida. Recarga la página.', true); return; }
-    if (!titleInput.value.trim()) { showToast('Ponle título a la pista.', true); return; }
+    for (const k of [1, 2]) { const p = problemaPasoA(k); if (p) { irPasoA(k, true); showToast(p.msg, true); return; } }
     const audio = audioInput.files[0];
     const cover = coverInput.files[0];
     if (!audio) { showToast('Selecciona un archivo de audio.', true); return; }
@@ -399,6 +517,7 @@
     if (stems) lista.push({ kind: 'stems', file: stems, etiqueta: 'los STEMS' });
 
     subiendo = true;
+    irPasoA(3);
     controlSubida = new AbortController();
     uploadBtn.disabled = true;
     uploadProgressWrap.style.display = 'block';
@@ -440,6 +559,7 @@
       controlSubida = null;
       uploadBtn.disabled = false;
       uploadProgressWrap.style.display = 'none';
+      irPasoA(pasoA);
     }
   });
   document.getElementById('upload-cancel').addEventListener('click', () => { if (controlSubida) controlSubida.abort(); });
@@ -518,10 +638,19 @@
         </div>
         ${priceEditHtml}
         <div class="track-row-actions">
+          ${priceEditHtml.includes('price-edit') ? '<button type="button" class="btn-secondary btn-precios" aria-expanded="false">Precios</button>' : ''}
           <button type="button" class="btn-secondary btn-edit-info">Editar</button>
           <button type="button" class="btn-delete" data-id="${track.id}">Eliminar</button>
         </div>
       `;
+      // los precios se editan en la misma fila, al pulsar «Precios»
+      const bPrecios = item.querySelector('.btn-precios');
+      if (bPrecios) bPrecios.addEventListener('click', () => {
+        const abrir = !item.classList.contains('precios-abiertos');
+        item.classList.toggle('precios-abiertos', abrir);
+        bPrecios.setAttribute('aria-expanded', String(abrir));
+        if (abrir) { const i = item.querySelector('.lic-price'); if (i) i.focus({ preventScroll: true }); }
+      });
       item.querySelector('.btn-delete').addEventListener('click', () => deleteTrack(track.id, track.title));
       item.querySelector('.btn-edit-info').addEventListener('click', () => abrirEditorPista(track));
 
@@ -650,8 +779,21 @@
     const alerta = document.getElementById('orig-alerta');
     panel.hidden = !n;
     alerta.hidden = !n;
-    if (!n) { document.getElementById('coincidencias-list').innerHTML = ''; return; }
+    const sub = document.querySelector('.subtabs[data-grupo="musica"] .subtab[data-sub="coincidencias"]');
+    if (sub) sub.hidden = !n;
+    actualizarNav('musica', 'coincidencias', n);
+    if (!n) {
+      document.getElementById('coincidencias-list').innerHTML = '';
+      // si estaba abierta esa parte y ya no queda nada, se vuelve a la música
+      if (sub && sub.classList.contains('active')) ZBUI.irSub('musica', 'catalogo', { silencio: true });
+      return;
+    }
     document.getElementById('orig-alerta-n').textContent = n === 1 ? '1 obra con coincidencias.' : n + ' obras con coincidencias.';
+    document.getElementById('orig-alerta-det').textContent = 'Quien ' + (n === 1 ? 'la' : 'las') + ' licencie puede recibir reclamos de Content ID.';
+    // en el teléfono la alerta va en la barra de arriba, como una ficha roja con el número
+    const bAlerta = document.getElementById('orig-alerta-btn');
+    bAlerta.dataset.n = String(n);
+    bAlerta.setAttribute('aria-label', 'Revisar ahora: ' + (n === 1 ? '1 obra con coincidencias' : n + ' obras con coincidencias'));
     document.getElementById('coincidencias-count').textContent = n;
     document.getElementById('coincidencias-hint').textContent = d.autoRetiro
       ? 'Las que coinciden con canciones publicadas se retiran solas de la tienda. Escucha y decide: retirarla definitivamente o mantenerla si es original.'
@@ -689,11 +831,9 @@
             ${x.existe ? `<audio controls preload="none" src="/api/admin/preview-audio/${x.trackId}" aria-label="Escuchar ${escapeHtml(x.titulo)}"></audio>` : '<div class="coin-meta">Esa obra ya fue eliminada.</div>'}
           </div>`).join('')}
         <div class="coin-decision">
+          <label class="coin-motivo-l">Si es original, di por qué <input type="text" class="coin-motivo" maxlength="300" placeholder="Motivo (mínimo 10 caracteres)"></label>
+          <button type="button" class="btn-secondary coin-ok">Mantener${o.retiradaAuto ? ' y devolver a la tienda' : ''}</button>
           <button type="button" class="btn-delete coin-retirar">${o.retiradaAuto ? 'Confirmar retiro' : o.estado === 'approved' ? 'Retirar de la tienda' : 'Rechazar'}</button>
-          <div class="coin-mantener">
-            <label>Es original: <input type="text" class="coin-motivo" maxlength="300" placeholder="Motivo (mínimo 10 caracteres)"></label>
-            <button type="button" class="btn-secondary coin-ok">Mantener${o.retiradaAuto ? ' y devolver a la tienda' : ''}</button>
-          </div>
           <button type="button" class="btn-secondary coin-reverif">Verificar de nuevo</button>
           ${o.productorTel ? `<a class="btn-secondary coin-link" href="https://wa.me/${soloDigitos(o.productorTel)}?text=${encodeURIComponent('Hola ' + o.productor + ', tu obra «' + o.titulo + '» en Zona Beats coincide con ' + (o.externas[0] ? '«' + o.externas[0].titulo + '» de ' + o.externas[0].artista : 'otra obra de la tienda') + '. ¿Puedes aclararlo?')}" target="_blank" rel="noopener">Escribir al productor</a>` : ''}
         </div>
@@ -731,10 +871,7 @@
       if (r.ok) { showToast('Verificando de nuevo…'); setTimeout(recargar, 6000); } else { e.target.disabled = false; showToast('No se pudo verificar.', true); }
     }
   });
-  document.getElementById('orig-alerta-btn').addEventListener('click', () => {
-    abrirCategoria('musica');
-    setTimeout(() => document.getElementById('coincidencias-panel').scrollIntoView({ behavior: 'smooth', block: 'start' }), 350);
-  });
+  document.getElementById('orig-alerta-btn').addEventListener('click', () => abrirCategoria('musica/coincidencias'));
   document.getElementById('orig-auto-retiro').addEventListener('change', async (ev) => {
     const r = await fetch('/api/admin/originalidad/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ autoRetiro: ev.target.checked }) });
     if (r.ok) { showToast(ev.target.checked ? 'Retiro automático activado.' : 'Retiro automático desactivado.'); loadCoincidencias(); }
@@ -831,7 +968,11 @@
     accountsList.appendChild(row);
   }
 
-  addAccountBtn.addEventListener('click', () => addAccountRow());
+  addAccountBtn.addEventListener('click', () => {
+    addAccountRow();
+    // la cuenta nueva queda a la vista aunque caiga en otra página
+    setTimeout(() => { if (PAGINAS['accounts-list']) PAGINAS['accounts-list'].ultima(); const ult = accountsList.lastElementChild && accountsList.lastElementChild.querySelector('input'); if (ult) ult.focus({ preventScroll: true }); }, 0);
+  });
 
   async function loadPaymentInfo() {
     const res = await fetch('/api/admin/payment-info');
@@ -884,17 +1025,18 @@
     document.getElementById('reset-deshacer').hidden = !d.contadorDesde;
     const p = d.pendientes;
     const chips = [
-      ['musica', p.coincidencias || 0, 'obra con coincidencias', 'obras con coincidencias', 'prioridad'],
-      ['ajustes', (p.auddPocas !== undefined && p.auddPocas >= 0) ? 1 : 0, 'AudD: ' + (p.auddPocas === 0 ? 'sin consultas disponibles' : 'quedan ' + p.auddPocas + ' canciones por verificar'), '', 'prioridad', true],
-      ['ventas', p.pedidos, 'comprobante', 'comprobantes'],
-      ['ventas', p.reclamos || 0, 'reclamo de comprador', 'reclamos de compradores'],
-      ['productores', p.contentId || 0, 'reclamo de Content ID', 'reclamos de Content ID'],
-      ['productores', p.beats, 'beat por revisar', 'beats por revisar'],
-      ['packs', p.packs || 0, 'Sample Pack por revisar', 'Sample Packs por revisar'],
-      ['productores', p.productores, 'productor por aprobar', 'productores por aprobar'],
-      ['productores', p.planes, 'compra de plan', 'compras de plan'],
-      ['productores', p.retiros, 'retiro por pagar', 'retiros por pagar'],
+      ['musica/coincidencias', p.coincidencias || 0, 'obra con coincidencias', 'obras con coincidencias', 'prioridad'],
+      ['ajustes/originalidad', (p.auddPocas !== undefined && p.auddPocas >= 0) ? 1 : 0, 'AudD: ' + (p.auddPocas === 0 ? 'sin consultas disponibles' : 'quedan ' + p.auddPocas + ' canciones por verificar'), '', 'prioridad', true],
+      ['ventas/comprobantes', p.pedidos, 'comprobante', 'comprobantes'],
+      ['ventas/comprobantes', p.reclamos || 0, 'reclamo de comprador', 'reclamos de compradores'],
+      ['productores/reclamos', p.contentId || 0, 'reclamo de Content ID', 'reclamos de Content ID'],
+      ['productores/revisar', p.beats, 'beat por revisar', 'beats por revisar'],
+      ['musica/packs', p.packs || 0, 'sample pack por revisar', 'sample packs por revisar'],
+      ['productores/cuentas', p.productores, 'productor por aprobar', 'productores por aprobar'],
+      ['pagos/planes', p.planes, 'compra de plan', 'compras de plan'],
+      ['pagos/retiros', p.retiros, 'retiro por pagar', 'retiros por pagar'],
     ].filter(c => c[1] > 0);
+    actualizarNav('ajustes', 'audd', (p.auddPocas !== undefined && p.auddPocas >= 0) ? 1 : 0);
     const cont = document.getElementById('admin-pending');
     cont.innerHTML = chips.length
       ? chips.map(c => '<button type="button" class="pending-chip' + (c[4] ? ' chip-prioridad' : '') + '" data-cat="' + c[0] + '">' + (c[5] ? c[2] : c[1] + ' ' + (c[1] === 1 ? c[2] : c[3])) + '</button>').join('')
@@ -934,6 +1076,7 @@
     renderOrders(orders);
   }
 
+  const ESTADO_PEDIDO = { approved: 'aprobado', pending: 'pendiente', rejected: 'rechazado', esperando_pago: 'esperando el pago' };
   function formatOrderDate(isoLike) {
     const txt = String(isoLike || '');
     const d = new Date(txt.includes('T') ? txt : txt.replace(' ', 'T') + 'Z');
@@ -962,6 +1105,19 @@
       '¡Gracias por tu compra!';
   }
 
+  // «Pago posiblemente repetido»: un motivo y, como mucho, dos pedidos con nombre.
+  function avisoRepetido(lista) {
+    const motivos = [...new Set(lista.map(r => r.motivo))];
+    const motivo = motivos.length === 1 ? motivos[0] : 'mismo comprobante o transacción';
+    const pedido = (r) => (r.codigo ? String(r.codigo).split('-').slice(0, 2).join('-') : 'el pedido ' + r.id) +
+      ' (' + r.comprador + ', ' + (ESTADO_PEDIDO[r.estado] || r.estado) + ')';
+    const nombrados = lista.slice(0, 2).map(pedido);
+    const resto = lista.length - nombrados.length;
+    const texto = motivo.charAt(0).toUpperCase() + motivo.slice(1) + ' que ' +
+      (resto > 0 ? nombrados.join(', ') + ' y ' + resto + ' más' : nombrados.join(' y ')) + '. Confirma que entraron los dos pagos.';
+    return '<div class="order-reclamo"><strong>Pago posiblemente repetido.</strong> ' + escapeHtml(texto) + '</div>';
+  }
+
   function renderOrders(orders) {
     ordersList.innerHTML = '';
 
@@ -981,8 +1137,7 @@
       const reclamoHtml = order.conReclamo
         ? '<div class="order-reclamo"><strong>Reclamo del comprador</strong> (' + formatOrderDate(order.reclamo_at) + '): ' + escapeHtml(order.reclamo_texto) + '</div>' : '';
       const plazoHtml = order.vencido ? '<div class="order-warning">Plazo de confirmación vencido.</div>' : '';
-      const repetidoHtml = (order.repetidos || []).length
-        ? '<div class="order-reclamo"><strong>Pago posiblemente repetido.</strong> ' + order.repetidos.map(r => escapeHtml((r.codigo || 'Pedido ' + r.id) + ' de ' + r.comprador + ' (' + r.estado + '): ' + r.motivo)).join(' · ') + '. Comprueba en tu cuenta que entraron los dos pagos.</div>' : '';
+      const repetidoHtml = (order.repetidos || []).length ? avisoRepetido(order.repetidos) : '';
 
       const lic = LIC_NOMBRES[order.license_type] || order.license_type || '';
       const avisoVendida = order.track_sold
@@ -1236,7 +1391,10 @@
     socialLinksList.appendChild(row);
   }
 
-  addSocialLinkBtn.addEventListener('click', () => addSocialLinkRow());
+  addSocialLinkBtn.addEventListener('click', () => {
+    addSocialLinkRow();
+    setTimeout(() => { if (PAGINAS['social-links-list']) PAGINAS['social-links-list'].ultima(); }, 0);
+  });
 
   async function loadSocialLinks() {
     const res = await fetch('/api/admin/social-links');
@@ -1296,14 +1454,15 @@
 
   function appendRateRow(rate) {
     const row = document.createElement('div');
-    row.className = 'rate-row';
     const isCup = rate.code === 'CUP';
+    // el CUP es la moneda base (siempre 1): no hace falta mostrarlo como fila editable
+    row.className = 'rate-row' + (isCup ? ' rate-base' : '');
     row.innerHTML = `
       <div class="rate-row-label">${escapeHtml(rate.label)}${rate.custom ? ' <span class="custom-tag">agregado por ti</span>' : ''}</div>
       <div class="rate-row-input-wrap">
         ${isCup
           ? `<span>Moneda base — siempre 1</span>`
-          : `<input type="text" class="rate-value" data-code="${escapeHtml(rate.code)}" data-label="${escapeHtml(rate.label)}" placeholder="0" value="${rate.cupPerUnit || ''}"><span>CUP por unidad</span>`
+          : `<input type="text" class="rate-value" inputmode="decimal" data-code="${escapeHtml(rate.code)}" data-label="${escapeHtml(rate.label)}" placeholder="0" value="${rate.cupPerUnit || ''}" aria-label="CUP por 1 ${escapeHtml(rate.label)}"><span>CUP</span>`
         }
         ${rate.custom ? '<button type="button" class="account-remove-btn rate-remove" aria-label="Quitar método">&times;</button>' : ''}
       </div>
@@ -1325,7 +1484,7 @@
     if (qvapay && qvapay.claves) {
       qvEl.hidden = false;
       qvEl.textContent = qvapay.moneda
-        ? 'QvaPay: cobro automático activo. Los pagos con QvaPay se aprueban solos.'
+        ? 'QvaPay activo: esos pagos se aprueban solos.'
         : 'QvaPay: claves configuradas. Agrega el método «QvaPay» con su tasa (CUP por 1 USD) para activarlo en la tienda.';
     } else qvEl.hidden = true;
     const planIn = document.getElementById('plan-usd-rate');
@@ -1366,6 +1525,8 @@
     if (!code) { showToast('Nombre no válido.', true); return; }
     if (exchangeRatesList.querySelector(`[data-code="${code}"]`) || code === 'CUP') { showToast('Ese método ya existe.', true); return; }
     appendRateRow({ code, label, cupPerUnit: parseFloat(rateEl.value.replace(',', '.')) || 0, custom: true });
+    // la fila nueva queda a la vista aunque caiga en otra página
+    setTimeout(() => { if (PAGINAS['exchange-rates-list']) PAGINAS['exchange-rates-list'].ultima(); }, 0);
     labelEl.value = ''; rateEl.value = '';
     showToast('Agregado. Guarda las tasas para publicarlo.');
   });
@@ -1897,7 +2058,7 @@
       const v = payoutRatesCfg[c.code] || {};
       return '<div class="payout-rate-row" data-code="' + escapeHtml(c.code) + '">' +
         '<div class="rate-row-label">' + escapeHtml(c.label) + '</div>' +
-        '<label class="mini-field"><span>Fee de red (' + escapeHtml(c.label) + ')</span><input type="text" class="pr-fee" inputmode="decimal" placeholder="0" value="' + (v.fee || '') + '"></label>' +
+        '<label class="mini-field"><span class="sr-only">Fee de red en ' + escapeHtml(c.label) + '</span><input type="text" class="pr-fee" inputmode="decimal" placeholder="0" value="' + (v.fee || '') + '"></label>' +
       '</div>';
     }).join('') || '<div class="empty-hint">Sin monedas configuradas.</div>';
   }
@@ -2115,13 +2276,13 @@
         '<div class="info">' +
           '<div class="buyer">' + escapeHtml(o.buyer_name) + (rechazada ? ' <span class="tag-vencido">rechazada</span>' : '') + (o.pago_metodo === 'qvapay' ? ' <span class="tag-verif">QvaPay</span>' : '') + '</div>' +
           '<div class="track">' + escapeHtml(o.track_title) + ' · <strong>' + escapeHtml(lic) + '</strong> · ' + escapeHtml(o.price_label || '') + '</div>' +
-          '<div class="meta">' + escapeHtml(o.buyer_phone) + ' · ' + fechaHora(o.approved_at || o.rejected_at || o.created_at) + ' · ' + vendedor + escapeHtml(rechazada ? '' : paraProductor(o)) + '</div>' +
+          '<div class="meta">' + escapeHtml(o.buyer_phone) + ' · ' + fechaHora(o.approved_at || o.rejected_at || o.created_at) + ' · ' + vendedor + escapeHtml(rechazada ? '' : paraProductor(o)) +
+            (o.certificate_id ? ' · <span class="cert-line">Licencia <strong>' + escapeHtml(o.certificate_id) + '</strong></span>' : '') + '</div>' +
           (rechazada && o.reject_reason ? '<div class="meta">Motivo: ' + escapeHtml(o.reject_reason) + '</div>' : '') +
-          (o.certificate_id ? '<div class="cert-line">Licencia <strong>' + escapeHtml(o.certificate_id) + '</strong></div>' : '') +
         '</div>' +
         '<div class="actions">' +
           (o.certificate_id ? '<a class="btn-whatsapp-order" href="/api/license/' + encodeURIComponent(o.certificate_id) + '/pdf" target="_blank" rel="noopener">PDF</a>' : '') +
-          (wa && !rechazada ? '<a class="btn-toggle-producer" href="https://wa.me/' + wa + '?text=' + waText + '" target="_blank" rel="noopener">Enviar por WhatsApp</a>' : '') +
+          (wa && !rechazada ? '<a class="btn-toggle-producer" href="https://wa.me/' + wa + '?text=' + waText + '" target="_blank" rel="noopener">WhatsApp</a>' : '') +
           (linkCompra ? '<button type="button" class="btn-toggle-producer btn-copy-link">Copiar link</button>' : '') +
           (rechazada ? '<button type="button" class="btn-approve-order btn-approve-late">Aprobar igual</button>' : '') +
           (o.receipt_filename ? '<button type="button" class="btn-delete btn-del-photo">Borrar foto</button>' : '') +
@@ -2267,7 +2428,6 @@
   const payoutsHistory = document.getElementById('payouts-history');
   const fmtCup = (n) => Number(n || 0).toLocaleString('es', { maximumFractionDigits: 2 }) + ' CUP';
   const fmtN = (n, d) => Number(n || 0).toLocaleString('es', { minimumFractionDigits: d, maximumFractionDigits: d });
-  const LIC = { basic: 'Básica', premium: 'Premium', unlimited: 'Ilimitada', exclusive: 'Exclusiva', pack: 'Sample Pack' };
   let retirosTimer = null;
 
   conectarHistorial('planes', planRequestsList, {
@@ -2292,7 +2452,6 @@
   });
 
   // ---------- Hots ----------
-  let hotsData = null;
   const semTxt = (w) => w + (w === 1 ? ' semana' : ' semanas');
   // ---------- Denuncias de derechos de autor ----------
   async function loadDenuncias() {
@@ -2409,7 +2568,7 @@
   async function loadHotsAdmin() {
     const res = await fetch('/api/admin/hots');
     if (!res.ok) return;
-    const d = hotsData = await res.json();
+    const d = await res.json();
     const precioIn = document.getElementById('hot-price-usd'), cuposIn = document.getElementById('hot-slots');
     if (document.activeElement !== precioIn) precioIn.value = d.precioSemanaUsd || '';
     if (document.activeElement !== cuposIn) cuposIn.value = d.cupos;
@@ -2668,5 +2827,61 @@
     if (pendientes.length) retirosTimer = setTimeout(loadPayouts, 60000);
   }
 
+  // Filas plegables en el teléfono: se ve lo esencial (quién, qué y cuánto) y el
+  // detalle con los botones se abre con la flecha. Los avisos importantes se resumen
+  // en etiquetas para que no pasen inadvertidos con la fila cerrada.
+  const AVISOS_FILA = '.order-reclamo strong, .order-warning, .payout-due.late, .orig-estado.warn, .forzar-box:not([hidden]) label';
+  function plegarFilas(lista, filaSel) {
+    if (!lista) return;
+    const aplicar = () => {
+      lista.querySelectorAll(':scope > ' + filaSel).forEach((fila) => {
+        if (fila.querySelector(':scope > .row-mas')) return;
+        fila.classList.add('plegable');
+        const destino = fila.querySelector(':scope > .info') || fila.querySelector(':scope > .payout-head > div') || fila;
+        const vistos = new Set();
+        const avisos = [...fila.querySelectorAll(AVISOS_FILA)]
+          .map(el => el.textContent.trim().split(/\.\s|:\s/)[0].replace(/[.:]+$/, ''))
+          .filter(t => t && !vistos.has(t) && vistos.add(t)).slice(0, 3);
+        if (avisos.length) {
+          const chips = document.createElement('div');
+          chips.className = 'row-chips';
+          chips.innerHTML = avisos.map(t => '<span class="row-chip">' + escapeHtml(t.length > 34 ? t.slice(0, 32) + '…' : t) + '</span>').join('');
+          destino.appendChild(chips);
+        }
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'row-mas';
+        b.setAttribute('aria-expanded', 'false');
+        b.setAttribute('aria-label', 'Ver el detalle y las acciones');
+        b.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m7 10 5 5 5-5"/></svg>';
+        fila.appendChild(b);
+      });
+    };
+    new MutationObserver(aplicar).observe(lista, { childList: true });
+    aplicar();
+  }
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest && e.target.closest('.row-mas');
+    if (!b) return;
+    const fila = b.closest('.plegable');
+    const abrir = !fila.classList.contains('open');
+    fila.classList.toggle('open', abrir);
+    b.setAttribute('aria-expanded', String(abrir));
+  });
+  [['orders-list', '.order-item'], ['history-list', '.order-item'], ['plan-requests-list', '.order-item'], ['hots-pending', '.order-item'],
+   ['pending-tracks-list', '.pending-track-item'], ['producers-list', '.producer-item'], ['track-list', '.track-list-item'], ['payouts-list', '.payout-item']]
+    .forEach(([id, sel]) => plegarFilas(document.getElementById(id), sel));
+
+  // Listas largas en páginas: pocas filas en el teléfono, más en pantallas grandes
+  const PAGINAS = {};
+  [['orders-list', 4, 3], ['history-list', 4, 4], ['pending-tracks-list', 3, 4], ['producers-list', 4, 6],
+   ['payouts-list', 3, 5], ['payouts-unrequested', 7, 10], ['payouts-history', 7, 10], ['plan-requests-list', 4, 6],
+   ['hots-pending', 3, 5], ['hots-active', 6, 8], ['hots-history', 7, 10], ['denuncias-list', 3, 5], ['cid-list', 3, 5],
+   ['resenas-list', 4, 6], ['track-list', 5, 4], ['coincidencias-list', 1, 2], ['exchange-rates-list', 4, 8], ['payout-rates-list', 7, 12], ['accounts-list', 2, 6], ['social-links-list', 4, 6]]
+    .forEach(([id, movil, pc]) => { PAGINAS[id] = ZBUI.paginarDom(document.getElementById(id), { porPagina: () => ZBUI.filasPorPagina(movil, pc), filas: ':not(.rate-base)' }); });
+  document.getElementById('history-search').addEventListener('input', () => { if (PAGINAS['history-list']) PAGINAS['history-list'].primera(); });
+  document.querySelectorAll('.admin-tab').forEach(t => t.addEventListener('click', () => { if (PAGINAS['track-list']) PAGINAS['track-list'].primera(); }));
+
+  irPasoA(1);
   checkAuth();
 })();
