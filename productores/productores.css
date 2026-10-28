@@ -617,6 +617,8 @@ label, .ff-lbl { display: block; margin: 0 0 6px; font-size: var(--fs-sm); font-
 .act-mas { grid-area: mas; align-self: center; }
 .act-item:not(.open) .act-what span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .act-item.open .act-mas svg { transform: rotate(180deg); }
+.act-item:not(.sin-mas):has(.act-mas) { cursor: pointer; }
+.act-item.sin-mas .act-mas { visibility: hidden; }
 @media (min-width: 960px) {
   .act-item { grid-template-columns: 132px minmax(0, 1fr); grid-template-areas: "when what"; column-gap: 12px; }
   .act-item .act-mas { display: none; }

@@ -386,7 +386,12 @@
       // con el teclado del teléfono abierto no se toca nada (si no, el campo podría irse de la página)
       const a = document.activeElement;
       if (a && (a.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))) return;
-      encajes.forEach((e, lista) => { if (enPantalla(lista) && (e.vh !== window.innerHeight || e.vw !== window.innerWidth)) encajar(lista, e.max, e.pintar, e.firma, e.caja); });
+      // en el teléfono la barra de direcciones aparece y se esconde (cambia el alto ~60 px): eso no cuenta,
+      // si no, la lista se volvería a pintar bajo el dedo y cerraría lo que se acaba de abrir
+      encajes.forEach((e, lista) => {
+        const cambio = e.vw !== window.innerWidth || Math.abs((e.vh || 0) - window.innerHeight) > 120;
+        if (enPantalla(lista) && cambio) encajar(lista, e.max, e.pintar, e.firma, e.caja);
+      });
     }, 160);
   });
   // al cerrar un desplegable queda sitio: las listas recuperan sus filas

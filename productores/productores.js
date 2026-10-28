@@ -142,6 +142,27 @@
   let actividad = [];
   let registros = [];
   const pag = { reg: 0, act: 0, rev: 0, mov: 0, beats: 0, ref: 0 };
+  // filas desplegadas: siguen abiertas aunque la lista se vuelva a pintar (al reencajar, al girar el teléfono…)
+  const actAbiertas = new Set(), movAbiertos = new Set();
+  const claveMov = (m) => m.clave || [m.tipo, m.fecha, m.titulo, m.detalle].join('|');
+  // se pintan cerradas (el encaje mide la página así) y se vuelven a abrir justo después de medir
+  function reabrir(lista, fila, clave, abiertas) {
+    requestAnimationFrame(() => lista.querySelectorAll(fila).forEach(f => {
+      const abrir = abiertas.has(clave(f));
+      f.classList.toggle('open', abrir);
+      const b = f.querySelector('.mov-mas');
+      if (b) b.setAttribute('aria-expanded', String(abrir));
+    }));
+  }
+  // la flecha solo aparece si de verdad hay texto escondido
+  function marcarDesplegables(lista, fila, texto, boton) {
+    lista.querySelectorAll(fila).forEach(f => {
+      const b = f.querySelector(boton);
+      if (!b || f.classList.contains('open')) return;
+      const corto = [...f.querySelectorAll(texto)].every(t => t.scrollWidth <= t.clientWidth + 1);
+      f.classList.toggle('sin-mas', corto);
+    });
+  }
   async function loadRegistro() {
     if (!registros.length) ZBUI.mostrarSkeleton($('reg-list'), 'lineas', 2);
     let reg;
@@ -202,19 +223,24 @@
       (p) => { pag.act = p; pintarActividad(); },
       (desde, hasta) => {
         box.innerHTML = actividad.slice(desde, hasta).map(a =>
-          '<div class="act-item"><div class="act-when">' + ZBHistorial.fechaHora(a.created_at) + '</div>' +
+          '<div class="act-item" data-id="' + a.id + '"><div class="act-when">' + ZBHistorial.fechaHora(a.created_at) + '</div>' +
           '<div class="act-what"><strong>' + escapeHtml(a.accion) + '</strong>' + (a.detalle ? '<span>' + escapeHtml(a.detalle) + '</span>' : '') + '</div>' +
           (a.detalle ? '<button type="button" class="mov-mas act-mas" aria-expanded="false" aria-label="Ver el detalle"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m7 10 5 5 5-5"/></svg></button>' : '') +
           '</div>').join('');
+        marcarDesplegables(box, '.act-item', '.act-what span', '.act-mas');
+        reabrir(box, '.act-item', f => Number(f.dataset.id), actAbiertas);
       }).pagina;
   }
+  // se despliega tocando la flecha o la fila entera
   $('act-list').addEventListener('click', (e) => {
-    const b = e.target.closest('.act-mas');
-    if (!b) return;
-    const fila = b.closest('.act-item');
+    const fila = e.target.closest('.act-item');
+    const b = fila && fila.querySelector('.act-mas');
+    if (!b || fila.classList.contains('sin-mas')) return;
     const abrir = !fila.classList.contains('open');
     fila.classList.toggle('open', abrir);
     b.setAttribute('aria-expanded', String(abrir));
+    const id = Number(fila.dataset.id);
+    if (abrir) actAbiertas.add(id); else actAbiertas.delete(id);
   });
   $('act-download').addEventListener('click', () => {
     ZBHistorial.descargarCSV('actividad-administrador', [
@@ -1439,12 +1465,15 @@
     }
     pag.mov = ZBUI.paginarEncajado(list, $('mov-pager'), filtrados.length, pag.mov, ZBUI.filasPorPagina(6, 8),
       (p) => { pag.mov = p; pintarMovimientos(); },
-      (desde, hasta) => { list.innerHTML = filtrados.slice(desde, hasta).map(filaMovimiento).join(''); },
+      (desde, hasta) => {
+        list.innerHTML = filtrados.slice(desde, hasta).map(filaMovimiento).join('');
+        reabrir(list, '.mov-item', f => f.dataset.claveFila, movAbiertos);
+      },
       movFiltro + '|' + filtrados.length).pagina;
   }
   function filaMovimiento(m) {
     return (
-      '<div class="mov-item mov-' + m.tipo + '">' +
+      '<div class="mov-item mov-' + m.tipo + '" data-clave-fila="' + escapeHtml(claveMov(m)) + '">' +
         '<div class="mov-icon" aria-hidden="true">' + (MOV_ICONOS[m.tipo] || '•') + '</div>' +
         '<div class="info"><div class="t">' + escapeHtml(m.titulo) + '</div>' +
         '<div class="m"><span class="mov-when">' + ZBHistorial.fechaHora(m.fecha) + '</span>' + (m.detalle ? '<span>' + escapeHtml(m.detalle) + '</span>' : '') +
@@ -1482,6 +1511,7 @@
       const abrir = !fila.classList.contains('open');
       fila.classList.toggle('open', abrir);
       mas.setAttribute('aria-expanded', String(abrir));
+      if (abrir) movAbiertos.add(fila.dataset.claveFila); else movAbiertos.delete(fila.dataset.claveFila);
       return;
     }
     const b = e.target.closest('.hist-del');
