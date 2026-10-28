@@ -220,30 +220,27 @@ img { max-width: 100%; }
 @media (min-width: 900px) { .hots-viewport { margin: 0; padding: 1px 0 2px; } }
 .hots-viewport::-webkit-scrollbar { display: none; }
 .hots-track { display: flex; gap: 10px; width: max-content; }
-.hots-track .skel-wrap { display: flex; flex-direction: row; gap: 10px; }
-.hot-skel { width: 214px; height: 62px; border-radius: var(--r-md); flex-shrink: 0; }
-.hot-card {
-  width: 214px; flex-shrink: 0; cursor: pointer; user-select: none;
-  display: grid; grid-template-columns: 50px minmax(0, 1fr); align-items: center; gap: 10px;
-  padding: 5px 10px 5px 5px; border-radius: var(--r-md);
-  background: var(--bg-card); border: 1px solid rgba(var(--gold-rgb), 0.28);
-  transition: border-color var(--dur), background var(--dur);
-}
-.hot-card:hover, .hot-card:focus-visible { border-color: var(--gold); background: var(--bg-card-hover); }
-.hot-cover { position: relative; width: 50px; height: 50px; border-radius: var(--r-sm); overflow: hidden; background: var(--bg-card-hover); }
+.hots-track .skel-wrap { display: flex; flex-direction: row; gap: 12px; }
+/* fichas con la portada grande, como un estante de discos */
+.hot-skel { width: 132px; height: 190px; border-radius: var(--r-lg); flex-shrink: 0; }
+.hot-card { width: 132px; flex-shrink: 0; cursor: pointer; user-select: none; border-radius: var(--r-lg); }
+.hot-cover { position: relative; aspect-ratio: 1 / 1; border-radius: var(--r-lg); overflow: hidden; background: var(--bg-card); border: 1px solid var(--line); }
 .hot-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.hot-cover-fallback { width: 100%; height: 100%; display: grid; place-items: center; font-size: 22px; color: var(--text-faint); }
-.hot-badge { display: none; }
-.hot-play {
-  position: absolute; inset: 0; display: grid; place-items: center;
-  background: rgba(var(--bg-rgb), 0.45); opacity: 0; transition: opacity var(--dur);
+.hot-cover-fallback { width: 100%; height: 100%; display: grid; place-items: center; font-size: 40px; color: var(--text-faint); }
+.hot-badge {
+  position: absolute; top: 7px; left: 7px; padding: 2px 8px; border-radius: var(--r-pill);
+  background: var(--gold); color: var(--on-bright); font-size: 11px; font-weight: 800;
 }
-.hot-play svg { width: 18px; height: 18px; fill: var(--text); margin-left: 2px; }
-.hot-card:hover .hot-play, .hot-card:focus-visible .hot-play { opacity: 1; }
-.hot-info { min-width: 0; }
-.hot-name { font-weight: 700; font-size: var(--fs-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.hot-by { font-size: 11.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.hot-price { font-size: var(--fs-xs); font-weight: 800; color: var(--gold); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.hot-play {
+  position: absolute; right: 7px; bottom: 7px; width: 32px; height: 32px; border-radius: var(--r-round);
+  background: var(--accent); display: grid; place-items: center; box-shadow: 0 4px 14px rgba(var(--black-rgb), 0.4);
+}
+.hot-play svg { width: 15px; height: 15px; fill: var(--on-bright); margin-left: 2px; }
+.hot-card:hover .hot-cover, .hot-card:focus-visible .hot-cover { border-color: var(--gold); }
+.hot-info { padding: 7px 2px 0; min-width: 0; }
+.hot-name { font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hot-by { font-size: var(--fs-xs); color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.hot-price { font-size: var(--fs-sm); font-weight: 800; color: var(--gold); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 
 /* ---------- Catálogo ---------- */
 .store { margin: 0; }
@@ -389,11 +386,32 @@ img { max-width: 100%; }
 .track-like-btn:hover { color: var(--accent-ink); }
 .track-like-btn.liked { color: var(--accent-ink); }
 .track-like-btn.liked svg { fill: var(--accent); stroke: var(--accent); }
+/* aviso de cookies: flota abajo (no alarga la página) y se va con «Entendido» */
+.aviso-cookies {
+  position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 120;
+  display: flex; align-items: center; gap: 12px; max-width: 520px; margin: 0 auto;
+  padding: 10px 10px 10px 14px; border: 1px solid var(--line-strong); border-radius: var(--r-md);
+  background: rgba(26, 20, 32, 0.97); box-shadow: 0 10px 30px rgba(var(--shade-rgb), 0.5);
+  font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.4;
+}
+.aviso-cookies[hidden] { display: none; }
+.aviso-cookies p { margin: 0; flex: 1; min-width: 0; }
+.aviso-cookies a { color: var(--text); text-decoration: underline; }
+.aviso-cookies-ok {
+  flex-shrink: 0; min-height: 40px; padding: 0 14px; border-radius: var(--r-md);
+  background: var(--accent); color: var(--on-bright); font-weight: 800; font-size: var(--fs-xs);
+}
+body.con-reproductor .aviso-cookies { bottom: calc(92px + env(safe-area-inset-bottom)); }
+/* me gusta en el catálogo: corazón y número apilados, al lado del precio, sin ensanchar la fila */
+.tr-end { gap: 2px; }
+.track-like-btn.tr-like {
+  position: relative; z-index: 3; flex-direction: column; justify-content: center; gap: 1px;
+  min-height: 44px; min-width: 40px; padding: 2px 6px; border-radius: var(--r-md); font-size: 11px; line-height: 1;
+}
+.track-like-btn.tr-like svg { width: 16px; height: 16px; }
 .track-plays-count { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); color: var(--text-faint); font-variant-numeric: tabular-nums; }
 .track-plays-count svg { width: 12px; height: 12px; fill: currentColor; }
-/* la fila que suena muestra su onda debajo (en el teléfono) */
-.track-row.playing { grid-template-areas: "cover main end" "wave wave wave"; }
-.track-row.playing .tr-wave { display: block; margin-top: 8px; }
+/* en el teléfono la onda de la pista que suena va en el reproductor de abajo (no se repite en la fila) */
 .card-hit {
   position: absolute; inset: 0; z-index: 2; width: 100%; height: 100%; padding: 0; border: 0;
   background: transparent; border-radius: inherit; cursor: pointer;
@@ -902,9 +920,10 @@ textarea { resize: vertical; max-height: 240px; }
   .promo-banner-inner { padding: 6px 12px; font-size: var(--fs-xs); }
   .hots { margin-bottom: 10px; }
   .hots-head { margin-bottom: 4px; }
-  .hot-card { padding: 4px 10px 4px 4px; }
-  .hot-cover { width: 44px; height: 44px; }
-  .hot-card { grid-template-columns: 44px minmax(0, 1fr); }
+  .hot-card, .hot-skel { width: 108px; }
+  .hot-skel { height: 160px; }
+  .hot-name { font-size: 13px; }
+  .hot-info { padding-top: 5px; }
   .section-tab { min-height: 34px; }
   .toolbar { margin-top: 8px; }
   .search-bar { height: 40px; }
@@ -961,3 +980,28 @@ textarea { resize: vertical; max-height: 240px; }
   .license-option { padding: 9px 12px; }
   .buy-next { padding-top: 10px; }
 }
+/* con el reproductor abierto en pantallas que no son altas, los Hots se achican (siguen arriba) */
+@media (max-height: 820px) {
+  body.con-reproductor .hot-card, body.con-reproductor .hot-skel { width: 84px; }
+  body.con-reproductor .hot-badge { top: 4px; left: 4px; padding: 1px 6px; font-size: 10px; }
+  body.con-reproductor .hot-play { width: 26px; height: 26px; right: 4px; bottom: 4px; }
+  body.con-reproductor .hot-play svg { width: 12px; height: 12px; }
+  body.con-reproductor .hot-by { display: none; }
+  body.con-reproductor .hot-name { font-size: 12px; }
+  body.con-reproductor .hot-price { font-size: 12px; margin-top: 0; }
+  body.con-reproductor .hots-sub { display: none; }
+}
+@media (max-height: 700px) {
+  body.con-reproductor .promo-banner { display: none !important; }
+}
+/* «Vende tus beats» junto a la portada cuando no cabe en la barra de arriba */
+.hero-acciones { display: flex; flex-direction: column; align-items: stretch; gap: 6px; flex-shrink: 0; }
+.join-hero {
+  display: inline-flex; align-items: center; justify-content: center; height: 28px; padding: 0 10px;
+  border-radius: var(--r-pill); border: 1px solid rgba(var(--live-rgb), 0.45);
+  color: var(--live); font-size: var(--fs-xs); font-weight: 700; white-space: nowrap;
+}
+.join-hero:hover { background: rgba(var(--live-rgb), 0.1); }
+.hero-acciones .info-btn { height: 32px; justify-content: center; }
+@media (min-width: 860px) { .join-hero { display: none; } }
+@media (min-width: 900px) and (min-height: 700px) { .hero-acciones { display: none; } }

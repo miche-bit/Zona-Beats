@@ -615,19 +615,22 @@
       const badge = track.is_pack ? '<span class="tr-badge">Pack</span>' : (track.is_exclusive ? '<span class="tr-badge tr-badge-ex">Exclusiva</span>' : '');
 
       let fin = '';
+      const botonMeGusta = (clase) => {
+        const liked = isTrackLiked(track.id);
+        return `<button type="button" class="track-like-btn${clase}${liked ? ' liked' : ''}" data-track-id="${track.id}" aria-label="Me gusta ${escapeHtml(track.title)}" aria-pressed="${liked}">${ICONO_CORAZON}<span class="track-like-count">${track.likes || 0}</span></button>`;
+      };
       if ((seccion === 'catalog' || esPacks) && track.for_sale && track.price_cup > 0) {
         const priceText = formatPriceInCurrency(track.price_cup, selectedCurrency);
         const multiples = (track.licenses || []).length > 1;
         const tieneDescuento = discountPercent > 0 && track.original_cup && track.original_cup > track.price_cup;
-        fin = `<button type="button" class="tr-buy" aria-label="Comprar ${escapeHtml(track.title)}, ${multiples ? 'desde ' : ''}${escapeHtml(priceText)}">` +
+        fin = (seccion === 'catalog' ? botonMeGusta(' tr-like') : '') + `<button type="button" class="tr-buy" aria-label="Comprar ${escapeHtml(track.title)}, ${multiples ? 'desde ' : ''}${escapeHtml(priceText)}">` +
           (multiples ? '<span class="tr-desde">desde</span>' : '') +
           (tieneDescuento ? `<s class="price-strike">${escapeHtml(formatPriceInCurrency(track.original_cup, selectedCurrency))}</s>` : '') +
           `<span class="tr-price">${escapeHtml(priceText)}</span></button>`;
       } else if (seccion === 'vip') {
         fin = '<span class="tr-sold">Vendida' + (track.price_cup > 0 ? '<span class="tr-price-sold">' + escapeHtml(formatPriceInCurrency(track.price_cup, selectedCurrency)) + '</span>' : '') + '</span>';
       } else if (seccion === 'playlist') {
-        const liked = isTrackLiked(track.id);
-        fin = `<span class="track-stats"><button type="button" class="track-like-btn${liked ? ' liked' : ''}" data-track-id="${track.id}" aria-label="Me gusta" aria-pressed="${liked}">${ICONO_CORAZON}<span class="track-like-count">${track.likes || 0}</span></button>` +
+        fin = `<span class="track-stats">${botonMeGusta('')}` +
           `<span class="track-plays-count" title="Reproducciones">${ICONO_PLAY}${track.plays || 0}</span></span>`;
       }
       const vip = seccion === 'vip' ? `<div class="track-vip-owner">${track.vip_owner ? 'Dueño: ' + escapeHtml(track.vip_owner) : 'Dueño anónimo'}</div>` : '';
@@ -810,6 +813,20 @@
     try { localStorage.setItem('zonabeats_liked', JSON.stringify(next)); } catch { /* sin almacenamiento */ }
   }
 
+  // aviso de cookies: se muestra hasta que se toca «Entendido» (queda guardado en este navegador)
+  (function avisoCookies() {
+    const aviso = document.getElementById('aviso-cookies');
+    if (!aviso) return;
+    let visto = false;
+    try { visto = localStorage.getItem('zonabeats_aviso_cookies') === '1'; } catch { /* sin almacenamiento */ }
+    if (visto) return;
+    aviso.hidden = false;
+    document.getElementById('aviso-cookies-ok').addEventListener('click', () => {
+      aviso.hidden = true;
+      try { localStorage.setItem('zonabeats_aviso_cookies', '1'); } catch { /* nada */ }
+    });
+  })();
+
   async function toggleLike(trackId, btn) {
     const alreadyLiked = isTrackLiked(trackId);
     const endpoint = alreadyLiked ? 'unlike' : 'like';
@@ -827,8 +844,12 @@
       btn.setAttribute('aria-pressed', String(!alreadyLiked));
       btn.querySelector('.track-like-count').textContent = likes;
 
-      const track = tracksBySection.playlist.find(t => t.id === trackId);
-      if (track) track.likes = likes;
+      // la misma canción puede estar en varias listas (catálogo, Hots, perfil del productor): todas al día
+      Object.values(tracksBySection).forEach(lista => (Array.isArray(lista) ? lista : []).forEach(t => { if (t.id === trackId) t.likes = likes; }));
+      document.querySelectorAll(`.track-like-btn[data-track-id="${trackId}"]`).forEach(b => {
+        b.classList.toggle('liked', !alreadyLiked); b.setAttribute('aria-pressed', String(!alreadyLiked));
+        const n = b.querySelector('.track-like-count'); if (n) n.textContent = likes;
+      });
     } catch {
       console.error('No se pudo registrar el like');
     } finally {

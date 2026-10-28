@@ -159,13 +159,14 @@ function cerrarSiQuedoCuerpo(res, headers) {
   });
 }
 
-function sendJSON(res, status, obj) {
+function sendJSON(res, status, obj, extra) {
   if (res.headersSent || res.destroyed) return;
   const body = JSON.stringify(obj);
   const headers = {
     'Content-Type': 'application/json; charset=utf-8',
     'Content-Length': Buffer.byteLength(body),
     'Cache-Control': 'no-store',
+    ...(extra || {}),
   };
   cerrarSiQuedoCuerpo(res, headers);
   res.writeHead(status, headers);
@@ -2033,15 +2034,23 @@ route('POST', '/api/tracks/:id/token', (req, res, params) => {
 });
 
 // Un "me gusta" por dispositivo y pista; además límite por IP para frenar trampas (los likes dan bonos en Studio).
+// El dispositivo se reconoce con una cookie propia y anónima («zb_dispositivo», 1 año). Una página web no puede
+// leer la dirección MAC del equipo; la cookie es lo equivalente. Si aún no la tiene, se crea con el identificador
+// que el navegador ya guardaba (así nadie puede repetir sus me gusta de antes).
+const COOKIE_DISPOSITIVO = 'zb_dispositivo';
+const ID_DISPOSITIVO_OK = /^[a-zA-Z0-9-]{16,80}$/;
 async function leerVotante(req) {
   try {
     const body = await readBody(req, 1024);
     const d = body.length ? jsonObjeto(body.toString('utf8')) : {};
-    const id = String(d.voterId || '').slice(0, 80);
-    if (!/^[a-zA-Z0-9-]{16,80}$/.test(id)) return null;
-    return crypto.createHash('sha256').update('zb-like|' + id).digest('hex');
+    const deCookie = String(getCookie(req, COOKIE_DISPOSITIVO) || '');
+    const delNavegador = String(d.voterId || '').slice(0, 80);
+    const id = ID_DISPOSITIVO_OK.test(deCookie) ? deCookie : delNavegador;
+    if (!ID_DISPOSITIVO_OK.test(id)) return null;
+    return { hash: crypto.createHash('sha256').update('zb-like|' + id).digest('hex'), id, nueva: id !== deCookie };
   } catch { return null; }
 }
+const cabecerasVotante = (req, v) => (v.nueva ? { 'Set-Cookie': cookieSegura(req, COOKIE_DISPOSITIVO, v.id, 31536000) } : {});
 
 route('POST', '/api/tracks/:id/like', async (req, res, params) => {
   const track = db.prepare('SELECT id, likes, producer_id FROM tracks WHERE id = ?').get(params.id);
@@ -2052,11 +2061,11 @@ route('POST', '/api/tracks/:id/like', async (req, res, params) => {
   // Los me gusta dan dinero (bono Studio): desde una misma IP se aceptan hasta 20 por canción al día.
   // No es 1 por IP porque en Cuba muchas personas salen a internet por la misma IP de la operadora.
   if (!rateLimit(req, 'like-pista-' + track.id, 20, 24 * 60 * 60 * 1000)) return sendJSON(res, 429, { error: 'Esta canción ya recibió muchos me gusta desde tu conexión hoy. Prueba mañana.' });
-  const r = db.prepare('INSERT OR IGNORE INTO track_likes (track_id, voter) VALUES (?, ?)').run(track.id, voter);
+  const r = db.prepare('INSERT OR IGNORE INTO track_likes (track_id, voter) VALUES (?, ?)').run(track.id, voter.hash);
   if (r.changes) db.prepare('UPDATE tracks SET likes = likes + 1 WHERE id = ?').run(track.id);
   const likes = db.prepare('SELECT likes FROM tracks WHERE id = ?').get(track.id).likes;
   if (r.changes && track.producer_id) { try { acreditarBonos(track.producer_id); } catch (e) { console.error(e); } }
-  sendJSON(res, 200, { likes });
+  sendJSON(res, 200, { likes }, cabecerasVotante(req, voter));
 });
 
 route('POST', '/api/tracks/:id/unlike', async (req, res, params) => {
@@ -2064,10 +2073,10 @@ route('POST', '/api/tracks/:id/unlike', async (req, res, params) => {
   if (!track) return sendJSON(res, 404, { error: 'Pista no encontrada' });
   const voter = await leerVotante(req);
   if (!voter) return sendJSON(res, 400, { error: 'Solicitud inválida' });
-  const r = db.prepare('DELETE FROM track_likes WHERE track_id = ? AND voter = ?').run(track.id, voter);
+  const r = db.prepare('DELETE FROM track_likes WHERE track_id = ? AND voter = ?').run(track.id, voter.hash);
   if (r.changes) db.prepare('UPDATE tracks SET likes = MAX(0, likes - 1) WHERE id = ?').run(track.id);
   const likes = db.prepare('SELECT likes FROM tracks WHERE id = ?').get(track.id).likes;
-  sendJSON(res, 200, { likes });
+  sendJSON(res, 200, { likes }, cabecerasVotante(req, voter));
 });
 
 // solo playlist puede descargarse
