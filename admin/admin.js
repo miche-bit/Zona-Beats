@@ -756,13 +756,15 @@
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
+  // la nota larga de «AudD no respondió» se resume; el detalle está en Ajustes › Originalidad
+  const notaOrig = (txt) => (/^Solo se comparó dentro/.test(txt) ? 'falta la revisión de AudD (no respondió; se repite sola)' : txt);
   // Resultado de la verificación de originalidad en «Mi música»
   let origTracksTimer = null;
   function lineaOrigAdmin(o) {
     if (!o) return '';
     if (o.estado === 'pendiente') { if (!origTracksTimer) origTracksTimer = setTimeout(() => { origTracksTimer = null; if (document.visibilityState === 'visible') loadTracks(); }, 8000); return '<div class="m orig-mini proc">Verificando originalidad…</div>'; }
     if (o.estado === 'error') return '<div class="m orig-mini warn">La verificación de originalidad falló' + (o.error ? ': ' + escapeHtml(o.error) : '') + '</div>';
-    if (o.estado === 'limpio') return '<div class="m orig-mini ok">✓ Sin coincidencias' + (o.servicio ? ' (catálogo y ' + escapeHtml(o.servicio) + ')' : ' en el catálogo') + '</div>';
+    if (o.estado === 'limpio') return '<div class="m orig-mini ok">✓ Sin coincidencias' + (o.servicio ? ' (catálogo y ' + escapeHtml(o.servicio) + ')' : ' en el catálogo') + (o.error ? ' · ' + escapeHtml(notaOrig(o.error)) : '') + '</div>';
     const lista = (o.externas || []).map(x => '«' + escapeHtml(x.titulo) + '» de ' + escapeHtml(x.artista))
       .concat((o.internas || []).map(x => '«' + escapeHtml(x.titulo) + '» (' + x.similitud + ' %)'));
     return '<div class="m orig-mini warn"><strong>Coincide con:</strong> ' + lista.join(' · ') + '</div>';
@@ -910,7 +912,10 @@
     document.getElementById('orig-estado').innerHTML =
       (d.servicioExterno ? 'Reconocimiento externo (AudD): <strong>configurado</strong>.' : 'Reconocimiento externo (AudD): <strong>sin configurar</strong>. Solo se compara con el catálogo de la tienda.') +
       '<br>Verificados: ' + d.limpio + ' sin coincidencias · ' + d.coincidencias + ' con coincidencias · ' + d.pendiente + ' en curso · ' + d.error + ' con error' +
-      (d.ultimoError ? '<br>Último error: ' + escapeHtml(d.ultimoError) : '');
+      (d.ultimoError ? '<br>Último error: ' + escapeHtml(d.ultimoError) : '') +
+      (d.fallaAudd ? '<br><span class="warn-txt"><strong>AudD no está respondiendo</strong> (' + escapeHtml(d.fallaAudd.msg) + '). ' +
+        (/token|subscription|trial|authoriz/i.test(d.fallaAudd.msg) ? 'Renueva la suscripción en dashboard.audd.io o quita AUDD_API_TOKEN en Railway. ' : '') +
+        'Mientras tanto los beats se verifican solo dentro de la tienda' + (d.sinAudd ? ' (' + d.sinAudd + ' esperan la revisión de AudD)' : '') + ' y se pueden aprobar.</span>' : '');
     document.getElementById('orig-probar').hidden = !d.servicioExterno;
     pintarConsumoAudd(d.consumo, d.servicioExterno);
     document.getElementById('orig-auto-retiro').checked = d.autoRetiro !== false;
@@ -1452,6 +1457,126 @@
     rates.forEach(appendRateRow);
   }
 
+  // ---------- elTOQUE: tasas automáticas ----------
+  let elToque = { conectado: false, auto: [], planAuto: false, pendientes: [], tasas: {} };
+  // igual que en el servidor: qué tasa de elTOQUE le toca a cada moneda
+  function fuenteToque(code) {
+    const c = String(code || '').toUpperCase();
+    if (c === 'USD' || c === 'QVAPAY' || /^USD_/.test(c) || c === 'PLAN') return 'USD';
+    if (c === 'MLC') return 'MLC';
+    if (/^USDT/.test(c)) return 'USDT_TRC20';
+    if (/^(EUR|EURO|ECU)(_|$)/.test(c)) return 'ECU';
+    return null;
+  }
+  const NOMBRE_TOQUE = { USD: 'USD', MLC: 'MLC', USDT_TRC20: 'USDT', ECU: 'EUR' };
+  const fmt = (n) => Number(n || 0).toLocaleString('es', { maximumFractionDigits: 2 });
+  const tasaConMargen = (v) => { const n = v * (1 + (Number(elToque.margen) || 0) / 100); return n >= 100 ? Math.round(n) : Math.round(n * 100) / 100; };
+  function haceCuanto(iso) {
+    const min = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+    if (!iso || !Number.isFinite(min)) return '';
+    if (min < 1) return 'hace un momento';
+    if (min < 60) return 'hace ' + min + ' min';
+    const h = Math.round(min / 60);
+    return h < 24 ? 'hace ' + h + ' h' : 'hace ' + Math.round(h / 24) + ' d';
+  }
+  function botonAuto(code, activo, input) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'rate-auto';
+    b.dataset.code = code;
+    b.textContent = 'Auto';
+    b.title = 'Tomar la tasa de elTOQUE (' + NOMBRE_TOQUE[fuenteToque(code)] + ') cada hora';
+    const aplicar = (on) => {
+      b.setAttribute('aria-pressed', String(on));
+      b.setAttribute('aria-label', (on ? 'Automática con elTOQUE: ' : 'Manual: ') + code);
+      input.readOnly = on;
+      input.classList.toggle('es-auto', on);
+    };
+    aplicar(activo);
+    b.addEventListener('click', () => {
+      const on = b.getAttribute('aria-pressed') !== 'true';
+      aplicar(on);
+      if (on) {
+        const v = elToque.tasas[fuenteToque(code)];
+        if (v) input.value = String(tasaConMargen(v));
+        showToast('Guarda las tasas para que siga a elTOQUE.');
+      }
+    });
+    return b;
+  }
+  function pintarElToque(e) {
+    elToque = e || elToque;
+    const est = document.getElementById('eltoque-estado');
+    const box = document.getElementById('eltoque-box');
+    document.getElementById('eltoque-sin').hidden = elToque.conectado;
+    document.getElementById('eltoque-con').hidden = !elToque.conectado;
+    const nAuto = elToque.auto.length + (elToque.planAuto ? 1 : 0);
+    const pend = elToque.pendientes || [];
+    est.className = 'eltoque-estado';
+    if (!elToque.conectado) est.textContent = 'sin conectar';
+    else if (pend.length) { est.textContent = pend.length === 1 ? '1 tasa por aprobar' : pend.length + ' tasas por aprobar'; est.classList.add('mal'); box.open = true; }
+    else if (elToque.error) { est.textContent = 'no se pudo actualizar'; est.classList.add('mal'); }
+    else if (!nAuto) est.textContent = 'conectado, sin monedas en «Auto»';
+    else { est.textContent = 'automático, ' + (haceCuanto(elToque.ultimoOk) || 'pendiente'); est.classList.add('ok'); }
+    if (!elToque.conectado) return;
+    const hoy = Object.entries(NOMBRE_TOQUE).filter(([k]) => elToque.tasas[k]).map(([k, n]) => n + ' ' + fmt(elToque.tasas[k])).join(' · ');
+    document.getElementById('eltoque-info').innerHTML =
+      (hoy ? 'Hoy: <strong>' + escapeHtml(hoy) + '</strong> CUP' : 'Aún sin tasas.') +
+      (elToque.error ? ' <span class="mal">' + escapeHtml(elToque.error) + ' Se mantienen las últimas tasas.</span>' : '');
+    document.getElementById('eltoque-token-fin').textContent = elToque.tokenFin ? 'Token …' + elToque.tokenFin : '';
+    const mIn = document.getElementById('eltoque-margen');
+    if (document.activeElement !== mIn) mIn.value = elToque.margen ? String(elToque.margen) : '';
+    const pBox = document.getElementById('eltoque-pend');
+    pBox.hidden = !pend.length;
+    if (pend.length) {
+      pBox.innerHTML = '<p>Estas tasas cambiaron más de un 30 % de golpe y esperan tu visto bueno:</p><p><strong>' +
+        pend.map(x => escapeHtml(x.label) + ': ' + fmt(x.viejo) + ' → ' + fmt(x.nuevo) + ' CUP').join('<br>') +
+        '</strong></p><button type="button" class="btn-secondary" id="eltoque-aprobar">Aplicar estas tasas</button>';
+    }
+    const quitar = document.getElementById('eltoque-quitar');
+    quitar.hidden = Boolean(elToque.delEntorno);
+  }
+  async function llamarToque(url, cuerpo, boton) {
+    if (boton) boton.disabled = true;
+    try {
+      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo || {}) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { showToast(d.error || 'No se pudo hablar con elTOQUE.', true); return null; }
+      await loadExchangeRates();
+      return d;
+    } finally { if (boton) boton.disabled = false; }
+  }
+  document.getElementById('eltoque-conectar').addEventListener('click', async (ev) => {
+    const t = document.getElementById('eltoque-token');
+    if (!t.value.trim()) { showToast('Pega el token de elTOQUE.', true); t.focus(); return; }
+    const btn = ev.currentTarget;
+    btn.textContent = 'Probando…';
+    const d = await llamarToque('/api/admin/eltoque', { token: t.value.trim() }, btn);
+    btn.textContent = 'Conectar';
+    if (d) { t.value = ''; showToast('elTOQUE conectado. Marca «Auto» en las monedas que quieras y guarda.'); }
+  });
+  document.getElementById('eltoque-margen-btn').addEventListener('click', async (ev) => {
+    const d = await llamarToque('/api/admin/eltoque', { margen: document.getElementById('eltoque-margen').value.trim() || '0' }, ev.currentTarget);
+    if (d) showToast('Margen aplicado.');
+  });
+  document.getElementById('eltoque-ahora').addEventListener('click', async (ev) => {
+    const d = await llamarToque('/api/admin/eltoque/actualizar', {}, ev.currentTarget);
+    if (d) showToast(d.error ? d.error : 'Tasas de elTOQUE al día.', Boolean(d.error));
+  });
+  document.getElementById('eltoque-quitar').addEventListener('click', async (ev) => {
+    if (!confirm('¿Desconectar elTOQUE? Las tasas se quedan como están y pasan a ser manuales.')) return;
+    const d = await llamarToque('/api/admin/eltoque', { quitarToken: true }, ev.currentTarget);
+    if (d) showToast('elTOQUE desconectado.');
+  });
+  // al abrir o cerrar el plegable la lista de tasas recalcula cuántas filas caben
+  document.getElementById('eltoque-box').addEventListener('toggle', () => ZBUI.reencajar());
+  document.getElementById('eltoque-pend').addEventListener('click', async (ev) => {
+    const b = ev.target.closest('#eltoque-aprobar');
+    if (!b) return;
+    const d = await llamarToque('/api/admin/eltoque/aprobar', {}, b);
+    if (d) showToast('Tasas aplicadas.');
+  });
+
   function appendRateRow(rate) {
     const row = document.createElement('div');
     const isCup = rate.code === 'CUP';
@@ -1467,6 +1592,10 @@
         ${rate.custom ? '<button type="button" class="account-remove-btn rate-remove" aria-label="Quitar método">&times;</button>' : ''}
       </div>
     `;
+    const input = row.querySelector('.rate-value');
+    if (input && elToque.conectado && fuenteToque(rate.code)) {
+      row.querySelector('.rate-row-input-wrap').appendChild(botonAuto(rate.code, elToque.auto.includes(rate.code), input));
+    }
     const rm = row.querySelector('.rate-remove');
     if (rm) rm.addEventListener('click', () => {
       if (confirm('¿Quitar "' + rate.label + '"? Las cuentas en esa moneda dejarán de mostrarse.')) row.remove();
@@ -1479,7 +1608,14 @@
   async function loadExchangeRates() {
     const res = await fetch('/api/admin/exchange-rates');
     if (!res.ok) return;
-    const { rates, planUsdRate, qvapay } = await res.json();
+    const { rates, planUsdRate, qvapay, eltoque } = await res.json();
+    if (eltoque) pintarElToque(eltoque);
+    // el USD de planes y Hots también puede seguir a elTOQUE
+    const planIn0 = document.getElementById('plan-usd-rate');
+    const planWrap = planIn0.closest('.rate-row-input-wrap');
+    planWrap.querySelectorAll('.rate-auto').forEach(b => b.remove());
+    planIn0.readOnly = false; planIn0.classList.remove('es-auto');
+    if (elToque.conectado) planWrap.appendChild(botonAuto('PLAN', elToque.planAuto, planIn0));
     const qvEl = document.getElementById('qvapay-estado');
     if (qvapay && qvapay.claves) {
       qvEl.hidden = false;
@@ -1546,7 +1682,13 @@
     const res = await fetch('/api/admin/exchange-rates', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rates, planUsdRate: document.getElementById('plan-usd-rate').value.trim() || '0' }),
+      body: JSON.stringify({
+        rates, planUsdRate: document.getElementById('plan-usd-rate').value.trim() || '0',
+        ...(elToque.conectado ? {
+          auto: [...exchangeRatesList.querySelectorAll('.rate-auto[aria-pressed="true"]')].map(b => b.dataset.code),
+          planAuto: Boolean(document.querySelector('.plan-usd-box .rate-auto[aria-pressed="true"]')),
+        } : {}),
+      }),
     });
 
     if (res.ok) {
@@ -1923,7 +2065,7 @@
     let cuerpo;
     if (o.estado === 'pendiente') cuerpo = '<div class="orig-estado proc">Verificando originalidad…</div>';
     else if (o.estado === 'error') cuerpo = '<div class="orig-estado warn">La verificación falló' + (o.error ? ': ' + escapeHtml(o.error) : '') + '.</div>';
-    else if (o.estado === 'limpio') cuerpo = '<div class="orig-estado ok">✓ Sin coincidencias' + (o.servicio ? ' (catálogo de la tienda y ' + escapeHtml(o.servicio) + ')' : ' en el catálogo de la tienda') + (o.error ? ' · ' + escapeHtml(o.error) : '') + '</div>';
+    else if (o.estado === 'limpio') cuerpo = '<div class="orig-estado ok">✓ Sin coincidencias' + (o.servicio ? ' (catálogo de la tienda y ' + escapeHtml(o.servicio) + ')' : ' en el catálogo de la tienda') + (o.error ? ' · ' + escapeHtml(notaOrig(o.error)) : '') + '</div>';
     else {
       const filas = (o.internas || []).map(x => '<li>Se parece un <strong>' + x.similitud + ' %</strong> (' + x.segundos + ' s) a «' + escapeHtml(x.titulo) + '» de ' + escapeHtml(x.productor) + (x.mismoProductor ? ' (del mismo productor)' : '') + '</li>')
         .concat((o.externas || []).map(x => '<li>Coincide con «' + escapeHtml(x.titulo) + '» de <strong>' + escapeHtml(x.artista) + '</strong>' + (x.sello ? ' · ' + escapeHtml(x.sello) : '') + (x.fecha ? ' · ' + escapeHtml(x.fecha) : '') + ' · en el segundo ' + x.segundo + (x.enlace ? ' · <a href="' + escapeHtml(x.enlace) + '" target="_blank" rel="noopener">escuchar</a>' : '') + '</li>'));
@@ -1964,7 +2106,7 @@
           ${archivos}
           ${t.is_playlist ? '' : bloqueOriginalidad(t)}
           <div class="forzar-box" hidden>
-            <label>Hay coincidencias. Si igual lo publicas, escribe por qué (queda en el registro del productor):
+            <label><span class="forzar-txt">Hay coincidencias. Si igual lo publicas, escribe por qué (queda en el registro del productor):</span>
               <input type="text" class="forzar-motivo" maxlength="300" placeholder="Ej: el productor mostró el proyecto original; el otro beat es suyo">
             </label>
             <button type="button" class="btn-forzar">Publicar igual</button>
@@ -1993,8 +2135,11 @@
         if (res.status === 401) return;
         const e2 = await res.json().catch(() => ({}));
         showToast(e2.error || 'No se pudo aprobar.', true);
-        if (e2.verificacion === 'coincidencias') {
+        if (e2.verificacion === 'coincidencias' || e2.verificacion === 'error') {
           const box = item.querySelector('.forzar-box');
+          box.querySelector('.forzar-txt').textContent = e2.verificacion === 'error'
+            ? 'No se pudo verificar. Si igual lo publicas, escribe por qué (queda en el registro del productor):'
+            : 'Hay coincidencias. Si igual lo publicas, escribe por qué (queda en el registro del productor):';
           box.hidden = false;
           box.querySelector('.forzar-motivo').focus();
         }

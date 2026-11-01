@@ -32,6 +32,7 @@ const { buildLicensePdf, buildRegistroPdf, buildPedidoPdf, buildCartaContentIdPd
 const almacen = require('./almacen');
 const originalidad = require('./originalidad');
 const qvapay = require('./qvapay');
+const eltoque = require('./eltoque');
 const onda = require('./onda');
 
 // Cuerpo JSON de una petición: si no es un objeto (null, un número, una lista…) se trata como vacío.
@@ -3338,6 +3339,11 @@ function programarOriginalidad(trackId) {
     .then(() => { originalidadEnCola.delete(trackId); });
 }
 const UMBRAL_MISMO_AUDIO = 0.85;
+const NOTA_SIN_AUDD = 'Solo se comparó dentro de la tienda (AudD no respondió: ';
+// por qué AudD no está respondiendo (token vencido, sin suscripción…), si es el caso
+function fallaAudd() {
+  try { const f = db.prepare("SELECT valor FROM app_secrets WHERE clave = 'audd_falla'").get(); return f ? JSON.parse(f.valor) : null; } catch { return null; }
+}
 async function verificarOriginalidad(id) {
   const t = db.prepare('SELECT * FROM tracks WHERE id = ?').get(id);
   if (!t) { db.prepare('DELETE FROM originalidad WHERE track_id = ?').run(id); return; }
@@ -3364,17 +3370,28 @@ async function verificarOriginalidad(id) {
         similitud: Math.round(c.similitud * 100), segundos: c.segundos });
     }
   }
-  // 2. contra las canciones publicadas (si el servicio está conectado)
+  // 2. contra las canciones publicadas (si el servicio está conectado).
+  // Si AudD falla (token vencido, sin suscripción, caído) la verificación NO se bloquea: queda hecha
+  // dentro de la tienda, con la nota de que falta AudD, y se repite sola cuando AudD vuelva a responder.
   let externas = [];
   let servicio = '';
+  let nota = '';
   if (originalidad.externoActivo()) {
-    externas = await originalidad.reconocerExterno(archivo) || [];
-    servicio = 'AudD';
-    if (externas.consultas) anotarConsumoAudd(externas.consultas, id, 'verificacion');
+    try {
+      externas = await originalidad.reconocerExterno(archivo) || [];
+      servicio = 'AudD';
+      if (externas.consultas) anotarConsumoAudd(externas.consultas, id, 'verificacion');
+      db.prepare("DELETE FROM app_secrets WHERE clave = 'audd_falla'").run();
+    } catch (e) {
+      externas = [];
+      const msg = String((e && e.message) || 'sin respuesta').slice(0, 240);
+      nota = NOTA_SIN_AUDD + msg + ')';
+      db.prepare("INSERT OR REPLACE INTO app_secrets (clave, valor) VALUES ('audd_falla', ?)").run(JSON.stringify({ msg, at: new Date().toISOString() }));
+    }
   }
   const estado = internas.length || externas.length ? 'coincidencias' : 'limpio';
-  db.prepare(`UPDATE originalidad SET estado = ?, huella = ?, internas_json = ?, externas_json = ?, servicio = ?, error = '', checked_at = datetime('now') WHERE track_id = ?`)
-    .run(estado, originalidad.aTexto(h), JSON.stringify(internas), JSON.stringify(externas), servicio, id);
+  db.prepare(`UPDATE originalidad SET estado = ?, huella = ?, internas_json = ?, externas_json = ?, servicio = ?, error = ?, checked_at = datetime('now') WHERE track_id = ?`)
+    .run(estado, originalidad.aTexto(h), JSON.stringify(internas), JSON.stringify(externas), servicio, nota, id);
   if (t.producer_id && estado === 'coincidencias') {
     anotar(t.producer_id, 'Verificación de originalidad: coincidencias', `«${t.title}»: ` +
       [...internas.map(x => `se parece ${x.similitud} % a «${x.titulo}» de ${x.productor}`), ...externas.map(x => `coincide con «${x.titulo}» de ${x.artista}`)].join(' · ').slice(0, 400), id);
@@ -3418,7 +3435,7 @@ function revisarOriginalidadPendiente() {
   const externo = originalidad.externoActivo();
   const filas = db.prepare(`SELECT t.id FROM tracks t LEFT JOIN originalidad o ON o.track_id = t.id
     WHERE o.track_id IS NULL OR o.estado = 'pendiente' OR (o.estado = 'error' AND o.checked_at < datetime('now', '-1 hour'))
-    ${externo ? "OR (o.servicio = '' AND o.error = '' AND o.estado IN ('limpio', 'coincidencias'))" : ''}
+    ${externo ? "OR (o.servicio = '' AND o.error = '' AND o.estado IN ('limpio', 'coincidencias')) OR (o.servicio = '' AND o.error LIKE 'Solo se comparó dentro%' AND o.checked_at < datetime('now', '-6 hours'))" : ''}
     ORDER BY t.approval_status = 'pending' DESC, t.id DESC LIMIT 5`).all();
   for (const f of filas) programarOriginalidad(f.id);
 }
@@ -3754,7 +3771,9 @@ route('GET', '/api/admin/originalidad/estado', (req, res) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   const cuenta = (e) => db.prepare('SELECT COUNT(*) as c FROM originalidad WHERE estado = ?').get(e).c;
   sendJSON(res, 200, { servicioExterno: originalidad.externoActivo(), autoRetiro: autoRetiroActivo(), sinDecidir: contarCoincidencias(), consumo: consumoAudd(), limpio: cuenta('limpio'), coincidencias: cuenta('coincidencias'), pendiente: cuenta('pendiente'), error: cuenta('error'),
-    ultimoError: (db.prepare("SELECT error FROM originalidad WHERE estado = 'error' ORDER BY checked_at DESC LIMIT 1").get() || {}).error || '' });
+    ultimoError: (db.prepare("SELECT error FROM originalidad WHERE estado = 'error' ORDER BY checked_at DESC LIMIT 1").get() || {}).error || '',
+    fallaAudd: originalidad.externoActivo() ? fallaAudd() : null,
+    sinAudd: db.prepare("SELECT COUNT(*) as c FROM originalidad WHERE servicio = '' AND error LIKE 'Solo se comparó dentro%'").get().c });
 });
 // ---------- Coincidencias de originalidad: lo que el administrador tiene que decidir ----------
 // coincidencias sin revisar: las que siguen a la venta o en revisión, y las retiradas automáticamente
@@ -4090,14 +4109,14 @@ route('GET', '/api/admin/exchange-rates', (req, res) => {
   // tasa del USD solo para planes y Hots (no es forma de pago)
   const cfg = db.prepare('SELECT plan_usd_rate FROM platform_config WHERE id = 1').get();
   const qv = rates.find(r => r.code === 'QVAPAY');
-  sendJSON(res, 200, { rates, planUsdRate: Number(cfg && cfg.plan_usd_rate) || 0, qvapay: { claves: qvapay.activo(), moneda: Boolean(qv && Number(qv.cupPerUnit) > 0) } });
+  sendJSON(res, 200, { rates, planUsdRate: Number(cfg && cfg.plan_usd_rate) || 0, qvapay: { claves: qvapay.activo(), moneda: Boolean(qv && Number(qv.cupPerUnit) > 0) }, eltoque: estadoElToque() });
 });
 
 route('POST', '/api/admin/exchange-rates', async (req, res) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   try {
     const body = await readBody(req, 1024 * 10);
-    const { rates, planUsdRate } = jsonObjeto(body.toString('utf8'));
+    const { rates, planUsdRate, auto, planAuto } = jsonObjeto(body.toString('utf8'));
     if (!Array.isArray(rates)) return sendJSON(res, 400, { error: 'Formato de tasas inválido' });
     if (planUsdRate !== undefined) {
       db.prepare('UPDATE platform_config SET plan_usd_rate = ? WHERE id = 1').run(Math.max(0, parsePrecio(planUsdRate, 4) || 0));
@@ -4115,10 +4134,154 @@ route('POST', '/api/admin/exchange-rates', async (req, res) => {
     if (!cleanRates.some(r => r.code === 'CUP')) cleanRates.unshift({ code: 'CUP', label: 'CUP', cupPerUnit: 1 });
 
     db.prepare('UPDATE exchange_rates SET rates_json = ? WHERE id = 1').run(JSON.stringify(cleanRates));
-    sendJSON(res, 200, { ok: true });
+    // qué monedas siguen a elTOQUE: las que se acaban de activar toman su tasa ya, sin esperar a la hora
+    let nuevas = [];
+    if (Array.isArray(auto) || planAuto !== undefined) {
+      const cfgT = configElToque();
+      const antes = new Set(cfgT.auto.concat(cfgT.planAuto ? ['PLAN'] : []));
+      if (Array.isArray(auto)) cfgT.auto = [...new Set(auto.map(c => String(c || '').toUpperCase()).filter(c => cleanRates.some(r => r.code === c) && eltoque.fuenteDe(c)))].slice(0, 30);
+      if (planAuto !== undefined) cfgT.planAuto = Boolean(planAuto);
+      guardarSecretoJson('eltoque_cfg', cfgT);
+      nuevas = cfgT.auto.concat(cfgT.planAuto ? ['PLAN'] : []).filter(c => !antes.has(c));
+    }
+    if (nuevas.length && tokenElToque()) await actualizarElToque({ forzar: new Set(nuevas) });
+    sendJSON(res, 200, { ok: true, eltoque: estadoElToque() });
   } catch {
     sendJSON(res, 400, { error: 'Solicitud inválida' });
   }
+});
+
+// ---------- Tasas automáticas con elTOQUE ----------
+// El admin pega su token (se guarda en el servidor y nunca se vuelve a mostrar entero), elige qué monedas
+// siguen a elTOQUE y un margen opcional. Cada hora se piden las tasas y se aplican.
+// Freno: si una tasa cambia más de un 30 % de golpe no se aplica sola; queda «por aprobar» en el panel.
+// Si elTOQUE falla, la tienda sigue con las últimas tasas buenas.
+const ELTOQUE_SALTO_MAX = 0.30;
+const leerSecreto = (clave) => { const f = db.prepare('SELECT valor FROM app_secrets WHERE clave = ?').get(clave); return f ? String(f.valor || '') : ''; };
+const guardarSecreto = (clave, valor) => db.prepare('INSERT OR REPLACE INTO app_secrets (clave, valor) VALUES (?, ?)').run(clave, String(valor));
+const borrarSecreto = (clave) => db.prepare('DELETE FROM app_secrets WHERE clave = ?').run(clave);
+const leerSecretoJson = (clave, def) => { try { return { ...def, ...JSON.parse(leerSecreto(clave) || '{}') }; } catch { return { ...def }; } };
+const guardarSecretoJson = (clave, obj) => guardarSecreto(clave, JSON.stringify(obj));
+const tokenElToque = () => leerSecreto('eltoque_token') || process.env.ELTOQUE_TOKEN || '';
+function configElToque() {
+  const c = leerSecretoJson('eltoque_cfg', { margen: 0, auto: [], planAuto: false });
+  c.margen = Math.max(-50, Math.min(50, Number(c.margen) || 0));
+  c.auto = Array.isArray(c.auto) ? c.auto.map(String) : [];
+  c.planAuto = Boolean(c.planAuto);
+  return c;
+}
+function estadoElToque() {
+  const t = tokenElToque();
+  const cfg = configElToque();
+  const e = leerSecretoJson('eltoque_estado', { ultimoOk: '', ultimoIntento: '', error: '', tasas: {}, pendientes: [] });
+  return {
+    conectado: Boolean(t), tokenFin: t ? t.slice(-4) : '', delEntorno: Boolean(t && !leerSecreto('eltoque_token')),
+    margen: cfg.margen, auto: cfg.auto, planAuto: cfg.planAuto,
+    ultimoOk: e.ultimoOk, ultimoIntento: e.ultimoIntento, error: e.error, tasas: e.tasas || {}, pendientes: e.pendientes || [],
+  };
+}
+const redondearTasa = (n) => (n >= 100 ? Math.round(n) : Math.round(n * 100) / 100);
+// Aplica unas tasas de elTOQUE a las monedas automáticas. forzar: true (todas) o un Set de códigos que no pasan por el freno.
+function aplicarTasasElToque(tasas, forzar) {
+  const cfg = configElToque();
+  const libre = (c) => forzar === true || (forzar instanceof Set && forzar.has(c));
+  const factor = 1 + cfg.margen / 100;
+  const row = db.prepare('SELECT rates_json FROM exchange_rates WHERE id = 1').get();
+  let rates = [];
+  try { rates = JSON.parse((row && row.rates_json) || '[]'); } catch { rates = []; }
+  const pendientes = [];
+  let cambios = 0;
+  const decidir = (code, label, viejo) => {
+    const v = tasas[eltoque.fuenteDe(code === 'PLAN' ? 'USD' : code)];
+    if (!v) return null;
+    const nuevo = redondearTasa(v * factor);
+    if (nuevo === viejo) return null;
+    if (viejo > 0 && Math.abs(nuevo - viejo) / viejo > ELTOQUE_SALTO_MAX && !libre(code)) { pendientes.push({ code, label, viejo, nuevo }); return null; }
+    cambios++;
+    return nuevo;
+  };
+  rates.forEach(r => {
+    if (r.code === 'CUP' || !cfg.auto.includes(r.code)) return;
+    const n = decidir(r.code, r.label, Number(r.cupPerUnit) || 0);
+    if (n != null) r.cupPerUnit = n;
+  });
+  if (cambios) db.prepare('UPDATE exchange_rates SET rates_json = ? WHERE id = 1').run(JSON.stringify(rates));
+  if (cfg.planAuto) {
+    const pc = db.prepare('SELECT plan_usd_rate FROM platform_config WHERE id = 1').get();
+    const n = decidir('PLAN', 'USD para planes y Hots', Number(pc && pc.plan_usd_rate) || 0);
+    if (n != null) db.prepare('UPDATE platform_config SET plan_usd_rate = ? WHERE id = 1').run(n);
+  }
+  return { pendientes, cambios };
+}
+let elToqueEnCurso = null;
+function actualizarElToque({ forzar = null } = {}) {
+  if (elToqueEnCurso) return elToqueEnCurso;
+  const token = tokenElToque();
+  if (!token) return Promise.resolve(estadoElToque());
+  elToqueEnCurso = (async () => {
+    const e = leerSecretoJson('eltoque_estado', {});
+    e.ultimoIntento = new Date().toISOString();
+    try {
+      const tasas = await eltoque.pedirTasas(token);
+      const r = aplicarTasasElToque(tasas, forzar);
+      Object.assign(e, { tasas, ultimoOk: e.ultimoIntento, error: '', pendientes: r.pendientes });
+    } catch (err) {
+      e.error = String((err && err.message) || 'No se pudo consultar elTOQUE.').slice(0, 200);
+    }
+    guardarSecretoJson('eltoque_estado', e);
+    return estadoElToque();
+  })().finally(() => { elToqueEnCurso = null; });
+  return elToqueEnCurso;
+}
+setTimeout(() => { actualizarElToque().catch(() => {}); }, 20 * 1000).unref();
+setInterval(() => { actualizarElToque().catch(() => {}); }, 60 * 60 * 1000).unref();
+
+route('GET', '/api/admin/eltoque', (req, res) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  sendJSON(res, 200, estadoElToque());
+});
+route('POST', '/api/admin/eltoque', async (req, res) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  let d;
+  try { d = jsonObjeto((await readBody(req, 8192)).toString('utf8')); } catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
+  if (d.quitarToken) {
+    borrarSecreto('eltoque_token');
+    // las tasas se quedan como están y pasan a ser manuales
+    guardarSecretoJson('eltoque_cfg', { ...configElToque(), auto: [], planAuto: false });
+    guardarSecretoJson('eltoque_estado', { ultimoOk: '', ultimoIntento: '', error: '', tasas: {}, pendientes: [] });
+  }
+  const token = typeof d.token === 'string' ? d.token.trim() : '';
+  if (token) {
+    if (token.length < 10 || token.length > 4000 || /\s/.test(token)) return sendJSON(res, 400, { error: 'Ese token no parece válido: cópialo entero, sin espacios.' });
+    // se prueba antes de guardarlo: un token malo no reemplaza al bueno
+    try { await eltoque.pedirTasas(token); } catch (err) { return sendJSON(res, 400, { error: err.message }); }
+    guardarSecreto('eltoque_token', token);
+  }
+  if (d.margen !== undefined) {
+    const m = Number(String(d.margen).replace(',', '.'));
+    if (!Number.isFinite(m) || m < -50 || m > 50) return sendJSON(res, 400, { error: 'El margen va de −50 % a +50 %.' });
+    const cfg = configElToque(); cfg.margen = Math.round(m * 100) / 100; guardarSecretoJson('eltoque_cfg', cfg);
+  }
+  // con token nuevo o margen nuevo se aplica enseguida (el margen lo eligió el admin: sin freno)
+  const estado = tokenElToque() ? await actualizarElToque({ forzar: d.margen !== undefined ? true : null }) : estadoElToque();
+  sendJSON(res, 200, estado);
+});
+let elToqueManual = 0;
+route('POST', '/api/admin/eltoque/actualizar', async (req, res) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  if (!tokenElToque()) return sendJSON(res, 400, { error: 'Primero conecta elTOQUE con tu token.' });
+  if (Date.now() - elToqueManual < 15000) return sendJSON(res, 429, { error: 'Espera unos segundos antes de volver a actualizar.' });
+  elToqueManual = Date.now();
+  sendJSON(res, 200, await actualizarElToque());
+});
+route('POST', '/api/admin/eltoque/aprobar', (req, res) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  const e = leerSecretoJson('eltoque_estado', {});
+  if (!e.pendientes || !e.pendientes.length) return sendJSON(res, 200, estadoElToque());
+  aplicarTasasElToque(e.tasas || {}, new Set(e.pendientes.map(p => p.code)));
+  e.pendientes = [];
+  guardarSecretoJson('eltoque_estado', e);
+  sendJSON(res, 200, estadoElToque());
 });
 
 route('GET', '/api/admin/site-config', (req, res) => {
@@ -5146,8 +5309,13 @@ route('POST', '/api/admin/tracks/:id/approve', async (req, res, params) => {
       programarOriginalidad(track.id);
       return sendJSON(res, 409, { verificacion: 'pendiente', error: 'La verificación de originalidad todavía no terminó. Espera un momento y vuelve a intentarlo.' });
     }
-    if (v.estado === 'error') {
-      return sendJSON(res, 409, { verificacion: 'error', error: 'La verificación de originalidad falló: ' + (v.error || 'error desconocido') + '. Pulsa «Verificar de nuevo».' });
+    if (v.estado === 'error' && !v.override_motivo) {
+      const motivo = limpiarTexto(d.motivo, 300);
+      if (d.forzar !== true || motivo.length < 10) {
+        return sendJSON(res, 409, { verificacion: 'error', error: 'La verificación de originalidad falló: ' + (v.error || 'error desconocido') + '. Pulsa «Verificar de nuevo» o apruébalo indicando el motivo.' });
+      }
+      db.prepare("UPDATE originalidad SET override_motivo = ?, override_at = datetime('now') WHERE track_id = ?").run(motivo, track.id);
+      anotar(track.producer_id, 'Publicó tu obra sin verificación de originalidad', `«${track.title}» · motivo del administrador: ${motivo}`, track.id);
     }
     if (v.estado === 'coincidencias' && !v.override_motivo) {
       const motivo = limpiarTexto(d.motivo, 300);

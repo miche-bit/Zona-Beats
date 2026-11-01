@@ -705,6 +705,33 @@
             <h2>Tasas de cambio</h2>
             <p class="panel-hint">Los precios base están en CUP. Indica cuántos CUP vale cada moneda; con 0, no se muestra en la tienda.</p>
             <form id="exchange-rates-form">
+              <details class="eltoque-box" id="eltoque-box">
+                <summary><span>Tasas de elTOQUE</span><span class="eltoque-estado" id="eltoque-estado">sin conectar</span></summary>
+                <div class="eltoque-cuerpo">
+                  <div class="eltoque-sin" id="eltoque-sin">
+                    <p class="panel-hint compact">Las monedas marcadas como «Auto» toman cada hora la tasa del mercado informal de elTOQUE. Pide tu token gratis en <a href="https://tasas-token.eltoque.com/" target="_blank" rel="noopener">tasas-token.eltoque.com</a> y pégalo aquí.</p>
+                    <div class="eltoque-fila">
+                      <label class="sr-only" for="eltoque-token">Token de elTOQUE</label>
+                      <input type="password" id="eltoque-token" autocomplete="off" spellcheck="false" placeholder="Pega aquí el token">
+                      <button type="button" class="btn-secondary" id="eltoque-conectar">Conectar</button>
+                    </div>
+                  </div>
+                  <div class="eltoque-con" id="eltoque-con" hidden>
+                    <p class="eltoque-info" id="eltoque-info"></p>
+                    <div class="eltoque-pend" id="eltoque-pend" hidden></div>
+                    <div class="eltoque-fila">
+                      <label class="eltoque-margen-l" for="eltoque-margen" title="Sube (+) o baja (−) las tasas de elTOQUE. Con 0 se usan tal cual.">Margen</label>
+                      <div class="rate-row-input-wrap eltoque-margen"><input type="text" id="eltoque-margen" inputmode="decimal" placeholder="0" aria-label="Margen sobre las tasas de elTOQUE, en por ciento (con 0 se usan tal cual)"><span>%</span></div>
+                      <button type="button" class="btn-secondary" id="eltoque-margen-btn">Aplicar</button>
+                    </div>
+                    <div class="eltoque-acciones">
+                      <button type="button" class="btn-secondary" id="eltoque-ahora">Actualizar ahora</button>
+                      <span class="eltoque-token" id="eltoque-token-fin"></span>
+                      <button type="button" class="btn-link" id="eltoque-quitar">Desconectar</button>
+                    </div>
+                  </div>
+                </div>
+              </details>
               <div class="plan-usd-box">
                 <div class="rate-row">
                   <label class="rate-row-label" for="plan-usd-rate">USD para planes y Hots</label>
