@@ -2845,13 +2845,16 @@ async function crearPistaDesdeSubidas(d, owner, opts = {}) {
     if (kbps && kbps < 310) throw { status: 400, error: `El MP3 tiene que ser de 320 kbps y este es de ${kbps} kbps. Expórtalo de nuevo a 320 kbps.` };
   }
 
-  // productores: el WAV de entrega es de 24 bits
+  // productores: el WAV de entrega se recomienda de 24 bits; de 16 se acepta con aviso, menos no
+  const avisosWav = [];
   if (opts.requireWav24) {
     for (const a of [audio, wav].filter(x => x && x.ext === '.wav')) {
       const bits = await bitsWav(a.path);
-      if (bits && bits < 24) throw { status: 400, error: `El WAV tiene que ser de 24 bits y este es de ${bits} bits. Expórtalo de nuevo a 24 bits.` };
+      if (bits && bits < 16) throw { status: 400, error: `El WAV es de ${bits} bits: tiene que ser de 16 o, mejor, de 24 bits.` };
+      if (bits === 16 && !avisosWav.length) avisosWav.push('El WAV es de 16 bits: se acepta, pero se recomienda de 24 bits para la mejor calidad.');
     }
   }
+  if (avisosWav.length) validacion.avisos = [...(validacion.avisos || []), ...avisosWav];
   // duración máxima por beat según el plan (Free 3, Pro 10, Studio 20 minutos), en el MP3 y en el WAV
   let muestraInicio = 0;
   if (opts.maxSegundos) {
@@ -4003,7 +4006,7 @@ route('POST', '/api/producer/tracks/:id/wav-sin-tag', async (req, res, params) =
   try { wav = tomarSubida(d.wavUploadId, `p:${producer.id}`, 'wav'); } catch (err) { return sendJSON(res, err.status || 400, { error: err.error || 'Falta el WAV' }); }
   if (!wav) return sendJSON(res, 400, { error: 'Sube el WAV sin tag del beat completo.' });
   const bits = await bitsWav(wav.path);
-  if (bits && bits < 24) return sendJSON(res, 400, { error: `El WAV tiene que ser de 24 bits y este es de ${bits} bits. Expórtalo de nuevo a 24 bits.` });
+  if (bits && bits < 16) return sendJSON(res, 400, { error: `El WAV es de ${bits} bits: tiene que ser de 16 o, mejor, de 24 bits.` });
   if (plan.maxSegundos) {
     let seg = 0;
     try { seg = await getDurationSeconds(wav.path); } catch { seg = 0; }
@@ -4023,6 +4026,7 @@ route('POST', '/api/producer/tracks/:id/wav-sin-tag', async (req, res, params) =
   // el audio cambió: AudD lo escanea de nuevo (gratis para el productor)
   db.prepare("INSERT INTO originalidad (track_id, estado) VALUES (?, 'pendiente') ON CONFLICT(track_id) DO UPDATE SET estado = 'pendiente', error = ''").run(t.id);
   programarOriginalidad(t.id);
+  if (bits === 16) aviso = (aviso ? aviso + ' ' : '') + 'Ojo: el WAV es de 16 bits; se recomienda de 24 bits.';
   sendJSON(res, 200, { ok: true, reactivado, aviso });
 });
 

@@ -649,16 +649,9 @@
         const liked = isTrackLiked(track.id);
         return `<button type="button" class="track-like-btn${clase}${liked ? ' liked' : ''}" data-track-id="${track.id}" aria-label="Me gusta ${escapeHtml(track.title)}" aria-pressed="${liked}">${ICONO_CORAZON}<span class="track-like-count">${track.likes || 0}</span></button>`;
       };
-      if ((seccion === 'catalog' || esPacks) && track.enVerificacion) {
-        fin = (seccion === 'catalog' ? botonMeGusta(' tr-like') : '') + `<button type="button" class="tr-buy en-verif" aria-label="${escapeHtml(track.title)}: en verificación de originalidad"><span class="tr-desde">en</span><span class="tr-price">verificación</span></button>`;
-      } else if ((seccion === 'catalog' || esPacks) && track.for_sale && track.price_cup > 0) {
-        const priceText = formatPriceInCurrency(track.price_cup, selectedCurrency);
-        const multiples = (track.licenses || []).length > 1;
-        const tieneDescuento = discountPercent > 0 && track.original_cup && track.original_cup > track.price_cup;
-        fin = (seccion === 'catalog' ? botonMeGusta(' tr-like') : '') + `<button type="button" class="tr-buy" aria-label="Comprar ${escapeHtml(track.title)}, ${multiples ? 'desde ' : ''}${escapeHtml(priceText)}">` +
-          (multiples ? '<span class="tr-desde">desde</span>' : '') +
-          (tieneDescuento ? `<s class="price-strike">${escapeHtml(formatPriceInCurrency(track.original_cup, selectedCurrency))}</s>` : '') +
-          `<span class="tr-price">${escapeHtml(priceText)}</span></button>`;
+      // el precio no se muestra en la lista: se ve al tocar «Comprar» (así el artista entra a escuchar)
+      if (seccion === 'catalog') {
+        fin = botonMeGusta(' tr-like');
       } else if (seccion === 'vip') {
         fin = '<span class="tr-sold">Vendida' + (track.price_cup > 0 ? '<span class="tr-price-sold">' + escapeHtml(formatPriceInCurrency(track.price_cup, selectedCurrency)) + '</span>' : '') + '</span>';
       } else if (seccion === 'playlist') {
@@ -696,19 +689,16 @@
   const reducirMovimiento = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : { matches: false };
 
   function tarjetaHot(track, clon) {
-    const precio = track.price_cup > 0 ? formatPriceInCurrency(track.price_cup, selectedCurrency) : '';
-    const multiples = (track.licenses || []).length > 1;
     const cover = track.cover_filename
       ? `<img src="/api/cover/${track.id}?s=300" alt="" loading="lazy" draggable="false">`
       : `<div class="hot-cover-fallback" aria-hidden="true">♪</div>`;
     return `<div class="hot-card" data-id="${track.id}" ${clon ? 'aria-hidden="true" tabindex="-1"' : 'role="button" tabindex="0"'}
-              aria-label="Escuchar ${escapeHtml(track.title)}${', ' + escapeHtml(creditosTexto(track, 'catalog', false))}${precio ? ', ' + escapeHtml((multiples ? 'desde ' : '') + precio) : ''}">
+              aria-label="Escuchar ${escapeHtml(track.title)}${', ' + escapeHtml(creditosTexto(track, 'catalog', false))}">
       <div class="hot-cover">${cover}<span class="hot-badge" aria-hidden="true">🔥 HOT</span>
         <span class="hot-play" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></span></div>
       <div class="hot-info">
         <div class="hot-name">${escapeHtml(track.title)}</div>
         <div class="hot-by">${track.genre ? escapeHtml(track.genre) + ' · ' : ''}prod. ${escapeHtml(nombreProductor(track))}</div>
-        ${precio ? `<div class="hot-price">${multiples ? 'Desde ' : ''}${escapeHtml(precio)}</div>` : ''}
       </div>
     </div>`;
   }
@@ -943,11 +933,9 @@
       downloadBtn.style.display = 'inline-flex';
       downloadBtn.onclick = () => { window.location.href = `/api/download/${track.id}`; };
     } else if (canBuy) {
-      const priceText = formatPriceInCurrency(track.price_cup, selectedCurrency);
-      const multipleLicenses = (track.licenses || []).length > 1;
-      // «Desde» va aparte: en teléfonos se oculta para que el precio se lea entero
-      buyPriceLabel.innerHTML = (multipleLicenses ? '<span class="pb-desde">Desde </span>' : '') + escapeHtml(priceText);
-      buyPriceLabel.title = (multipleLicenses ? 'Desde ' : '') + priceText;
+      // sin precio: los precios se ven al abrir la compra
+      buyPriceLabel.textContent = track.enVerificacion ? 'En verificación' : 'Comprar';
+      buyPriceLabel.title = '';
       buyBtn.style.display = 'inline-flex';
       buyBtn.onclick = () => openBuyModal(track);
       downloadBtn.style.display = 'none';
@@ -974,7 +962,6 @@
     if (track.genre) meta.push(track.genre);
     meta.push('prod. ' + nombreProductor(track));
     if (track._section === 'playlist') meta.push('Playlist · descarga gratis');
-    else if (track.for_sale && track.price_cup > 0 && !track.sold) meta.push((track.licenses || []).length > 1 ? 'Desde ' + formatPriceInCurrency(track.price_cup, selectedCurrency) : formatPriceInCurrency(track.price_cup, selectedCurrency));
     document.getElementById('desc-meta').textContent = meta.join(' · ');
     const txt = String(track.description || '').trim();
     const p = document.getElementById('desc-text');
