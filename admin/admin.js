@@ -569,19 +569,42 @@
   });
 
   let currentAdminListSection = 'catalog';
+  // dentro de Catálogo: «Beats activos» (a la venta) o «Beats vendidos» (ya salieron de la tienda)
+  let filtroCatalogo = 'catalog';
 
   document.querySelectorAll('.admin-tab').forEach((tab) => {
     tab.addEventListener('click', () => {
-      currentAdminListSection = tab.dataset.listSection;
+      currentAdminListSection = tab.dataset.listSection === 'catalog' ? filtroCatalogo : tab.dataset.listSection;
       document.querySelectorAll('.admin-tab').forEach(t => t.classList.toggle('active', t === tab));
       loadTracks();
     });
   });
+  document.querySelectorAll('.cat-filtro').forEach((b) => b.addEventListener('click', () => {
+    filtroCatalogo = b.dataset.catFiltro;
+    currentAdminListSection = filtroCatalogo;
+    loadTracks();
+  }));
 
   async function loadTracks() {
-    const res = await fetch(`/api/admin/tracks?type=${currentAdminListSection}`);
+    const enCatalogo = currentAdminListSection === 'catalog' || currentAdminListSection === 'vendidos';
+    document.getElementById('cat-filtros').hidden = !enCatalogo;
+    document.querySelectorAll('.cat-filtro').forEach((b) => {
+      const on = b.dataset.catFiltro === currentAdminListSection;
+      b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on));
+    });
+    const [res, otro] = await Promise.all([
+      fetch(`/api/admin/tracks?type=${currentAdminListSection}`),
+      enCatalogo ? fetch(`/api/admin/tracks?type=${currentAdminListSection === 'catalog' ? 'vendidos' : 'catalog'}&solo=cuenta`) : null,
+    ]);
     if (!res.ok) return;
     const { tracks } = await res.json();
+    if (enCatalogo) {
+      const n2 = otro && otro.ok ? ((await otro.json()).cuenta || 0) : 0;
+      const act = currentAdminListSection === 'catalog' ? tracks.length : n2;
+      const ven = currentAdminListSection === 'vendidos' ? tracks.length : n2;
+      document.getElementById('cat-n-act').textContent = '(' + act + ')';
+      document.getElementById('cat-n-vend').textContent = '(' + ven + ')';
+    }
     renderTrackList(tracks);
   }
 
@@ -592,6 +615,7 @@
         catalog: 'Aún no hay pistas en el catálogo.',
         playlist: 'Aún no hay colaboraciones.',
         vip: 'Aún no hay ventas exclusivas.',
+        vendidos: 'Todavía no se vendió ningún beat de venta única (fuera de las Exclusivas, que están en Beats VIP).',
       };
       trackList.innerHTML = `<div class="empty-hint">${hints[currentAdminListSection]}</div>`;
       return;
@@ -603,8 +627,9 @@
       const metaExtra = track.artist_credit ? ` · ${escapeHtml(track.artist_credit)}` : '';
 
       let priceEditHtml = '';
-      if (currentAdminListSection === 'catalog' && track.sold) {
-        priceEditHtml = `<div class="vip-sold-tag">${track.is_exclusive ? 'Vendida (Exclusiva) · en Beats VIP' : 'Vendida (Ilimitada) · fuera del catálogo'}</div>`;
+      if (currentAdminListSection === 'vendidos') {
+        const v = track.vendidaCon;
+        priceEditHtml = `<div class="vip-sold-tag">${v ? 'Vendida · ' + escapeHtml(v.licencia.replace(/^Licencia /, '')) + ' a ' + escapeHtml(v.comprador) + (v.fecha ? ' · ' + escapeHtml(String(v.fecha).slice(0, 10)) : '') + ' · ' + escapeHtml(v.pedido) : 'Vendida · fuera del catálogo'}</div>`;
       } else if (currentAdminListSection === 'catalog') {
         const licMap = {};
         (track.licenses || []).forEach(l => { licMap[l.license_type] = l.price_cup; });
@@ -1887,9 +1912,9 @@
   }));
 
   const PLAN_INFO = {
-    free:   { label: 'Free',   com: 30, beats: '5 beats' },
-    pro:    { label: 'Pro',    com: 20, beats: '50 beats' },
-    studio: { label: 'Studio', com: 10, beats: 'ilimitados' },
+    free:   { label: 'Free',   com: 30, beats: '2 beats de 3 min' },
+    pro:    { label: 'Pro',    com: 20, beats: '50 beats de 10 min' },
+    studio: { label: 'Studio', com: 10, beats: '150 beats de 20 min' },
   };
 
   function renderProducers(producers) {

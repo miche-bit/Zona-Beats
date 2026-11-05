@@ -4707,13 +4707,23 @@ route('GET', '/api/admin/tracks', (req, res, params, query) => {
     tracks = db.prepare('SELECT * FROM tracks WHERE is_playlist = 1 ORDER BY created_at DESC').all();
   } else if (type === 'vip') {
     tracks = db.prepare('SELECT * FROM tracks WHERE is_playlist = 0 AND is_pack = 0 AND is_exclusive = 1 AND sold = 1 ORDER BY created_at DESC').all();
+  } else if (type === 'vendidos') {
+    // vendidos con venta única que no son Exclusiva (esos van en Beats VIP): fuera del catálogo
+    tracks = db.prepare('SELECT * FROM tracks WHERE is_playlist = 0 AND is_pack = 0 AND sold = 1 AND is_exclusive = 0 ORDER BY created_at DESC').all();
   } else {
-    tracks = db.prepare('SELECT * FROM tracks WHERE is_playlist = 0 AND is_pack = 0 ORDER BY created_at DESC').all();
+    tracks = db.prepare('SELECT * FROM tracks WHERE is_playlist = 0 AND is_pack = 0 AND sold = 0 ORDER BY created_at DESC').all();
   }
 
+  if (query.get('solo') === 'cuenta') return sendJSON(res, 200, { cuenta: tracks.length });
   const nombres = Object.fromEntries(db.prepare('SELECT id, name FROM producers').all().map(p => [p.id, p.name]));
+  // con qué venta salió del catálogo (la última aprobada que lo cerró)
+  const ventaQueCerro = (t) => {
+    const o = db.prepare("SELECT license_type, terms_v, buyer_name, price_label, approved_at, control_code, id FROM orders WHERE track_id = ? AND status = 'approved' AND license_type IN ('basic', 'unlimited', 'exclusive') ORDER BY id DESC LIMIT 1").get(t.id);
+    return o ? { licencia: etiquetaLicencia(o.license_type, o.terms_v), comprador: o.buyer_name, precio: o.price_label, fecha: normalizarFecha(o.approved_at), pedido: codigoPedido(o) } : null;
+  };
   tracks = tracks.map(t => ({
     ...t,
+    vendidaCon: type === 'vendidos' ? ventaQueCerro(t) : undefined,
     producer_name: t.producer_id ? (nombres[t.producer_id] || 'Productor eliminado') : '',
     licenses: type === 'catalog' ? getTrackLicenses(t.id) : [],
     archivos: archivosDePista(t),

@@ -463,14 +463,14 @@ label, .ff-lbl { display: block; margin: 0 0 6px; font-size: var(--fs-sm); font-
 .mv-in { color: var(--gold); }
 .mv-out { color: var(--text); }
 .prod-filtros { display: flex; gap: 6px; margin: 0 0 10px; }
-.prod-filtro {
+.prod-filtro, .cat-filtro {
   flex: 1 1 0; min-height: 40px; padding: 0 12px; border-radius: var(--r-pill); border: 1px solid var(--line);
   color: var(--text-dim); font-size: var(--fs-sm); font-weight: 700; white-space: nowrap;
 }
-.prod-filtro:hover { color: var(--text); border-color: var(--line-strong); }
-.prod-filtro.active { background: var(--text); border-color: var(--text); color: var(--bg); }
+.prod-filtro:hover, .cat-filtro:hover { color: var(--text); border-color: var(--line-strong); }
+.prod-filtro.active, .cat-filtro.active { background: var(--text); border-color: var(--text); color: var(--bg); }
 .prod-filtro-n { font-weight: 600; opacity: 0.7; font-variant-numeric: tabular-nums; }
-@media (min-width: 640px) { .prod-filtro { flex: 0 0 auto; } }
+@media (min-width: 640px) { .prod-filtro, .cat-filtro { flex: 0 0 auto; } }
 .crear-prod { margin: 0 0 10px; border: 1px solid var(--line); border-radius: var(--r-md); }
 .crear-prod > summary {
   list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px;
