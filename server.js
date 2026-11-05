@@ -28,7 +28,8 @@ const db = require('./db');
 const { issueStreamToken, validateStreamToken } = require('./streamAuth');
 const { enviarBackup, restaurarDesdeZip, limpiarRestosRestauracion } = require('./backup');
 const { DatabaseSync } = require('node:sqlite');
-const { buildLicensePdf, buildRegistroPdf, buildPedidoPdf, buildCartaContentIdPdf, LICENSE_LABELS } = require('./license');
+const { buildLicensePdf, buildRegistroPdf, buildPedidoPdf, buildCartaContentIdPdf, buildReporteMensualPdf, LICENSE_LABELS_V2, etiquetaLicencia } = require('./license');
+const LICENSE_LABELS = LICENSE_LABELS_V2; // nombres de hoy (los de un pedido viejo salen con etiquetaLicencia y su versión)
 const almacen = require('./almacen');
 const originalidad = require('./originalidad');
 const qvapay = require('./qvapay');
@@ -42,7 +43,8 @@ function jsonObjeto(txt) {
   return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
 }
 const producerAuth = require('./producerAuth');
-const { applyWatermark, getDurationSeconds, transcodificarMp3, miniaturaImagen } = require('./watermark');
+const forense = require('./forense');
+const { applyWatermark, bitsWav, getDurationSeconds, transcodificarMp3, miniaturaImagen, cortarDemo, cortarMuestra, marcarEntrega } = require('./watermark');
 const { pipeline } = require('node:stream/promises');
 const { Transform } = require('node:stream');
 
@@ -632,7 +634,7 @@ route('POST', '/api/uploads', async (req, res) => {
     const plan = planEfectivo(full);
     if (kind === 'wav' && !plan.wav) return sendJSON(res, 403, { error: `Tu plan ${plan.label} no incluye entrega en WAV. Sube al plan Pro o Studio.` });
     if (kind === 'stems' && !plan.stems) return sendJSON(res, 403, { error: `Tu plan ${plan.label} no incluye STEMS. Solo el plan Studio permite subir STEMS.` });
-    if (kind === 'pack' && !plan.packs) return sendJSON(res, 403, { error: `Tu plan ${plan.label} no permite vender Sample Packs. Sube al plan Pro o Studio.` });
+    if (kind === 'pack' && !plan.packs) return sendJSON(res, 403, { error: `Tu plan ${plan.label} no permite vender Sample Packs. Son del plan Studio.` });
     if (kind === 'audio' && !plan.audioExt.includes(ext)) {
       return sendJSON(res, 403, { error: plan.audioExt.length === 1 ? `Tu plan ${plan.label} solo permite subir audio en MP3 (320 kbps).` : `Tu plan ${plan.label} permite subir el audio en MP3 (320 kbps) o WAV.` });
     }
@@ -766,6 +768,41 @@ function conProductor(rows) {
   return rows.map(t => ({ ...t, producer_display: t.producer_name || admin }));
 }
 
+// Prioridad por plan: Studio alta, Pro media, Free baja (los beats del administrador, alta).
+// Ordena el catálogo de la tienda, la lista de beats por revisar y la cola de verificación.
+const PRIORIDAD = { studio: 3, pro: 2, free: 1 };
+const NOMBRE_PRIORIDAD = { 3: 'alta', 2: 'media', 1: 'baja' };
+function mapaPrioridad() {
+  const m = new Map();
+  for (const p of db.prepare('SELECT id, plan, plan_paid_until FROM producers').all()) m.set(p.id, PRIORIDAD[planClave(p)] || 1);
+  return m;
+}
+const prioridadDe = (mapa, producerId) => (producerId ? (mapa.get(producerId) || 1) : 3);
+// de mayor a menor prioridad; dentro de la misma, lo más nuevo primero (o lo más viejo, para revisar)
+function ordenarPorPrioridad(rows, masViejoPrimero = false) {
+  const m = mapaPrioridad();
+  const fecha = (t) => String(t.created_at || '');
+  return rows.map((t, i) => ({ t, i, p: prioridadDe(m, t.producer_id) }))
+    .sort((a, b) => (b.p - a.p) || (masViejoPrimero ? fecha(a.t).localeCompare(fecha(b.t)) : fecha(b.t).localeCompare(fecha(a.t))) || (a.i - b.i))
+    .map(x => x.t);
+}
+
+// Licencias que ve el comprador: cada una dice si se compra ya ('ok'), si espera la verificación AudD
+// ('verificando') o si lleva el suplemento de verificación ('suplemento'). Las que no pasaron, no salen.
+const mapaOriginalidadVenta = () => new Map(db.prepare('SELECT track_id, estado, servicio, error, override_motivo FROM originalidad').all().map(o => [o.track_id, o]));
+function conLicenciasDeVenta(t, pct, origs) {
+  const sup = precioVerificacion();
+  const licenses = getTrackLicenses(t.id).map(l => {
+    const venta = estadoLicenciaVenta(t, l.license_type, origs.get(t.id) || null);
+    if (!venta) return null;
+    return { ...l, price_cup: aplicarDescuento(l.price_cup, pct), original_cup: l.price_cup, venta, ...(venta === 'suplemento' ? { suplemento_cup: sup } : {}) };
+  }).filter(Boolean);
+  const vendibles = licenses.filter(l => l.venta === 'ok' || l.venta === 'suplemento');
+  const desde = vendibles.length ? Math.min(...vendibles.map(l => l.original_cup)) : t.price_cup;
+  const { wav_filename, verif_pagada, demo_filename, ...pub } = t;
+  return { ...pub, price_cup: aplicarDescuento(desde, pct), original_cup: desde, licenses, enVerificacion: licenses.length > 0 && !vendibles.length && !licenses.some(l => l.venta === 'gratis') };
+}
+
 // GET /api/tracks?type=catalog|playlist|vip|packs
 route('GET', '/api/tracks', (req, res, params, query) => {
   const type = query.get('type') || 'catalog';
@@ -795,12 +832,13 @@ route('GET', '/api/tracks', (req, res, params, query) => {
     rows = db.prepare(`
       SELECT t.id, t.title, t.genre, t.description, t.cover_filename, t.duration_seconds, t.plays, t.likes,
              t.price_label, t.price_cup, t.for_sale, t.is_exclusive, t.sold, t.is_pack, t.created_at, t.onda,
-             t.producer_id, p.name as producer_name
+             t.producer_id, p.name as producer_name, t.wav_filename, t.verif_pagada, t.demo_filename
       FROM tracks t
       LEFT JOIN producers p ON p.id = t.producer_id
       WHERE t.is_playlist = 0 AND t.sold = 0 AND t.is_pack = ${type === 'packs' ? 1 : 0} AND t.approval_status = 'approved' AND ${FILTRO_PRODUCTOR_ACTIVO}
       ORDER BY t.created_at DESC
     `).all();
+    rows = ordenarPorPrioridad(rows);
   }
 
   const pct = descuentoActivo();
@@ -810,12 +848,9 @@ route('GET', '/api/tracks', (req, res, params, query) => {
   const conExterno = new Set(db.prepare("SELECT track_id FROM originalidad WHERE servicio != ''").all().map(r => r.track_id));
   rows = rows.map(t => ({ ...t, rating: notas.get(t.id) || null, originalidadVerificada: verificados.has(t.id), originalidadExterna: conExterno.has(t.id), producer_verificado: Boolean(t.producer_id && prodVerif.has(t.producer_id)) }));
   if (type === 'catalog' || type === 'packs') {
-    rows = rows.map(t => ({
-      ...t,
-      price_cup: aplicarDescuento(t.price_cup, pct),
-      original_cup: t.price_cup,
-      licenses: getTrackLicenses(t.id).map(l => ({ ...l, price_cup: aplicarDescuento(l.price_cup, pct), original_cup: l.price_cup })),
-    }));
+    // cada licencia dice si se puede comprar ya, si espera la verificación AudD o si lleva el suplemento de verificación
+    const origs = mapaOriginalidadVenta();
+    rows = rows.map(t => conLicenciasDeVenta(t, pct, origs));
   }
 
   sendJSON(res, 200, { tracks: conProductor(rows), discountPercent: pct });
@@ -890,7 +925,7 @@ route('GET', '/api/verify-hash/:hash', (req, res, params) => {
   if (track) {
     const profile = db.prepare('SELECT artist_name FROM profile WHERE id = 1').get();
     const licencias = db.prepare(`
-      SELECT certificate_id, license_type, created_at FROM orders
+      SELECT certificate_id, license_type, terms_v, created_at FROM orders
       WHERE track_id = ? AND status = 'approved' ORDER BY created_at ASC
     `).all(track.id);
     return sendJSON(res, 200, {
@@ -901,7 +936,7 @@ route('GET', '/api/verify-hash/:hash', (req, res, params) => {
       uploadedAt: track.created_at,
       licenciasEmitidas: licencias.map(l => ({
         certificateId: l.certificate_id,
-        licenseLabel: LICENSE_LABELS[l.license_type] || l.license_type,
+        licenseLabel: etiquetaLicencia(l.license_type, l.terms_v),
         createdAt: l.created_at,
       })),
     });
@@ -928,7 +963,7 @@ route('GET', '/api/license/:certificateId', (req, res, params) => {
     producerName: order.producer_name || (profile && profile.artist_name) || 'Zona Beats',
     buyerName: order.buyer_name,
     licenseType: order.license_type,
-    licenseLabel: LICENSE_LABELS[order.license_type] || order.license_type,
+    licenseLabel: etiquetaLicencia(order.license_type, order.terms_v),
     priceLabel: order.price_label,
     createdAt: order.created_at,
   });
@@ -945,7 +980,7 @@ function findOrderByBuyerToken(token) {
 
 // Qué archivos recibe cada licencia: Básica MP3 · Premium MP3 + WAV · Ilimitada/Exclusiva MP3 + WAV + STEMS
 function archivosDeCompra(order) {
-  const t = db.prepare('SELECT title, master_filename, mp3_filename, wav_filename, stems_filename, stems_remote, stems_size FROM tracks WHERE id = ?').get(order.track_id);
+  const t = db.prepare('SELECT title, master_filename, mp3_filename, wav_filename, stems_filename, stems_remote, stems_size, demo_filename, demo_wav_filename, mon_mp3_filename FROM tracks WHERE id = ?').get(order.track_id);
   if (!t) return [];
   const lista = [];
   const vistos = new Set();
@@ -954,7 +989,7 @@ function archivosDeCompra(order) {
     if (tipo === 'pack') return `Sample Pack (${ext.replace('.', '').toUpperCase()})`;
     return ext.replace('.', '').toUpperCase();
   };
-  const agregar = (tipo, nombre) => {
+  const agregar = (tipo, nombre, etiqueta) => {
     if (!nombre || vistos.has(nombre)) return;
     const p = path.join(UPLOADS_MASTERS, nombre);
     let st = null;
@@ -962,7 +997,7 @@ function archivosDeCompra(order) {
     if (!st) return;
     vistos.add(nombre);
     const ext = path.extname(nombre).toLowerCase();
-    lista.push({ f: tipo, etiqueta: nombreBonito(ext, tipo), nombre, path: p, ext, size: st.size, titulo: t.title });
+    lista.push({ f: tipo, etiqueta: etiqueta || nombreBonito(ext, tipo), nombre, path: p, ext, size: st.size, titulo: t.title });
   };
   // el archivo grande (pack o STEMS) puede estar en el almacenamiento externo
   const agregarGrande = (tipo) => {
@@ -973,6 +1008,28 @@ function archivosDeCompra(order) {
   };
   // un Sample Pack entrega solo el archivo comprimido del pack
   if (order.license_type === 'pack') { agregarGrande('pack'); return lista; }
+  if (Number(order.terms_v) >= 2) {
+    if (order.license_type === 'practice') {
+      // solo la demo de 1 minuto (con la marca invisible de esta compra, si ya está lista); nunca el beat completo
+      const conMarca = (ext, sinMarca) => (archivoExiste(nombreEntrega(order.id, ext)) ? nombreEntrega(order.id, ext) : sinMarca);
+      agregar('mp3', t.demo_filename && conMarca('.mp3', t.demo_filename), 'MP3 (demo 1 min)');
+      agregar('wav', t.demo_wav_filename && conMarca('.wav', t.demo_wav_filename), 'WAV (demo 1 min)');
+      if (!lista.length) programarDemo(order.track_id);
+      else if (!archivoExiste(nombreEntrega(order.id, '.mp3'))) prepararEntregaPractica(order.id).catch(() => {});
+      return lista;
+    }
+    // marca forense (Free y Studio): se entregan las copias marcadas de este pedido
+    if (order.forense === 'lista' && archivoExiste(order.forense_wav)) {
+      agregar('wav', order.forense_wav);
+      agregar('mp3', order.forense_mp3);
+    } else if (order.forense !== 'pendiente') {
+      agregar('wav', t.wav_filename);
+      // beats Free de antes (MP3 con tag): el MP3 sin tag sale del WAV sin tag que subió después
+      agregar('mp3', t.mon_mp3_filename || t.mp3_filename || t.master_filename);
+    }
+    if (['unlimited', 'exclusive'].includes(order.license_type)) agregarGrande('stems');
+    return lista;
+  }
   agregar('mp3', t.mp3_filename || t.master_filename);
   if (['premium', 'unlimited', 'exclusive'].includes(order.license_type)) agregar('wav', t.wav_filename);
   if (SINGLE_SALE_LICENSES.includes(order.license_type)) agregarGrande('stems');
@@ -996,14 +1053,18 @@ route('GET', '/api/purchase/:token', (req, res, params) => {
     status: aprobada ? 'approved' : (order.status === 'rejected' ? 'rejected' : order.status === 'esperando_pago' ? 'esperando_pago' : 'pending'),
     qvapay: order.pago_metodo === 'qvapay' ? { url: order.status === 'esperando_pago' ? order.qvapay_url : '', pagado: Boolean(order.qvapay_pagado_at) } : null,
     rejectReason: order.status === 'rejected' ? (order.reject_reason || '') : '',
+    // el artista pagó la verificación: el pago está confirmado y se espera a AudD
+    verificacion: order.status === 'pending' && order.verif_pago_ok ? (order.verif_estado === 'fallo' ? 'fallo' : 'esperando') : '',
     trackTitle: order.track_title,
     licenseType: order.license_type,
-    licenseLabel: LICENSE_LABELS[order.license_type] || order.license_type,
+    licenseLabel: etiquetaLicencia(order.license_type, order.terms_v),
     priceLabel: order.price_label,
     createdAt: normalizarFecha(order.created_at),
     certificateId: aprobada ? order.certificate_id : null,
     pdfUrl: aprobada ? `/api/license/${encodeURIComponent(order.certificate_id)}/pdf` : null,
     files: archivos.map(a => ({ f: a.f, label: a.etiqueta, size: a.size, url: `${base}?f=${a.f}` })),
+    // se están preparando los archivos con la marca forense de esta compra (tarda uno o dos minutos)
+    preparando: aprobada && order.forense === 'pendiente',
     downloadUrl: archivos.length ? `${base}?f=${archivos[0].f}` : null,
     codigo: codigoPedido(order),
     comprobanteUrl: `/api/purchase/${order.buyer_token}/comprobante`,
@@ -1014,7 +1075,7 @@ route('GET', '/api/purchase/:token', (req, res, params) => {
     resena: (() => { const r = db.prepare('SELECT * FROM resenas WHERE order_id = ?').get(order.id); return r ? { ...resenaPublica(r), oculta: Boolean(r.oculta) } : null; })(),
     contentId: aprobada ? {
       cartaUrl: `/api/purchase/${order.buyer_token}/carta-content-id`,
-      monetiza: ['unlimited', 'exclusive'].includes(order.license_type),
+      monetiza: licenciaMonetiza(order),
       reportes: db.prepare('SELECT id, plataforma, reclamante, estado, nota, created_at FROM reclamos_cid WHERE order_id = ? ORDER BY id DESC').all(order.id),
     } : null,
     adminPhone: telefonoAdmin(),
@@ -1057,7 +1118,7 @@ route('GET', '/api/tracks/:id/contrato/:tipo', (req, res, params, query) => {
   const pdf = buildLicensePdf({
     ejemplo: true, certificateId: 'LIC-MODELO', certificateHash: '0'.repeat(64), trackTitle: t.title,
     producerName: t.producer_name || (perfil && perfil.artist_name) || 'Zona Beats', buyerName: '(tu nombre)',
-    licenseType: String(params.tipo), priceLabel: etiquetaPrecioVenta(precioCup, pago), createdAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
+    licenseType: String(params.tipo), termsV: 2, priceLabel: etiquetaPrecioVenta(precioCup, pago), createdAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
     verifyUrl: `${baseUrlFrom(req)}/verify`, platformName: (perfil && perfil.artist_name) || 'Zona Beats',
   });
   res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="contrato-modelo.pdf"`, 'Content-Length': pdf.length, 'Cache-Control': 'no-store' });
@@ -1076,6 +1137,7 @@ route('GET', '/api/license/:certificateId/pdf', (req, res, params) => {
       producerName: order.producer_name || (profile && profile.artist_name) || 'Zona Beats',
       buyerName: order.buyer_name,
       licenseType: order.license_type,
+      termsV: order.terms_v,
       priceLabel: order.price_label,
       createdAt: order.created_at,
       verifyUrl: `${baseUrlFrom(req)}/verify/${order.certificate_id}`,
@@ -1169,6 +1231,8 @@ route('GET', '/api/producer/me', (req, res) => {
     puedeStems: plan.stems,
     soloMp3: Boolean(plan.audioExt && plan.audioExt.length === 1),
     previewConMarca: plan.watermarkPreview,
+    maxSegundos: plan.maxSegundos || 0,
+    muestraSegundos: plan.muestraSegundos || 0,
     beatsUsados: usados,
     socialLinks: social,
     accounts,
@@ -1181,9 +1245,13 @@ route('GET', '/api/producer/me', (req, res) => {
       maxBeats: v.maxBeats === Infinity ? null : v.maxBeats,
       priceUsd: planPriceUsd(k), priceCup: planPriceCup(k), payout: v.payout, exclusiveAuto: v.exclusiveAuto,
       wav: v.wav, stems: v.stems, social: v.social, watermarkPreview: v.watermarkPreview,
-      playlist: v.playlist, stats: v.stats, licenses: v.licenses, packs: v.packs, payoutDays: v.payoutDays,
+      playlist: v.playlist, stats: v.stats, licenses: v.licenses, packs: v.packs, payoutDays: v.payoutDays, auddMes: v.auddMes,
     })),
     planRequest: ultimaSolicitudPlan(full.id),
+    planClave: planClave(full),
+    verificacion: { precio: precioVerificacion(), creditos: creditosVerificacion(full.id), cupo: cupoAudd(full.id), externoActivo: originalidad.externoActivo() },
+    rangosFree: RANGOS_FREE,
+    preciosSugeridos: preciosSugeridos(),
     // bono Studio por me gusta, con los números que puso el administrador
     bonoLikes: (() => { const b = configBonos(); return { cada: b.likesPorBono, cup: b.bonoLikesCup }; })(),
   });
@@ -1359,6 +1427,25 @@ route('POST', '/api/producer/plan-con-saldo', async (req, res) => {
 // Un productor paga por semanas para que un beat suyo salga en el carrusel de la portada.
 // Hay cupos limitados (los pedidos en revisión apartan su cupo). El admin también puede destacar gratis.
 const HOT_SEMANAS = [1, 2, 4];
+// Hots según el plan: Free no compra Hots; Pro tiene 10 % de descuento desde 5 ventas aprobadas;
+// Studio, desde 10 ventas, tiene 1 Hot al mes con 20 % de descuento.
+const HOT_PRO_VENTAS = 5, HOT_PRO_PCT = 10, HOT_STUDIO_VENTAS = 10, HOT_STUDIO_PCT = 20;
+function beneficioHot(producerId) {
+  const k = planClave(producerFull(producerId));
+  const ventas = db.prepare("SELECT COUNT(*) as c FROM orders WHERE producer_id = ? AND status = 'approved' AND COALESCE(pago_metodo, '') != 'gratis'").get(producerId).c;
+  if (k === 'free') return { permitido: false, pct: 0, ventas, texto: 'Los Hots son de los planes Pro y Studio.' };
+  if (k === 'pro') {
+    return ventas >= HOT_PRO_VENTAS
+      ? { permitido: true, pct: HOT_PRO_PCT, ventas, texto: `Plan Pro: ${HOT_PRO_PCT} % de descuento en tus Hots.` }
+      : { permitido: true, pct: 0, ventas, texto: `Plan Pro: con ${HOT_PRO_VENTAS} ventas aprobadas tienes ${HOT_PRO_PCT} % de descuento en tus Hots (llevas ${ventas}).` };
+  }
+  if (ventas < HOT_STUDIO_VENTAS) return { permitido: true, pct: 0, ventas, texto: `Plan Studio: con ${HOT_STUDIO_VENTAS} ventas aprobadas tienes 1 Hot al mes con ${HOT_STUDIO_PCT} % de descuento (llevas ${ventas}).` };
+  const usado = db.prepare("SELECT 1 FROM hot_requests WHERE producer_id = ? AND descuento_pct > 0 AND status != 'rejected' AND created_at >= ?").get(producerId, inicioDeMes());
+  return usado
+    ? { permitido: true, pct: 0, ventas, texto: `Plan Studio: ya usaste tu Hot con ${HOT_STUDIO_PCT} % de descuento de este mes; el próximo mes tienes otro.` }
+    : { permitido: true, pct: HOT_STUDIO_PCT, ventas, texto: `Plan Studio: este Hot tiene ${HOT_STUDIO_PCT} % de descuento (1 al mes).` };
+}
+const precioHotCon = (semanalCup, semanas, pct) => Math.round(semanalCup * semanas * (1 - (pct || 0) / 100));
 const sqlFecha = (d) => d.toISOString().slice(0, 19).replace('T', ' ');
 function hotConfig() {
   const c = db.prepare('SELECT hot_price_usd, hot_slots FROM platform_config WHERE id = 1').get() || {};
@@ -1429,18 +1516,15 @@ route('GET', '/api/hots', (req, res) => {
   if (!activos.length) return sendJSON(res, 200, { hots: [] });
   const fin = Object.fromEntries(activos.map(a => [a.track_id, a.ends_at]));
   const pct = descuentoActivo();
-  const rows = db.prepare(`
+  let rows = db.prepare(`
     SELECT t.id, t.title, t.genre, t.description, t.cover_filename, t.duration_seconds, t.plays, t.likes,
-           t.price_label, t.price_cup, t.for_sale, t.is_exclusive, t.sold, t.created_at, t.producer_id, p.name as producer_name, t.onda
+           t.price_label, t.price_cup, t.for_sale, t.is_exclusive, t.sold, t.created_at, t.producer_id, p.name as producer_name, t.onda,
+           t.wav_filename, t.verif_pagada, t.demo_filename
     FROM tracks t LEFT JOIN producers p ON p.id = t.producer_id
     WHERE t.id IN (${activos.map(() => '?').join(',')}) AND ${HOT_TRACK_OK}
-  `).all(...activos.map(a => a.track_id)).map(t => ({
-    ...t,
-    hot_until: normalizarFecha(fin[t.id]),
-    price_cup: aplicarDescuento(t.price_cup, pct),
-    original_cup: t.price_cup,
-    licenses: getTrackLicenses(t.id).map(l => ({ ...l, price_cup: aplicarDescuento(l.price_cup, pct), original_cup: l.price_cup })),
-  }));
+  `).all(...activos.map(a => a.track_id));
+  const origsH = mapaOriginalidadVenta();
+  rows = rows.map(t => ({ ...conLicenciasDeVenta(t, pct, origsH), hot_until: normalizarFecha(fin[t.id]) }));
   for (let i = rows.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [rows[i], rows[j]] = [rows[j], rows[i]]; }
   sendJSON(res, 200, { hots: conProductor(rows), discountPercent: pct });
 });
@@ -1464,7 +1548,7 @@ route('GET', '/api/producer/hots', (req, res) => {
     activosMios[h.track_id] = normalizarFecha(h.fin);
   }
   sendJSON(res, 200, {
-    ...cfg, semanas: HOT_SEMANAS,
+    ...cfg, semanas: HOT_SEMANAS, beneficio: beneficioHot(producer.id),
     cupos: c.cupos, ocupados: c.ocupados, libres: c.libres, proximoLibre: c.proximoLibre,
     activos: activosMios,
     enRevision: pedidos.filter(h => h.status === 'pending').map(h => h.track_id),
@@ -1488,8 +1572,10 @@ route('POST', '/api/producer/hots/saldo', async (req, res) => {
   if (error) return sendJSON(res, 400, { error });
   const bloqueo = puedePedirHot(track.id);
   if (bloqueo) return sendJSON(res, 409, { error: bloqueo });
+  const ben = beneficioHot(producer.id);
+  if (!ben.permitido) return sendJSON(res, 403, { error: ben.texto });
   const moneda = String(d.wallet || 'CUP').slice(0, 30);
-  const totalCup = cfg.precioSemanaCup * semanas;
+  const totalCup = precioHotCon(cfg.precioSemanaCup, semanas, ben.pct);
   const costo = costoPlanEn(totalCup, moneda);
   if (!costo.ok) return sendJSON(res, 400, { error: 'Moneda no disponible. Elige otro saldo.' });
   acreditarBonos(producer.id);
@@ -1500,8 +1586,8 @@ route('POST', '/api/producer/hots/saldo', async (req, res) => {
   db.exec('BEGIN');
   let act;
   try {
-    const info = db.prepare(`INSERT INTO hot_requests (producer_id, track_id, weeks, amount_cup, currency, receipt_filename, status)
-                             VALUES (?, ?, ?, ?, ?, '', 'pending')`).run(producer.id, track.id, semanas, totalCup, `Saldo ${etiquetaMoneda(moneda)}`);
+    const info = db.prepare(`INSERT INTO hot_requests (producer_id, track_id, weeks, amount_cup, currency, receipt_filename, status, descuento_pct)
+                             VALUES (?, ?, ?, ?, ?, '', 'pending', ?)`).run(producer.id, track.id, semanas, totalCup, `Saldo ${etiquetaMoneda(moneda)}`, ben.pct);
     act = activarHot(Number(info.lastInsertRowid));
     db.prepare("INSERT INTO producer_credits (producer_id, kind, amount_cup, detail, currency, amount_units) VALUES (?, 'hot', ?, ?, ?, ?)")
       .run(producer.id, -totalCup, `Hot · ${track.title} · ${semanas} ${semanas === 1 ? 'semana' : 'semanas'}`, moneda, -costo.unidades);
@@ -1537,11 +1623,13 @@ route('POST', '/api/producer/hots', async (req, res) => {
   if (!ALLOWED_IMAGE_EXT.includes(ext)) return sendJSON(res, 400, { error: 'El comprobante debe ser una imagen (JPG, PNG o WEBP)' });
   const bloqueo = puedePedirHot(track.id, producer.id);
   if (bloqueo) return sendJSON(res, 409, { error: bloqueo });
+  const ben = beneficioHot(producer.id);
+  if (!ben.permitido) return sendJSON(res, 403, { error: ben.texto });
   const currency = limpiarTexto(fields.currency || 'CUP', 30) || 'CUP';
   const filename = `hot-${crypto.randomUUID()}${ext}`;
   fs.writeFileSync(path.join(UPLOADS_RECEIPTS, filename), receiptPart.data);
-  const info = db.prepare(`INSERT INTO hot_requests (producer_id, track_id, weeks, amount_cup, currency, receipt_filename)
-                           VALUES (?, ?, ?, ?, ?, ?)`).run(producer.id, track.id, semanas, cfg.precioSemanaCup * semanas, currency, filename);
+  const info = db.prepare(`INSERT INTO hot_requests (producer_id, track_id, weeks, amount_cup, currency, receipt_filename, descuento_pct)
+                           VALUES (?, ?, ?, ?, ?, ?, ?)`).run(producer.id, track.id, semanas, precioHotCon(cfg.precioSemanaCup, semanas, ben.pct), currency, filename, ben.pct);
   sendJSON(res, 201, { ok: true, id: Number(info.lastInsertRowid) });
 });
 
@@ -1752,20 +1840,19 @@ route('GET', '/api/producers/:id/tracks', (req, res, params) => {
   }
   let tracks = db.prepare(`
     SELECT id, title, genre, description, cover_filename, duration_seconds, plays, likes,
-           price_label, price_cup, for_sale, is_exclusive, sold, created_at, producer_id, onda
+           price_label, price_cup, for_sale, is_exclusive, sold, created_at, producer_id, onda, wav_filename, verif_pagada, demo_filename
     FROM tracks WHERE producer_id = ? AND approval_status = 'approved' AND sold = 0 AND is_playlist = 0 AND is_pack = 0
     ORDER BY created_at DESC
   `).all(params.id);
   const pct = descuentoActivo();
   const notasP = mapaResenasPorPista();
+  const origsP = mapaOriginalidadVenta();
   tracks = tracks.map(t => ({
-    ...t,
+    ...conLicenciasDeVenta(t, pct, origsP),
     rating: notasP.get(t.id) || null,
     producer_verificado: Boolean(prod.identidad_verificada_at),
     producer_name: prod.name,
     producer_display: prod.name,
-    licenses: getTrackLicenses(t.id).map(l => ({ ...l, price_cup: aplicarDescuento(l.price_cup, pct), original_cup: l.price_cup })),
-    price_cup: aplicarDescuento(t.price_cup, pct),
   }));
   sendJSON(res, 200, {
     producer: { id: prod.id, name: prod.name, bio: prod.bio || '', avatar: prod.avatar_filename || '', socialLinks: social, insignias: insigniasProductor(prod) },
@@ -1784,7 +1871,7 @@ route('GET', '/api/social-links', (req, res) => {
 // Comprueba que la pista y la licencia se pueden comprar ahora y calcula el precio de venta.
 function prepararCompra(trackId, licenseType) {
   const fallo = (status, body) => ({ status, body });
-  const track = db.prepare('SELECT id, title, for_sale, is_playlist, is_exclusive, sold, producer_id, approval_status FROM tracks WHERE id = ?').get(trackId);
+  const track = db.prepare('SELECT id, title, for_sale, is_playlist, is_exclusive, sold, producer_id, approval_status, wav_filename, verif_pagada, demo_filename FROM tracks WHERE id = ?').get(trackId);
   if (!track) return fallo(404, { error: 'Pista no encontrada' });
 
   if (track.is_playlist) {
@@ -1811,19 +1898,28 @@ function prepararCompra(trackId, licenseType) {
   if (!licenseRow) {
     return fallo(400, { error: 'Esa licencia no está disponible para esta pista' });
   }
-  return { track, priceCupAtSale: aplicarDescuento(licenseRow.price_cup, descuentoActivo()) };
+  // lo monetizable solo con la verificación AudD aprobada; la Básica del Free sin verificar, con suplemento
+  const venta = estadoLicenciaVenta(track, licenseType);
+  if (licenseType === 'practice') return fallo(400, { error: 'La Básica práctica ya no se vende.' });
+  if (!venta) return fallo(409, { error: 'Esta licencia no está disponible: el beat no pasó la verificación de originalidad.' });
+  if (venta === 'verificando') return fallo(409, { error: 'Esta licencia se habilita cuando termine la verificación de originalidad del beat. Vuelve a intentarlo más tarde.' });
+  if (licenseType === 'basic' && basicaUnicaVendida(track.id)) return fallo(409, { error: 'La Básica monetizable de este beat ya se vendió (es venta única).' });
+  const suplemento = venta === 'suplemento' ? precioVerificacion() : 0;
+  return { track, suplemento, priceCupAtSale: aplicarDescuento(licenseRow.price_cup, descuentoActivo()) + suplemento };
 }
 
 // Lo que gana el productor y lo que paga el comprador en su moneda
-function importesPedido(track, priceCupAtSale, pago) {
+// (el suplemento de verificación que paga el artista es para AudD: no entra en la ganancia del productor)
+function importesPedido(track, priceCupAtSale, pago, suplemento = 0) {
   let commissionPercent = 0;
   let producerEarning = 0;
+  const parte = priceCupAtSale > 0 ? Math.max(0, priceCupAtSale - suplemento) / priceCupAtSale : 1;
   if (track.producer_id) {
     commissionPercent = planEfectivo(producerFull(track.producer_id)).commission;
-    producerEarning = priceCupAtSale * (1 - commissionPercent / 100);
+    producerEarning = (priceCupAtSale - suplemento) * (1 - commissionPercent / 100);
   }
   return { commissionPercent, producerEarning: redondear(producerEarning),
-    producerEarningUnits: track.producer_id ? redondearMoneda(pago.unidades * (1 - commissionPercent / 100), pago.moneda) : 0 };
+    producerEarningUnits: track.producer_id ? redondearMoneda(pago.unidades * parte * (1 - commissionPercent / 100), pago.moneda) : 0 };
 }
 
 route('POST', '/api/orders', async (req, res) => {
@@ -1872,7 +1968,7 @@ route('POST', '/api/orders', async (req, res) => {
 
   const prep = prepararCompra(trackId, licenseType);
   if (prep.status) return sendJSON(res, prep.status, prep.body);
-  const { track, priceCupAtSale } = prep;
+  const { track, priceCupAtSale, suplemento } = prep;
 
   const receiptExt = safeExt(receiptPart.filename, '.jpg');
   if (!ALLOWED_IMAGE_EXT.includes(receiptExt)) {
@@ -1886,16 +1982,9 @@ route('POST', '/api/orders', async (req, res) => {
   fs.writeFileSync(path.join(UPLOADS_RECEIPTS, receiptFilename), receiptPart.data);
   const receiptHash = crypto.createHash('sha256').update(receiptPart.data).digest('hex');
 
-  let commissionPercent = 0;
-  let producerEarning = 0;
-  if (track.producer_id) {
-    const prodRow = producerFull(track.producer_id);
-    const plan = planEfectivo(prodRow);
-    commissionPercent = plan.commission;
-    producerEarning = priceCupAtSale * (1 - commissionPercent / 100);
-  }
   // Lo que el comprador pagó en SU moneda, con la tasa de ese momento (va a la billetera del productor en esa moneda)
   const pago = montoEnMoneda(priceCupAtSale, currency);
+  const imp = importesPedido(track, priceCupAtSale, pago, suplemento);
 
   const buyerToken = crypto.randomBytes(24).toString('hex');
   db.prepare(`
@@ -1905,10 +1994,11 @@ route('POST', '/api/orders', async (req, res) => {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     track.id, track.title, etiquetaPrecioVenta(priceCupAtSale, pago), currency, buyerName, buyerPhone, receiptFilename,
-    track.producer_id || null, priceCupAtSale, commissionPercent, redondear(producerEarning), licenseType, buyerToken, vipPublico,
-    pago.moneda, pago.unidades, pago.tasa, track.producer_id ? redondearMoneda(pago.unidades * (1 - commissionPercent / 100), pago.moneda) : 0
+    track.producer_id || null, priceCupAtSale, imp.commissionPercent, imp.producerEarning, licenseType, buyerToken, vipPublico,
+    pago.moneda, pago.unidades, pago.tasa, imp.producerEarningUnits
   );
-  db.prepare('UPDATE orders SET transaction_ref = ?, receipt_hash = ? WHERE buyer_token = ?').run(transaccion, receiptHash, buyerToken);
+  db.prepare('UPDATE orders SET transaction_ref = ?, receipt_hash = ?, terms_v = ?, verif_suplemento = ? WHERE buyer_token = ?').run(transaccion, receiptHash, TERMS_V, suplemento, buyerToken);
+  if (suplemento) db.prepare("UPDATE orders SET price_label = price_label || ' (incluye la verificación)' WHERE buyer_token = ?").run(buyerToken);
   const nuevaOrden = db.prepare('SELECT * FROM orders WHERE buyer_token = ?').get(buyerToken);
   const codigo = codigoPedido(nuevaOrden);
 
@@ -1932,11 +2022,11 @@ route('POST', '/api/orders/qvapay', async (req, res) => {
 
   const prep = prepararCompra(trackId, licenseType);
   if (prep.status) return sendJSON(res, prep.status, prep.body);
-  const { track, priceCupAtSale } = prep;
+  const { track, priceCupAtSale, suplemento } = prep;
   const pago = montoEnMoneda(priceCupAtSale, 'QVAPAY');
   if (pago.moneda !== 'QVAPAY' || !(pago.unidades > 0)) return sendJSON(res, 503, { error: 'El pago con QvaPay no está disponible en este momento.' });
   if (pago.unidades > 100000) return sendJSON(res, 400, { error: 'El importe supera el máximo que admite QvaPay.' });
-  const imp = importesPedido(track, priceCupAtSale, pago);
+  const imp = importesPedido(track, priceCupAtSale, pago, suplemento);
 
   const buyerToken = crypto.randomBytes(24).toString('hex');
   const info = db.prepare(`
@@ -1948,6 +2038,8 @@ route('POST', '/api/orders/qvapay', async (req, res) => {
     track.producer_id || null, priceCupAtSale, imp.commissionPercent, imp.producerEarning, licenseType, buyerToken, vipPublico,
     pago.unidades, pago.tasa, imp.producerEarningUnits);
   const orderId = Number(info.lastInsertRowid);
+  db.prepare('UPDATE orders SET terms_v = ?, verif_suplemento = ? WHERE id = ?').run(TERMS_V, suplemento, orderId);
+  if (suplemento) db.prepare("UPDATE orders SET price_label = price_label || ' (incluye la verificación)' WHERE id = ?").run(orderId);
   const orden = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
   const base = baseUrlFrom(req);
   let factura;
@@ -2001,7 +2093,7 @@ route('POST', '/api/pagos/qvapay/webhook', async (req, res) => {
     db.prepare("UPDATE orders SET status = 'pending', qvapay_error = ? WHERE id = ?").run(String(r.body.error || 'No se pudo entregar'), order.id);
     return sendJSON(res, 200, { received: true, review: true });
   }
-  anotar(order.producer_id, 'Venta cobrada con QvaPay', `«${order.track_title}» · ${LICENSE_LABELS[order.license_type] || order.license_type} · ${order.price_label}`, order.track_id);
+  anotar(order.producer_id, 'Venta cobrada con QvaPay', `«${order.track_title}» · ${etiquetaLicencia(order.license_type, order.terms_v)} · ${order.price_label}`, order.track_id);
   sendJSON(res, 200, { received: true });
 });
 
@@ -2270,7 +2362,7 @@ route('GET', '/api/purchase/:token/comprobante', (req, res, params) => {
   const codigo = codigoPedido(order);
   const pdf = buildPedidoPdf({
     codigo, titulo: order.track_title, esPack: order.license_type === 'pack',
-    licencia: LICENSE_LABELS[order.license_type] || order.license_type, precio: order.price_label,
+    licencia: etiquetaLicencia(order.license_type, order.terms_v), precio: order.price_label,
     comprador: order.buyer_name, fecha: order.created_at, estado: ESTADO_PEDIDO[order.status] || order.status,
     horas: cfg.horas, titular: cfg.titular, figura: cfg.figura, contacto: telefonoAdmin(),
     verifyUrl: `${baseUrlFrom(req)}/verify/${codigo}`, platformName: (perfil && perfil.artist_name) || 'Zona Beats',
@@ -2285,7 +2377,7 @@ route('GET', '/api/pedido/:codigo', (req, res, params) => {
   const o = db.prepare('SELECT * FROM orders WHERE control_code = ?').get(String(params.codigo || '').toUpperCase());
   if (!o) return sendJSON(res, 404, { error: 'No existe un pedido con ese código' });
   sendJSON(res, 200, {
-    codigo: o.control_code, titulo: o.track_title, licencia: LICENSE_LABELS[o.license_type] || o.license_type,
+    codigo: o.control_code, titulo: o.track_title, licencia: etiquetaLicencia(o.license_type, o.terms_v),
     precio: o.price_label, fecha: o.created_at, estado: o.status, estadoTexto: ESTADO_PEDIDO[o.status] || o.status,
     certificateId: o.status === 'approved' ? o.certificate_id : null,
   });
@@ -2316,7 +2408,7 @@ route('POST', '/api/admin/orders/:id/reclamo-atendido', (req, res, params) => {
 
 // --- datos públicos de la tienda: quién vende y cifras reales
 function minutosAprobacion() {
-  const filas = db.prepare("SELECT created_at, approved_at FROM orders WHERE status = 'approved' AND approved_at != '' AND approved_at IS NOT NULL AND created_at > datetime('now', '-90 days')").all();
+  const filas = db.prepare("SELECT created_at, approved_at FROM orders WHERE status = 'approved' AND COALESCE(pago_metodo, '') != 'gratis' AND approved_at != '' AND approved_at IS NOT NULL AND created_at > datetime('now', '-90 days')").all();
   const mins = filas.map(o => (fechaUtc(o.approved_at) - fechaUtc(o.created_at)) / 60000).filter(m => Number.isFinite(m) && m >= 0).sort((a, b) => a - b);
   if (!mins.length) return null;
   const mitad = Math.floor(mins.length / 2);
@@ -2325,7 +2417,7 @@ function minutosAprobacion() {
 
 route('GET', '/api/confianza', (req, res) => {
   const cfg = confianzaConfig();
-  const entregadas = db.prepare("SELECT COUNT(*) as c FROM orders WHERE status = 'approved'").get().c;
+  const entregadas = db.prepare("SELECT COUNT(*) as c FROM orders WHERE status = 'approved' AND COALESCE(pago_metodo, '') != 'gratis'").get().c;
   const productores = db.prepare('SELECT COUNT(*) as c FROM producers WHERE approved = 1 AND active = 1').get().c;
   const primera = db.prepare("SELECT MIN(created_at) as f FROM orders WHERE status = 'approved'").get().f || '';
   sendJSON(res, 200, {
@@ -2489,6 +2581,7 @@ route('GET', '/api/producer/check', (req, res) => {
 route('GET', '/api/producer/tracks', (req, res) => {
   const producer = getAuthedProducer(req);
   if (!producer) return sendJSON(res, 401, { error: 'No autorizado' });
+  const fullP = producerFull(producer.id);
   const tracks = db.prepare('SELECT * FROM tracks WHERE producer_id = ? AND is_pack = 0 ORDER BY created_at DESC').all(producer.id).map(t => ({
     id: t.id, title: t.title, genre: t.genre, description: t.description, artist_credit: t.artist_credit,
     cover_filename: t.cover_filename, plays: t.plays, likes: t.likes, price_label: t.price_label, price_cup: t.price_cup,
@@ -2497,10 +2590,14 @@ route('GET', '/api/producer/tracks', (req, res) => {
     onda: t.onda && t.onda !== '-' ? t.onda : '',
     licenses: getTrackLicenses(t.id),
     archivos: archivosDePista(t),
-    ventas: db.prepare("SELECT COUNT(*) as c FROM orders WHERE track_id = ? AND status = 'approved'").get(t.id).c,
+    ventas: db.prepare("SELECT COUNT(*) as c FROM orders WHERE track_id = ? AND status = 'approved' AND COALESCE(pago_metodo, '') != 'gratis'").get(t.id).c,
     registro: (db.prepare('SELECT codigo FROM registros WHERE track_id = ?').get(t.id) || {}).codigo || '',
     originalidad: originalidadPublica(t.id, false),
     rating: resumenResenas('track_id', t.id),
+    monet: monetDePista(t, fullP),
+    basicaVendida: basicaUnicaVendida(t.id),
+    muestraInicio: Number(t.muestra_inicio) >= 0 ? Number(t.muestra_inicio) : null,
+    pausaFree: t.pausa_free || '',
   }));
   sendJSON(res, 200, { tracks });
 });
@@ -2520,6 +2617,7 @@ route('POST', '/api/producer/tracks/:id', async (req, res, params) => {
   const full = producerFull(producer.id);
   const titulo = limpiarTexto(d.title, 120);
   if (!titulo) return sendJSON(res, 400, { error: 'El título no puede quedar vacío' });
+  let avisosPrecio = [];
 
   if (!track.is_playlist) {
     const precios = parseLicensePrices(d);
@@ -2530,6 +2628,10 @@ route('POST', '/api/producer/tracks/:id', async (req, res, params) => {
     }
     const validacion = validateLicenseCombination(precios);
     if (!validacion.ok) return sendJSON(res, 400, { error: validacion.error });
+    const rg = revisarRangos(precios, planClave(full));
+    if (rg.error) return sendJSON(res, 400, { error: rg.error });
+    avisosPrecio = rg.avisos;
+    if (precios.basic > 0 && basicaUnicaVendida(track.id)) return sendJSON(res, 409, { error: 'La Básica monetizable de este beat ya se vendió (es venta única). Puedes seguir vendiendo la práctica.' });
     const falta = faltanArchivosPara(precios, archivosDePista(track));
     if (falta) return sendJSON(res, 400, { error: falta + ' Súbelo de nuevo como un beat nuevo con todos los archivos.' });
     if (validacion.isExclusive) {
@@ -2538,13 +2640,23 @@ route('POST', '/api/producer/tracks/:id', async (req, res, params) => {
     }
     aplicarPrecios(track.id, precios, validacion);
   }
-  const volverARevision = track.approval_status === 'rejected';
+  // un beat pausado por las reglas nuevas del Free vuelve solo al subir su WAV sin tag
+  const volverARevision = track.approval_status === 'rejected' && !track.pausa_free;
+  // Free: el productor puede cambiar desde qué segundo suena la muestra de 1 minuto
+  let muestraCambio = false;
+  if (getPlan(full).muestraSegundos && !track.is_playlist && d.muestraInicio !== undefined && d.muestraInicio !== null && d.muestraInicio !== '') {
+    const nuevo = Math.max(0, Math.round(Number(d.muestraInicio) || 0));
+    if (nuevo !== Number(track.muestra_inicio)) {
+      try { await regenerarMuestra(track.id, nuevo); muestraCambio = true; }
+      catch (e) { console.error('Muestra:', e.message); return sendJSON(res, 500, { error: 'No se pudo rehacer la muestra de 1 minuto.' }); }
+    }
+  }
   db.prepare(`UPDATE tracks SET title = ?, genre = ?, description = ?, artist_credit = ?,
               approval_status = CASE WHEN ? THEN 'pending' ELSE approval_status END,
               rejection_reason = CASE WHEN ? THEN '' ELSE rejection_reason END WHERE id = ?`)
     .run(titulo, limpiarTexto(d.genre, 60), limpiarTexto(d.description, 1000), track.is_playlist ? limpiarTexto(d.artistCredit, 120) : '',
       volverARevision ? 1 : 0, volverARevision ? 1 : 0, track.id);
-  sendJSON(res, 200, { ok: true, reenviado: volverARevision });
+  sendJSON(res, 200, { ok: true, reenviado: volverARevision, avisos: avisosPrecio, muestraCambio });
 });
 
 route('DELETE', '/api/producer/tracks/:id', (req, res, params) => {
@@ -2553,7 +2665,7 @@ route('DELETE', '/api/producer/tracks/:id', (req, res, params) => {
   const track = db.prepare('SELECT * FROM tracks WHERE id = ? AND producer_id = ?').get(params.id, producer.id);
   if (!track) return sendJSON(res, 404, { error: 'Beat no encontrado' });
 
-  const soldCount = db.prepare("SELECT COUNT(*) as c FROM orders WHERE track_id = ? AND status = 'approved'").get(params.id).c;
+  const soldCount = db.prepare("SELECT COUNT(*) as c FROM orders WHERE track_id = ? AND status = 'approved' AND COALESCE(pago_metodo, '') != 'gratis'").get(params.id).c;
   if (track.sold || soldCount > 0) {
     return sendJSON(res, 409, { error: 'No puedes eliminar un beat que ya tiene ventas aprobadas' });
   }
@@ -2575,7 +2687,7 @@ route('GET', '/api/producer/earnings', (req, res) => {
   const orders = db.prepare(`
     SELECT o.*, t.title as current_title FROM orders o
     LEFT JOIN tracks t ON t.id = o.track_id
-    WHERE o.producer_id = ? ORDER BY o.created_at DESC
+    WHERE o.producer_id = ? AND COALESCE(o.pago_metodo, '') != 'gratis' ORDER BY o.created_at DESC
   `).all(producer.id);
 
   const approved = orders.filter(o => o.status === 'approved');
@@ -2677,6 +2789,7 @@ function mp3KbpsArchivo(filePath, size) {
 
 // Crea una pista a partir de archivos ya subidos por partes. Valida TODO antes de tocar los archivos,
 // así si falta algo (por ejemplo el WAV) la persona corrige y reenvía sin volver a subir el resto.
+const formatoMinutos = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')} min`;
 async function crearPistaDesdeSubidas(d, owner, opts = {}) {
   const titulo = limpiarTexto(d.title, 120);
   if (!titulo) throw { status: 400, error: 'Ponle título al beat' };
@@ -2686,7 +2799,7 @@ async function crearPistaDesdeSubidas(d, owner, opts = {}) {
   const esPlaylist = d.isPlaylist === true || d.isPlaylist === 1 || d.isPlaylist === '1' || d.isPlaylist === 'true';
   if (esPlaylist && opts.allowPlaylist === false) throw { status: 403, error: 'La Playlist es solo del plan Studio.' };
 
-  const precios = esPlaylist ? { basic: 0, premium: 0, unlimited: 0, exclusive: 0 } : parseLicensePrices(d);
+  const precios = esPlaylist ? { practice: 0, basic: 0, premium: 0, unlimited: 0, exclusive: 0 } : parseLicensePrices(d);
   let validacion = { ok: true, offered: [], isExclusive: false };
   if (!esPlaylist) {
     if (opts.allowedLicenses) {
@@ -2697,6 +2810,11 @@ async function crearPistaDesdeSubidas(d, owner, opts = {}) {
     }
     validacion = validateLicenseCombination(precios);
     if (!validacion.ok) throw { status: 400, error: validacion.error };
+    if (opts.planKey) {
+      const rg = revisarRangos(precios, opts.planKey);
+      if (rg.error) throw { status: 400, error: rg.error };
+      validacion.avisos = rg.avisos;
+    }
   }
 
   const audio = tomarSubida(d.audioUploadId, owner, 'audio');
@@ -2716,6 +2834,7 @@ async function crearPistaDesdeSubidas(d, owner, opts = {}) {
 
   const hayWav = Boolean(wav) || audio.ext === '.wav';
   if (!esPlaylist) {
+    if (precios.basic > 0 && !hayWav) throw { status: 400, error: 'La Básica monetizable entrega el WAV y el MP3 sin tag: sube el archivo WAV (es obligatorio).' };
     if (precios.premium > 0 && !hayWav) throw { status: 400, error: 'Pusiste precio a la licencia Premium: sube el archivo WAV (es obligatorio).' };
     if ((precios.unlimited > 0 || precios.exclusive > 0) && (!hayWav || !stems)) {
       throw { status: 400, error: 'Pusiste precio a la licencia Ilimitada o Exclusiva: sube el WAV y los STEMS, son obligatorios.' };
@@ -2726,8 +2845,27 @@ async function crearPistaDesdeSubidas(d, owner, opts = {}) {
     if (kbps && kbps < 310) throw { status: 400, error: `El MP3 tiene que ser de 320 kbps y este es de ${kbps} kbps. Expórtalo de nuevo a 320 kbps.` };
   }
 
+  // productores: el WAV de entrega es de 24 bits
+  if (opts.requireWav24) {
+    for (const a of [audio, wav].filter(x => x && x.ext === '.wav')) {
+      const bits = await bitsWav(a.path);
+      if (bits && bits < 24) throw { status: 400, error: `El WAV tiene que ser de 24 bits y este es de ${bits} bits. Expórtalo de nuevo a 24 bits.` };
+    }
+  }
+  // duración máxima por beat según el plan (Free 3, Pro 10, Studio 20 minutos), en el MP3 y en el WAV
+  let muestraInicio = 0;
+  if (opts.maxSegundos) {
+    for (const a of [audio, wav].filter(Boolean)) {
+      let seg = 0;
+      try { seg = await getDurationSeconds(a.path); } catch { seg = 0; }
+      if (seg > opts.maxSegundos + 1) throw { status: 400, error: `En el plan ${opts.planLabel} cada beat dura como máximo ${opts.maxSegundos / 60} minutos (este dura ${formatoMinutos(seg)}). Recórtalo${opts.planKey === 'studio' ? '' : ' o sube de plan'}.` };
+    }
+  }
+  if (opts.muestraSegundos) muestraInicio = Math.max(0, Math.round(Number(d.muestraInicio) || 0));
+
   // --- a partir de aquí se mueven archivos: si algo falla se deshace todo
-  return conCupoAudio(() => procesarPista({ titulo, genero, descripcion, credito, esPlaylist, precios, validacion, audio, cover, wav, stems }, opts));
+  const r = await conCupoAudio(() => procesarPista({ titulo, genero, descripcion, credito, esPlaylist, precios, validacion, audio, cover, wav, stems }, { ...opts, muestraInicio }));
+  return r;
 }
 
 async function procesarPista({ titulo, genero, descripcion, credito, esPlaylist, precios, validacion, audio, cover, wav, stems }, opts) {
@@ -2810,10 +2948,26 @@ async function procesarPista({ titulo, genero, descripcion, credito, esPlaylist,
     let duracion = 0;
     try { duracion = Math.round(await getDurationSeconds(masterPath)); } catch { duracion = 0; }
 
+    // Plan Free: en la tienda solo se escucha 1 minuto, desde el segundo que eligió el productor
+    if (opts.muestraSegundos && !esPlaylist) {
+      const inicio = Math.min(Math.max(0, opts.muestraInicio || 0), Math.max(0, duracion - opts.muestraSegundos));
+      opts.muestraInicio = inicio;
+      const corto = `${crypto.randomUUID()}.mp3`;
+      try {
+        await cortarMuestra(path.join(UPLOADS_AUDIO, audioFilename), path.join(UPLOADS_AUDIO, corto), inicio, opts.muestraSegundos);
+        creados.push([UPLOADS_AUDIO, corto]);
+        try { fs.unlinkSync(path.join(UPLOADS_AUDIO, audioFilename)); } catch { /* nada */ }
+        audioFilename = corto;
+      } catch (e) {
+        console.error('Muestra de 1 minuto:', e.message);
+        throw { status: 500, error: 'No se pudo preparar la muestra de 1 minuto. Verifica que el archivo no esté dañado.' };
+      }
+    }
+
     return {
       titulo, genero, descripcion, credito, esPlaylist, precios, validacion,
       masterFilename, masterHash, coverFilename, wavFilename, wavHash, stemsFilename, stemsHash,
-      mp3Filename, mp3Hash, audioFilename, duracion, conMarca,
+      mp3Filename, mp3Hash, audioFilename, duracion, conMarca, muestraInicio: opts.muestraSegundos ? opts.muestraInicio || 0 : null,
       deshacer: quitarCreados,
     };
   } catch (err) {
@@ -2829,6 +2983,7 @@ function archivosDePista(t) {
 
 // Revisa que cada licencia con precio tenga el archivo que entrega.
 function faltanArchivosPara(precios, archivos) {
+  if (precios.basic > 0 && !archivos.wav) return 'La Básica monetizable entrega el WAV sin tag y este beat no lo tiene subido.';
   if (precios.premium > 0 && !archivos.wav) return 'La licencia Premium entrega el WAV y este beat no tiene WAV subido.';
   if ((precios.unlimited > 0 || precios.exclusive > 0) && (!archivos.wav || !archivos.stems)) {
     return 'Las licencias Ilimitada y Exclusiva entregan WAV y STEMS, y este beat no los tiene subidos.';
@@ -2867,29 +3022,48 @@ function insertarPista(r, { producerId, estado }) {
   );
   const trackId = Number(result.lastInsertRowid);
   if (!r.esPlaylist) saveLicensesForTrack(trackId, r.precios);
+  if (r.muestraInicio !== null && r.muestraInicio !== undefined) db.prepare('UPDATE tracks SET muestra_inicio = ? WHERE id = ?').run(r.muestraInicio, trackId);
   return trackId;
 }
 
 const PRODUCER_PLANS = {
   free: {
-    label: 'Free', commission: 30, maxBeats: 5, watermarkPreview: true, exclusiveAuto: false,
-    payout: '7-14 días', payoutDays: 14, audioExt: ['.mp3'], wav: false, stems: false,
-    social: false, playlist: false, stats: false, packs: false, licenses: ['basic'],
+    // Free: 2 beats de 3 minutos como máximo, WAV + MP3 sin tag verificados con AudD al subir (gratis),
+    // venta única de la Básica monetizable y en la tienda solo una muestra de 1 minuto elegida por el productor
+    label: 'Free', commission: 30, maxBeats: 2, watermarkPreview: true, exclusiveAuto: false,
+    payout: '14 días', payoutDays: 14, audioExt: ['.mp3', '.wav'], wav: true, stems: false,
+    social: false, playlist: false, stats: false, packs: false, licenses: ['basic'], auddMes: 6,
+    maxSegundos: 180, muestraSegundos: 60, forense: true,
   },
   pro: {
+    // Pro: 50 beats de 10 minutos como máximo, solo Premium, sin marca forense ni Sample Packs
     label: 'Pro', commission: 20, maxBeats: 50, watermarkPreview: false, exclusiveAuto: false,
-    payout: '3 días', payoutDays: 3, audioExt: ['.mp3', '.wav'], wav: true, stems: false,
-    social: true, playlist: false, stats: true, packs: true, licenses: ['basic', 'premium'],
+    payout: '7 días', payoutDays: 7, audioExt: ['.mp3', '.wav'], wav: true, stems: false,
+    social: true, playlist: false, stats: true, packs: false, licenses: ['premium'], auddMes: 50,
+    maxSegundos: 600,
   },
   studio: {
-    label: 'Studio', commission: 10, maxBeats: Infinity, watermarkPreview: false, exclusiveAuto: true,
+    // Studio: 150 beats de 20 minutos como máximo, Premium, Ilimitada y Exclusiva, con marca forense
+    label: 'Studio', commission: 10, maxBeats: 150, watermarkPreview: false, exclusiveAuto: true,
     payout: '24 horas', payoutDays: 1, audioExt: ['.mp3', '.wav'], wav: true, stems: true,
-    social: true, playlist: true, stats: true, packs: true, licenses: ['basic', 'premium', 'unlimited', 'exclusive'],
+    social: true, playlist: true, stats: true, packs: true, licenses: ['premium', 'unlimited', 'exclusive'], auddMes: 150, forense: true,
+    maxSegundos: 1200,
   },
 };
 
 // Plazo para pagar retiros: el admin lo cambia por plan en Productores → Planes, bonos y retiros
-const PLAZOS_FABRICA = { free: 14, pro: 3, studio: 1 };
+const PLAZOS_FABRICA = { free: 14, pro: 7, studio: 1 };
+// una sola vez: el plan Pro pasa de 3 a 7 días (si el admin lo tenía en 3, el valor de antes)
+(function migrarPlazoPro() {
+  if (db.prepare("SELECT 1 FROM app_secrets WHERE clave = 'mig_plazo_pro_7'").get()) return;
+  let g = {};
+  try { g = JSON.parse(db.prepare('SELECT payout_days_json FROM platform_config WHERE id = 1').get().payout_days_json || '{}') || {}; } catch { g = {}; }
+  if (!g.pro || Number(g.pro) === 3) {
+    g.pro = 7;
+    db.prepare('UPDATE platform_config SET payout_days_json = ? WHERE id = 1').run(JSON.stringify(g));
+  }
+  db.prepare("INSERT INTO app_secrets (clave, valor) VALUES ('mig_plazo_pro_7', datetime('now'))").run();
+})();
 function plazoTexto(dias) { return dias === 1 ? '24 horas' : `${dias} días`; }
 function plazosRetiro() {
   let guardado = {};
@@ -2943,6 +3117,12 @@ function getPlan(producerRow) {
 // Plan que realmente aplica hoy: si el plan pagado venció, cobra como Free.
 function planEfectivo(producerRow) {
   return planVigente(producerRow) ? getPlan(producerRow) : PRODUCER_PLANS.free;
+}
+// 'free' | 'pro' | 'studio' según el plan que rige hoy (un plan vencido cuenta como Free)
+function planClave(producerRow) {
+  if (!producerRow) return 'free';
+  const k = producerRow.plan || 'free';
+  return PRODUCER_PLANS[k] && planVigente(producerRow) ? k : 'free';
 }
 
 function planVigente(producerRow) {
@@ -3064,11 +3244,52 @@ function aplicarDescuento(precio, pct) {
   return Math.round(precio * (1 - pct / 100));
 }
 
-const LICENSE_TYPES = ['basic', 'premium', 'unlimited', 'exclusive'];
+const LICENSE_TYPES = ['practice', 'basic', 'premium', 'unlimited', 'exclusive'];
+// Términos 1 (pedidos viejos): la Ilimitada y la Exclusiva cerraban el beat. Términos 2: solo la Exclusiva
+// lo cierra; la Básica monetizable es única (se retira esa licencia y la práctica sigue a la venta).
 const SINGLE_SALE_LICENSES = ['unlimited', 'exclusive'];
+const MONETIZABLES = ['basic', 'premium', 'unlimited', 'exclusive'];
+const LICENCIAS_ADMIN = ['premium', 'unlimited', 'exclusive'];
+const TERMS_V = 2;
+const cierraElBeat = (o) => (Number(o.terms_v) >= 2 ? o.license_type === 'exclusive' : SINGLE_SALE_LICENSES.includes(o.license_type));
+const licenciaMonetiza = (o) => (Number(o.terms_v) >= 2 ? MONETIZABLES.includes(o.license_type) : ['unlimited', 'exclusive'].includes(o.license_type));
+// Rangos del plan Free (CUP). Pro y Studio no tienen mínimo ni máximo: solo precio sugerido y aviso si es muy bajo.
+// Plan Free: la Básica monetizable tiene precio mínimo y no tiene techo (null = sin máximo).
+// La Básica práctica ya no se vende: queda solo para entregar los pedidos viejos.
+const RANGOS_FREE = { basic: [1900, null] };
+const SUGERIDOS_FABRICA = { premium: 3000, unlimited: 6000, exclusive: 15000 };
+function preciosSugeridos() {
+  const c = db.prepare('SELECT precios_sugeridos_json FROM platform_config WHERE id = 1').get();
+  let j = {};
+  try { j = JSON.parse((c && c.precios_sugeridos_json) || '{}'); } catch { j = {}; }
+  return Object.fromEntries(Object.entries(SUGERIDOS_FABRICA).map(([k, v]) => [k, Number(j[k]) > 0 ? Number(j[k]) : v]));
+}
+function precioVerificacion() {
+  const c = db.prepare('SELECT verif_precio_cup FROM platform_config WHERE id = 1').get();
+  return Math.max(0, Number(c && c.verif_precio_cup) || 0) || 1000;
+}
+// Revisa los precios según el plan: los rangos del Free son obligatorios; en Pro y Studio solo se avisa.
+function revisarRangos(precios, planKey) {
+  const avisos = [];
+  const fmt = (n) => Number(n).toLocaleString('es');
+  if (planKey === 'free') {
+    for (const [t, [min, max]] of Object.entries(RANGOS_FREE)) {
+      if (precios[t] > 0 && (precios[t] < min || (max && precios[t] > max))) {
+        return { error: max ? `${LICENSE_LABELS[t]}: en el plan Free va de ${fmt(min)} a ${fmt(max)} CUP.` : `${LICENSE_LABELS[t]}: en el plan Free cuesta como mínimo ${fmt(min)} CUP.` };
+      }
+    }
+  } else if (planKey === 'pro' || planKey === 'studio') {
+    const sug = preciosSugeridos();
+    for (const t of ['premium', 'unlimited', 'exclusive']) {
+      if (precios[t] > 0 && precios[t] < sug[t] * 0.5) avisos.push(`${LICENSE_LABELS[t]} a ${fmt(precios[t])} CUP está muy por debajo del precio sugerido (${fmt(sug[t])} CUP).`);
+    }
+  }
+  return { avisos };
+}
 
 function parseLicensePrices(fields) {
   return {
+    practice: 0,
     basic: parsePrecio(fields.priceBasic),
     premium: parsePrecio(fields.pricePremium),
     unlimited: parsePrecio(fields.priceUnlimited),
@@ -3177,7 +3398,7 @@ function mapaResenasPorPista() {
 }
 function insigniasProductor(p) {
   if (!p) return null;
-  const ventas = db.prepare("SELECT COUNT(*) as c FROM orders WHERE producer_id = ? AND status = 'approved'").get(p.id).c;
+  const ventas = db.prepare("SELECT COUNT(*) as c FROM orders WHERE producer_id = ? AND status = 'approved' AND COALESCE(pago_metodo, '') != 'gratis'").get(p.id).c;
   return {
     identidadVerificada: Boolean(p.identidad_verificada_at), verificadaEl: p.identidad_verificada_at || '',
     miembroDesde: p.created_at || '', ventasEntregadas: ventas, resenas: resumenResenas('producer_id', p.id),
@@ -3274,8 +3495,8 @@ route('GET', '/api/purchase/:token/carta-content-id', (req, res, params) => {
   const pdf = buildCartaContentIdPdf({
     certificateId: order.certificate_id, certificateHash: order.certificate_hash, trackTitle: order.track_title,
     producerName: (prod && prod.name) || (perfil && perfil.artist_name) || 'Zona Beats', buyerName: order.buyer_name,
-    licenseType: order.license_type, createdAt: order.approved_at ? String(order.approved_at).slice(0, 19).replace('T', ' ') : order.created_at,
-    monetiza: ['unlimited', 'exclusive'].includes(order.license_type),
+    licenseType: order.license_type, termsV: order.terms_v, createdAt: order.approved_at ? String(order.approved_at).slice(0, 19).replace('T', ' ') : order.created_at,
+    monetiza: licenciaMonetiza(order),
     verifyUrl: `${baseUrlFrom(req)}/verify/${order.certificate_id}`, platformName: (perfil && perfil.artist_name) || 'Zona Beats',
     contacto: telefonoAdmin(), titular: cfg.titular,
   });
@@ -3298,16 +3519,16 @@ route('POST', '/api/purchase/:token/content-id', async (req, res, params) => {
   const detalle = limpiarTexto(d.detalle, 800);
   db.prepare('INSERT INTO reclamos_cid (order_id, track_id, producer_id, track_title, plataforma, reclamante, enlace, detalle) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
     .run(order.id, order.track_id, order.producer_id || null, order.track_title, plataforma, reclamante, enlace, detalle);
-  anotar(order.producer_id, 'Un comprador reportó un reclamo de Content ID', `«${order.track_title}» · ${LICENSE_LABELS[order.license_type] || order.license_type} · en ${plataforma} · reclama: ${reclamante}. Si el reclamo es tuyo o de tu distribuidora, libéralo: el comprador tiene licencia.`, order.track_id);
+  anotar(order.producer_id, 'Un comprador reportó un reclamo de Content ID', `«${order.track_title}» · ${etiquetaLicencia(order.license_type, order.terms_v)} · en ${plataforma} · reclama: ${reclamante}. Si el reclamo es tuyo o de tu distribuidora, libéralo: el comprador tiene licencia.`, order.track_id);
   sendJSON(res, 201, { ok: true, cartaUrl: `/api/purchase/${order.buyer_token}/carta-content-id`, adminPhone: telefonoAdmin() });
 });
 
 route('GET', '/api/admin/reclamos-cid', (req, res) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
-  const filas = db.prepare(`SELECT r.*, o.buyer_name, o.buyer_phone, o.license_type, o.certificate_id, o.control_code, p.name as producer_name, p.contact_phone as producer_phone
+  const filas = db.prepare(`SELECT r.*, o.buyer_name, o.buyer_phone, o.license_type, o.terms_v, o.certificate_id, o.control_code, p.name as producer_name, p.contact_phone as producer_phone
     FROM reclamos_cid r LEFT JOIN orders o ON o.id = r.order_id LEFT JOIN producers p ON p.id = r.producer_id
     ORDER BY CASE r.estado WHEN 'abierto' THEN 0 ELSE 1 END, r.id DESC LIMIT 300`).all()
-    .map(r => ({ ...r, licencia: LICENSE_LABELS[r.license_type] || r.license_type, productor: r.producer_name || nombreAdmin() }));
+    .map(r => ({ ...r, licencia: etiquetaLicencia(r.license_type, r.terms_v), productor: r.producer_name || nombreAdmin() }));
   sendJSON(res, 200, { reclamos: filas, abiertos: filas.filter(r => r.estado === 'abierto').length });
 });
 route('POST', '/api/admin/reclamos-cid/:id/resolver', async (req, res, params) => {
@@ -3322,6 +3543,700 @@ route('POST', '/api/admin/reclamos-cid/:id/resolver', async (req, res, params) =
   anotar(r.producer_id, 'Cerró un reclamo de Content ID de tu obra', `«${r.track_title}» · ${nota}`, r.track_id);
   sendJSON(res, 200, { ok: true });
 });
+
+// ---------- Venta monetizable: verificación AudD por plan ----------
+// Reglas (noviembre de 2026):
+//  - Ninguna licencia monetizable se vende sin la verificación AudD aprobada (o la revisión manual del admin).
+//  - Pro y Studio se verifican solos al subir, con un cupo al mes (Pro 50, Studio 150). Agotado el cupo,
+//    el beat espera al mes siguiente o el productor paga una verificación extra.
+//  - Free no se verifica solo: para vender la Básica monetizable paga la pre-verificación y sube el WAV sin tag.
+//    Si no la pagó, el artista puede pagarla al comprar (suplemento): nunca se cobra dos veces por el mismo beat.
+//  - Si no es original: no se vende monetizable; el productor recibe un crédito para verificar otro beat
+//    (o pide la revisión manual). Si falla por un error técnico, la verificación se repite sin cobrar.
+const NOTA_FREE_SIN_AUDD = 'Plan Free: AudD revisa el beat cuando se paga la verificación';
+const NOTA_EN_COLA = 'En cola: se agotó el cupo de verificaciones AudD del mes';
+const filaOriginalidad = (id) => db.prepare('SELECT * FROM originalidad WHERE track_id = ?').get(id);
+const inicioDeMes = () => { const d = new Date(); return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)).toISOString().slice(0, 19).replace('T', ' '); };
+
+// cuántas verificaciones automáticas del cupo usó el productor este mes (las pagadas aparte no cuentan)
+function cupoAudd(producerId) {
+  const full = producerFull(producerId);
+  const k = planClave(full);
+  const cap = PRODUCER_PLANS[k].auddMes || 0;
+  const usados = db.prepare(`SELECT COUNT(*) as c FROM originalidad o JOIN tracks t ON t.id = o.track_id
+    WHERE t.producer_id = ? AND t.verif_pagada = 0 AND o.audd_at >= ?`).get(producerId, inicioDeMes()).c;
+  return { plan: k, cap, usados, quedan: Math.max(0, cap - usados) };
+}
+
+// ¿Este beat se manda a AudD ahora? Devuelve { ok } o { ok: false, nota }
+function decisionAudd(t, o) {
+  if (t.is_playlist) return { ok: false, nota: 'Playlist: no se vende, no pasa por AudD' };
+  if (!t.producer_id) return { ok: true };
+  if (o && o.audd_at) return { ok: true };             // ya se verificó antes: repetir no gasta cupo ni se cobra
+  if (t.verif_pagada) return { ok: true };
+  if (t.is_pack) return { ok: true };
+  const c = cupoAudd(t.producer_id);
+  if (c.usados < c.cap) return { ok: true };
+  return { ok: false, nota: `${NOTA_EN_COLA} (${c.cap}). Se verifica el mes que viene${c.plan === 'free' ? '' : ', o paga una verificación extra'}.` };
+}
+
+// Estado de la venta monetizable de un beat:
+//  'aprobada' | 'rechazada' | 'verificando' | 'en_cola' | 'sin_verificar'
+function estadoMonet(t, o) {
+  if (o === undefined) o = filaOriginalidad(t.id);
+  if (o && o.override_motivo) return 'aprobada';     // revisión manual del administrador
+  if (!o || o.estado === 'pendiente') return 'verificando';
+  if (o.estado === 'coincidencias') return 'rechazada';
+  if (o.estado === 'limpio' && o.servicio === 'AudD') return 'aprobada';
+  if (String(o.error || '').startsWith(NOTA_EN_COLA)) return 'en_cola';
+  if (String(o.error || '').startsWith(NOTA_FREE_SIN_AUDD) && !t.verif_pagada) return 'sin_verificar';
+  return 'verificando';                               // AudD sin responder, error técnico o pagada y en curso
+}
+
+// Qué ve el comprador en cada licencia: 'ok' | 'verificando' | 'suplemento' | null (no se ofrece)
+function estadoLicenciaVenta(t, tipo, o) {
+  if (tipo === 'practice') return null;               // la Básica práctica ya no se vende
+  if (!MONETIZABLES.includes(tipo)) return 'ok';
+  const e = estadoMonet(t, o);
+  if (e === 'rechazada') return null;
+  if (e === 'aprobada') return tipo === 'basic' && t.producer_id && !archivoExiste(t.wav_filename) ? 'verificando' : 'ok';
+  if (e === 'sin_verificar') return tipo === 'basic' ? 'suplemento' : null;
+  return 'verificando';
+}
+function archivoExiste(f) {
+  if (!f) return false;
+  try { return fs.statSync(path.join(UPLOADS_MASTERS, f)).isFile(); } catch { return false; }
+}
+function basicaUnicaVendida(trackId) {
+  return Boolean(db.prepare("SELECT 1 FROM orders WHERE track_id = ? AND license_type = 'basic' AND terms_v >= 2 AND status = 'approved'").get(trackId));
+}
+
+// vuelve a calcular la etiqueta de precio con las licencias que quedan
+function recalcularPrecio(trackId) {
+  const lic = getTrackLicenses(trackId);
+  const precios = Object.fromEntries(LICENSE_TYPES.map(k => [k, 0]));
+  lic.forEach(l => { precios[l.license_type] = l.price_cup; });
+  const v = validateLicenseCombination(precios);
+  if (!v.ok) {
+    // si solo queda la Básica práctica gratis, el beat sigue en la tienda para descargar la demo
+    const soloDemo = lic.some(l => l.license_type === 'practice');
+    db.prepare('UPDATE tracks SET price_label = ?, price_cup = 0, for_sale = ? WHERE id = ?').run(soloDemo ? 'Demo gratis' : '', soloDemo ? 1 : 0, trackId);
+    return;
+  }
+  const { lowest, label } = etiquetaPrecio(precios, v);
+  db.prepare('UPDATE tracks SET price_label = ?, price_cup = ?, for_sale = 1 WHERE id = ?').run(label, lowest, trackId);
+}
+
+// ---- Demo de 1 minuto de la Básica práctica (se hace en segundo plano, de a una) ----
+const demosEnCola = new Set();
+let colaDemos = Promise.resolve();
+function programarDemo(trackId) {
+  if (!trackId || demosEnCola.has(trackId)) return;
+  demosEnCola.add(trackId);
+  colaDemos = colaDemos.then(() => generarDemo(trackId))
+    .catch((e) => console.error(`Demo de la pista ${trackId}:`, e.message))
+    .then(() => { demosEnCola.delete(trackId); });
+}
+async function generarDemo(id) {
+  const t = db.prepare('SELECT id, master_filename, mp3_filename, tagwav_filename, demo_filename, demo_wav_filename FROM tracks WHERE id = ?').get(id);
+  if (!t) return;
+  const fuente = [t.master_filename, t.mp3_filename].find(archivoExiste);
+  if (!fuente) return;
+  const mp3 = `demo-${crypto.randomUUID()}.mp3`;
+  await cortarDemo(path.join(UPLOADS_MASTERS, fuente), path.join(UPLOADS_MASTERS, mp3), 60);
+  let wav = '';
+  if (archivoExiste(t.tagwav_filename)) {
+    wav = `demo-${crypto.randomUUID()}.wav`;
+    try { await cortarDemo(path.join(UPLOADS_MASTERS, t.tagwav_filename), path.join(UPLOADS_MASTERS, wav), 60); }
+    catch (e) { wav = ''; console.error(`Demo WAV de la pista ${id}:`, e.message); }
+  }
+  db.prepare('UPDATE tracks SET demo_filename = ?, demo_wav_filename = ? WHERE id = ?').run(mp3, wav, id);
+  for (const viejo of [t.demo_filename, t.demo_wav_filename]) { if (viejo) fs.promises.unlink(path.join(UPLOADS_MASTERS, viejo)).catch(() => {}); }
+}
+function completarDemos() {
+  for (const r of db.prepare("SELECT DISTINCT l.track_id as id FROM track_licenses l JOIN tracks t ON t.id = l.track_id WHERE l.license_type = 'practice' AND COALESCE(t.demo_filename, '') = '' LIMIT 20").all()) programarDemo(r.id);
+}
+setTimeout(completarDemos, 8000).unref();
+setInterval(completarDemos, 10 * 60 * 1000).unref();
+
+// Copia de la demo con la marca invisible (comprador y número de licencia en los metadatos), una por pedido
+const marcasEnCurso = new Set();
+function nombreEntrega(orderId, ext) { return `entrega-${orderId}-demo${ext}`; }
+async function prepararEntregaPractica(orderId) {
+  if (marcasEnCurso.has(orderId)) return;
+  marcasEnCurso.add(orderId);
+  try {
+    const o = db.prepare('SELECT o.id, o.track_id, o.certificate_id, o.buyer_name, o.license_type, o.terms_v, t.title, t.demo_filename, t.demo_wav_filename, p.name as producer_name FROM orders o JOIN tracks t ON t.id = o.track_id LEFT JOIN producers p ON p.id = t.producer_id WHERE o.id = ?').get(orderId);
+    if (!o || o.license_type !== 'practice' || !o.certificate_id) return;
+    const comentario = `Zona Beats · Licencia Básica Práctica ${o.certificate_id} · ${o.buyer_name} · no monetizable`;
+    for (const [f, ext] of [[o.demo_filename, '.mp3'], [o.demo_wav_filename, '.wav']]) {
+      if (!archivoExiste(f)) continue;
+      const destino = path.join(UPLOADS_MASTERS, nombreEntrega(o.id, ext));
+      if (fs.existsSync(destino)) continue;
+      const tmp = destino + '.tmp' + ext;
+      try {
+        await marcarEntrega(path.join(UPLOADS_MASTERS, f), tmp, { comentario, titulo: `${o.title} (demo)`, artista: o.producer_name || nombreAdmin() });
+        fs.renameSync(tmp, destino);
+      } catch (e) { try { fs.unlinkSync(tmp); } catch { /* nada */ } console.error(`Marca de la entrega ${o.id}:`, e.message); }
+    }
+  } finally { marcasEnCurso.delete(orderId); }
+}
+
+// ---- Marca de agua forense (planes Free y Studio) ----
+// Cada pedido monetizable recibe su propia copia del WAV y del MP3 con el código del pedido escondido en el sonido.
+function secretoForense() {
+  const f = db.prepare("SELECT valor FROM app_secrets WHERE clave = 'forense_secreto'").get();
+  if (f) return f.valor;
+  const s = crypto.randomBytes(32).toString('hex');
+  db.prepare("INSERT OR IGNORE INTO app_secrets (clave, valor) VALUES ('forense_secreto', ?)").run(s);
+  return db.prepare("SELECT valor FROM app_secrets WHERE clave = 'forense_secreto'").get().valor;
+}
+const codigoForense = (orderId) => 'pedido-' + orderId;
+function llevaForense(order) {
+  if (Number(order.terms_v) < 2 || !MONETIZABLES.includes(order.license_type) || !order.producer_id) return false;
+  const plan = PRODUCER_PLANS[planClave(producerFull(order.producer_id))];
+  if (!plan || !plan.forense) return false;
+  const t = db.prepare('SELECT wav_filename FROM tracks WHERE id = ?').get(order.track_id);
+  return Boolean(t && archivoExiste(t.wav_filename));
+}
+const forenseEnCola = new Set();
+let colaForense = Promise.resolve();
+function programarForense(orderId) {
+  if (forenseEnCola.has(orderId)) return;
+  forenseEnCola.add(orderId);
+  colaForense = colaForense.then(() => generarForense(orderId))
+    .catch((e) => console.error(`Marca forense del pedido ${orderId}:`, e.message))
+    .then(() => { forenseEnCola.delete(orderId); });
+}
+async function generarForense(orderId) {
+  const o = db.prepare('SELECT o.*, t.wav_filename, t.title FROM orders o JOIN tracks t ON t.id = o.track_id WHERE o.id = ?').get(orderId);
+  if (!o || o.forense !== 'pendiente') return;
+  const wav = `forense-${o.id}-${crypto.randomUUID()}.wav`, mp3 = wav.replace(/\.wav$/, '.mp3');
+  const pw = path.join(UPLOADS_MASTERS, wav), pm = path.join(UPLOADS_MASTERS, mp3);
+  try {
+    await conCupoAudio(async () => {
+      await forense.marcar(path.join(UPLOADS_MASTERS, o.wav_filename), pw, { secreto: secretoForense(), codigo: codigoForense(o.id) });
+      await transcodificarMp3(pw, pm, 320);
+    });
+    db.prepare("UPDATE orders SET forense = 'lista', forense_wav = ?, forense_mp3 = ? WHERE id = ?").run(wav, mp3, o.id);
+  } catch (e) {
+    for (const p of [pw, pm]) fs.promises.unlink(p).catch(() => {});
+    // si no se pudo marcar, se entrega el archivo normal para no dejar al artista sin su compra
+    db.prepare("UPDATE orders SET forense = 'error' WHERE id = ?").run(o.id);
+    throw e;
+  }
+}
+// al arrancar: lo que quedó a medias
+function completarForense() {
+  for (const r of db.prepare("SELECT id FROM orders WHERE forense = 'pendiente' AND status = 'approved' LIMIT 50").all()) programarForense(r.id);
+}
+setTimeout(completarForense, 5000).unref();
+
+// ¿De qué pedido salió este archivo? Busca el beat por su huella (si no se indica) y lee la marca.
+async function rastrearArchivo(archivo, trackId) {
+  let track = trackId ? db.prepare('SELECT id, title, wav_filename, producer_id FROM tracks WHERE id = ?').get(trackId) : null;
+  let similitud = null;
+  if (!track) {
+    const h = await originalidad.huella(archivo);
+    let mejor = null;
+    for (const r of db.prepare(`SELECT DISTINCT o.track_id, g.huella FROM orders o JOIN originalidad g ON g.track_id = o.track_id
+      WHERE o.forense = 'lista' AND g.huella != ''`).all()) {
+      const c = originalidad.comparar(h, originalidad.deTexto(r.huella));
+      if (!mejor || c.similitud > mejor.similitud) mejor = { trackId: r.track_id, similitud: c.similitud };
+    }
+    if (!mejor || mejor.similitud < UMBRAL_MISMO_AUDIO) return { encontrado: false, motivo: 'No se parece a ningún beat vendido con marca forense.' };
+    track = db.prepare('SELECT id, title, wav_filename, producer_id FROM tracks WHERE id = ?').get(mejor.trackId);
+    similitud = Math.round(mejor.similitud * 100);
+  }
+  if (!track) return { encontrado: false, motivo: 'Beat no encontrado.' };
+  const pedidos = db.prepare("SELECT id, control_code, buyer_name, buyer_phone, license_type, terms_v, certificate_id, approved_at, created_at FROM orders WHERE track_id = ? AND forense = 'lista'").all(track.id);
+  const beat = { id: track.id, titulo: track.title, similitud };
+  if (!pedidos.length) return { encontrado: false, beat, motivo: 'Este beat no tiene ventas con marca forense.' };
+  if (!archivoExiste(track.wav_filename)) return { encontrado: false, beat, motivo: 'Falta el WAV original del beat para comparar.' };
+  const r = await conCupoAudio(() => forense.detectar(path.join(UPLOADS_MASTERS, track.wav_filename), archivo, { secreto: secretoForense(), codigos: pedidos.map(p => codigoForense(p.id)) }));
+  const porCodigo = new Map(pedidos.map(p => [codigoForense(p.id), p]));
+  const fila = (x) => { const p = porCodigo.get(x.codigo); return { pedido: codigoPedido(p), comprador: p.buyer_name, telefono: p.buyer_phone, licencia: etiquetaLicencia(p.license_type, p.terms_v), certificado: p.certificate_id, fecha: normalizarFecha(p.approved_at || p.created_at), confianza: Math.round(x.z) }; };
+  return { encontrado: Boolean(r.encontrado), beat, pedido: r.encontrado ? fila(r.resultados[0]) : null,
+    candidatos: r.resultados.slice(0, 5).map(fila), segundosAnalizados: r.segundosAnalizados, desdeSegundo: r.desplazamientoSeg };
+}
+
+// Panel: el administrador sube un archivo sospechoso y la app dice de qué compra salió
+route('POST', '/api/admin/forense/rastrear', async (req, res) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  let d;
+  try { d = jsonObjeto((await readBody(req, 4096)).toString('utf8') || '{}'); } catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
+  let up;
+  try { up = tomarSubida(d.uploadId, 'admin', 'audio'); } catch (err) { return sendJSON(res, err.status || 400, { error: err.error || 'Falta el archivo' }); }
+  if (!up) return sendJSON(res, 400, { error: 'Sube el archivo que quieres rastrear.' });
+  try {
+    const r = await rastrearArchivo(up.path, Number(d.trackId) || 0);
+    sendJSON(res, 200, r);
+  } catch (e) {
+    sendJSON(res, 400, { error: 'No se pudo analizar el archivo: ' + String(e.message || e).slice(0, 200) });
+  } finally {
+    fs.promises.unlink(up.path).catch(() => {});
+    db.prepare('DELETE FROM uploads WHERE id = ?').run(up.id);
+  }
+});
+
+// Si un beat que se sube coincide con otro vendido con marca forense, se lee la marca sola:
+// así el administrador ve de qué compra salió la copia que intentan volver a vender.
+async function revisarFiltracion(trackId, internas) {
+  const vendidos = internas.filter(x => db.prepare("SELECT 1 FROM orders WHERE track_id = ? AND forense = 'lista'").get(x.trackId));
+  if (!vendidos.length) return;
+  const t = db.prepare('SELECT * FROM tracks WHERE id = ?').get(trackId);
+  if (!t) return;
+  // se prueba con cada archivo que subió (el audio principal y el WAV pueden venir de copias distintas)
+  const archivos = [...new Set([t.master_filename, t.mp3_filename, t.wav_filename].filter(Boolean))].map(f => path.join(UPLOADS_MASTERS, f)).filter(f => fs.existsSync(f));
+  for (const v of vendidos) {
+    for (const archivo of archivos) {
+      try {
+        const r = await rastrearArchivo(archivo, v.trackId);
+        if (r.encontrado) {
+          db.prepare('UPDATE originalidad SET forense_json = ? WHERE track_id = ?').run(JSON.stringify({ beatOriginal: r.beat, pedido: r.pedido }), trackId);
+          return;
+        }
+      } catch (e) { console.error(`Rastreo forense de la pista ${trackId}:`, e.message); }
+    }
+  }
+}
+
+// ---- Qué pasa cuando termina una verificación ----
+function alTerminarVerificacion(trackId) {
+  const t = db.prepare('SELECT * FROM tracks WHERE id = ?').get(trackId);
+  if (!t) return;
+  const o = filaOriginalidad(trackId);
+  const e = estadoMonet(t, o);
+  const v = db.prepare("SELECT * FROM verificaciones WHERE track_id = ? AND status = 'approved' AND resultado = '' ORDER BY id DESC LIMIT 1").get(trackId);
+  if (e === 'aprobada') {
+    if (v) db.prepare("UPDATE verificaciones SET resultado = 'ok', resolved_at = datetime('now') WHERE id = ?").run(v.id);
+    if (v) anotar(t.producer_id, 'Verificación AudD aprobada', `«${t.title}» ya se puede vender con licencia monetizable`, t.id, 60);
+    // pedidos de artistas que pagaron la verificación: se entregan solos si ya está el WAV sin tag
+    if (!t.producer_id || archivoExiste(t.wav_filename)) {
+      for (const ord of db.prepare("SELECT * FROM orders WHERE track_id = ? AND status = 'pending' AND verif_pago_ok = 1").all(trackId)) {
+        const r = aprobarPedido(ord, '');
+        if (r.status === 200) anotar(t.producer_id, 'Venta entregada tras la verificación', `«${t.title}» · ${etiquetaLicencia(ord.license_type, ord.terms_v)} · ${ord.price_label}`, t.id);
+      }
+    }
+  } else if (e === 'rechazada' && v) {
+    const credito = v.metodo !== 'artista' ? 'disponible' : '';
+    db.prepare("UPDATE verificaciones SET resultado = 'no_original', credito = ?, resolved_at = datetime('now') WHERE id = ?").run(credito, v.id);
+    anotar(t.producer_id, 'Verificación AudD: no se puede vender monetizable', `«${t.title}» tiene coincidencias.` +
+      (credito ? ' Te queda un crédito para verificar otro beat (sin reembolso en efectivo), o pide la revisión manual.' : ' El administrador lo revisa a mano.'), t.id);
+    db.prepare("UPDATE orders SET verif_estado = 'fallo' WHERE track_id = ? AND status = 'pending' AND verif_pago_ok = 1").run(trackId);
+  }
+}
+
+// marca el beat como pagado (por el productor o por un artista) y lo manda a AudD
+function marcarVerifPagada(trackId, pagador) {
+  db.prepare("UPDATE tracks SET verif_pagada = 1, verif_pagador = ? WHERE id = ?").run(pagador, trackId);
+  programarOriginalidad(trackId);
+}
+
+// Guarda el WAV sin tag del beat completo (Free) y saca de él el MP3 sin tag de entrega
+async function guardarWavSinTag(track, up) {
+  const nombre = moverSubida(up, UPLOADS_MASTERS, 'wav-');
+  const h = await hashArchivo(path.join(UPLOADS_MASTERS, nombre));
+  const viejo = db.prepare('SELECT wav_filename, mon_mp3_filename FROM tracks WHERE id = ?').get(track.id);
+  db.prepare('UPDATE tracks SET wav_filename = ?, wav_hash = ? WHERE id = ?').run(nombre, h, track.id);
+  agregarHuellaRegistro(track.id, 'WAV sin tag', h);
+  const mp3 = `mp3mon-${crypto.randomUUID()}.mp3`;
+  try {
+    await conCupoAudio(() => transcodificarMp3(path.join(UPLOADS_MASTERS, nombre), path.join(UPLOADS_MASTERS, mp3), 320));
+    db.prepare('UPDATE tracks SET mon_mp3_filename = ? WHERE id = ?').run(mp3, track.id);
+  } catch (e) { console.error('MP3 sin tag:', e.message); }
+  if (viejo) {
+    for (const f of [viejo.wav_filename, viejo.mon_mp3_filename]) if (f && f !== nombre) fs.promises.unlink(path.join(UPLOADS_MASTERS, f)).catch(() => {});
+  }
+}
+
+function creditosVerificacion(producerId) {
+  return db.prepare("SELECT COUNT(*) as c FROM verificaciones WHERE producer_id = ? AND credito = 'disponible'").get(producerId).c;
+}
+// lo que el productor ve de la verificación de un beat suyo
+function monetDePista(t, full) {
+  if (t.is_playlist || t.is_pack) return null;
+  const o = filaOriginalidad(t.id);
+  const e = estadoMonet(t, o);
+  const pendiente = db.prepare("SELECT id FROM verificaciones WHERE track_id = ? AND status = 'pending'").get(t.id);
+  const k = planClave(full);
+  const ofreceBasica = Boolean(db.prepare("SELECT 1 FROM track_licenses WHERE track_id = ? AND license_type = 'basic'").get(t.id));
+  const puedePagar = !t.verif_pagada && !pendiente && !t.sold && t.approval_status !== 'rejected' &&
+    (k === 'pro' || k === 'studio') && e === 'en_cola';
+  return {
+    estado: e, pagada: Boolean(t.verif_pagada), pagador: t.verif_pagador || '', enRevisionPago: Boolean(pendiente),
+    puedePagar, ofreceBasica, wavSinTag: archivoExiste(t.wav_filename),
+    // plan Free: sin el WAV sin tag no se puede vender (beats de antes, pausados)
+    faltaWav: k === 'free' && !t.sold && !archivoExiste(t.wav_filename),
+    puedeRevisionManual: e === 'rechazada',
+  };
+}
+
+// ---- Productor: pagar la verificación ----
+route('GET', '/api/producer/verificaciones', (req, res) => {
+  const producer = getAuthedProducer(req);
+  if (!producer) return sendJSON(res, 401, { error: 'No autorizado' });
+  const lista = db.prepare(`SELECT v.id, v.track_id, v.monto_cup, v.metodo, v.currency, v.status, v.reject_reason, v.resultado, v.credito, v.created_at, v.resolved_at, t.title
+    FROM verificaciones v LEFT JOIN tracks t ON t.id = v.track_id WHERE v.producer_id = ? ORDER BY v.id DESC LIMIT 100`).all(producer.id)
+    .map(v => ({ ...v, created_at: normalizarFecha(v.created_at), resolved_at: normalizarFecha(v.resolved_at) }));
+  sendJSON(res, 200, { precio: precioVerificacion(), creditos: creditosVerificacion(producer.id), cupo: cupoAudd(producer.id), lista, externoActivo: originalidad.externoActivo() });
+});
+
+route('POST', '/api/producer/verificaciones', async (req, res) => {
+  const producer = getAuthedProducer(req);
+  if (!producer) return sendJSON(res, 401, { error: 'No autorizado' });
+  if (!rateLimit(req, 'comprobantes', 30, 60 * 60 * 1000)) return sendJSON(res, 429, { error: 'Demasiados pedidos seguidos. Espera un rato.' });
+  const bm = (req.headers['content-type'] || '').match(/boundary=(.+)$/);
+  if (!bm) return sendJSON(res, 400, { error: 'Falta boundary multipart' });
+  let buffer;
+  try { buffer = await readBody(req, MAX_RECEIPT_BYTES + 1024 * 20); }
+  catch { return sendJSON(res, 413, { error: 'La imagen del comprobante es demasiado grande (máx 12MB)' }); }
+  const fields = {};
+  let receiptPart = null;
+  for (const part of parseMultipart(buffer, bm[1])) {
+    if (part.filename && part.name === 'receipt') receiptPart = part;
+    else if (part.name) fields[part.name] = part.data.toString('utf8');
+  }
+  const full = producerFull(producer.id);
+  const t = db.prepare('SELECT * FROM tracks WHERE id = ? AND producer_id = ?').get(Number(fields.trackId), producer.id);
+  if (!t) return sendJSON(res, 404, { error: 'Beat no encontrado' });
+  const m = monetDePista(t, full);
+  if (!m) return sendJSON(res, 400, { error: 'Esta obra no necesita verificación para venderse.' });
+  if (t.verif_pagada) return sendJSON(res, 409, { error: 'La verificación de este beat ya está pagada: nunca se cobra dos veces.' });
+  if (m.enRevisionPago) return sendJSON(res, 409, { error: 'Ya enviaste el pago de esta verificación: espera a que el administrador lo confirme.' });
+  if (!m.puedePagar) {
+    return sendJSON(res, 409, { error: m.estado === 'aprobada' ? 'Este beat ya tiene la verificación aprobada.'
+      : m.estado === 'rechazada' ? 'Este beat no pasó la verificación. Puedes pedir la revisión manual.'
+      : 'Este beat ya se está verificando.' });
+  }
+  const k = planClave(full);
+  // Free: hace falta el WAV sin tag del beat completo (es lo que se verifica y lo que se entrega)
+  let wav = null;
+  if (k === 'free' && !archivoExiste(t.wav_filename)) {
+    try { wav = tomarSubida(fields.wavUploadId, `p:${producer.id}`, 'wav'); } catch (err) { return sendJSON(res, err.status || 400, { error: err.error || 'Falta el WAV' }); }
+    if (!wav) return sendJSON(res, 400, { error: 'Sube el WAV sin tag del beat completo: es lo que se verifica y lo que recibe el artista.' });
+  }
+  const metodo = ['saldo', 'credito', 'comprobante'].includes(fields.metodo) ? fields.metodo : 'comprobante';
+  const precio = precioVerificacion();
+  let filaCredito = null, costo = null, moneda = 'CUP', receiptFilename = '';
+  if (metodo === 'credito') {
+    filaCredito = db.prepare("SELECT id FROM verificaciones WHERE producer_id = ? AND credito = 'disponible' ORDER BY id ASC LIMIT 1").get(producer.id);
+    if (!filaCredito) return sendJSON(res, 400, { error: 'No tienes créditos de verificación.' });
+  } else if (metodo === 'saldo') {
+    moneda = limpiarTexto(fields.wallet || 'CUP', 30) || 'CUP';
+    costo = costoPlanEn(precio, moneda);
+    if (!costo.ok) return sendJSON(res, 400, { error: 'Moneda no disponible. Elige otro saldo.' });
+    acreditarBonos(producer.id);
+    const b = saldoDisponible(producer.id).billeteras.find(x => x.code === moneda);
+    if (!b || b.unidades + 1e-9 < costo.unidades) {
+      return sendJSON(res, 400, { error: `Tu saldo en ${etiquetaMoneda(moneda)} no alcanza: la verificación cuesta ${fmtMonto(costo.unidades, moneda)} y tienes ${fmtMonto(b ? b.unidades : 0, moneda)}.` });
+    }
+  } else {
+    if (!receiptPart || !receiptPart.data.length) return sendJSON(res, 400, { error: 'Adjunta la foto del comprobante de pago' });
+    const ext = safeExt(receiptPart.filename, '.jpg');
+    if (!ALLOWED_IMAGE_EXT.includes(ext)) return sendJSON(res, 400, { error: 'El comprobante debe ser una imagen (JPG, PNG o WEBP)' });
+    moneda = limpiarTexto(fields.currency || 'CUP', 30) || 'CUP';
+    receiptFilename = `verif-${crypto.randomUUID()}${ext}`;
+    fs.writeFileSync(path.join(UPLOADS_RECEIPTS, receiptFilename), receiptPart.data);
+  }
+  if (wav) {
+    try { await guardarWavSinTag(t, wav); } catch (e) { console.error('WAV sin tag:', e.message); return sendJSON(res, 500, { error: 'No se pudo guardar el WAV. Inténtalo de nuevo.' }); }
+  }
+  const aprobada = metodo !== 'comprobante';
+  const info = db.prepare(`INSERT INTO verificaciones (producer_id, track_id, monto_cup, metodo, currency, receipt_filename, status, resolved_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(producer.id, t.id, metodo === 'credito' ? 0 : precio, metodo, moneda, receiptFilename,
+    aprobada ? 'approved' : 'pending', aprobada ? new Date().toISOString().slice(0, 19).replace('T', ' ') : '');
+  if (metodo === 'credito') db.prepare("UPDATE verificaciones SET credito = 'usado', credito_usado_en = ? WHERE id = ?").run(t.id, filaCredito.id);
+  if (metodo === 'saldo') {
+    db.prepare("INSERT INTO producer_credits (producer_id, kind, amount_cup, detail, currency, amount_units) VALUES (?, 'verificacion', ?, ?, ?, ?)")
+      .run(producer.id, -precio, `Verificación AudD de «${t.title}» pagada con tu saldo`, moneda, -costo.unidades);
+  }
+  if (aprobada) marcarVerifPagada(t.id, 'productor');
+  sendJSON(res, 201, { ok: true, id: Number(info.lastInsertRowid), aprobada });
+});
+
+// El productor sube el WAV sin tag cuando un artista ya pagó la verificación (o para cambiarlo antes de vender)
+// Muestra de 1 minuto de la tienda (plan Free), desde el segundo elegido. Sale del audio sin tag
+// (con la marca de la plataforma si el plan la lleva) y reemplaza el preview de la pista.
+async function regenerarMuestra(trackId, inicio) {
+  const t = db.prepare('SELECT * FROM tracks WHERE id = ?').get(trackId);
+  const k = t && t.producer_id ? planClave(producerFull(t.producer_id)) : '';
+  const plan = PRODUCER_PLANS[k];
+  if (!plan || !plan.muestraSegundos) return null;
+  const fuente = [t.wav_filename, t.master_filename, t.mp3_filename].filter(Boolean).map(f => path.join(UPLOADS_MASTERS, f)).find(f => fs.existsSync(f));
+  if (!fuente) throw new Error('no se encontró el audio');
+  let dur = 0;
+  try { dur = await getDurationSeconds(fuente); } catch { dur = Number(t.duration_seconds) || 0; }
+  const st = Math.min(Math.max(0, Math.round(Number(inicio) || 0)), Math.max(0, Math.floor(dur - plan.muestraSegundos)));
+  const wm = db.prepare('SELECT * FROM watermark_config WHERE id = 1').get();
+  const tmp = path.join(UPLOADS_AUDIO, `tmp-${crypto.randomUUID()}.mp3`);
+  const nuevo = `${crypto.randomUUID()}.mp3`;
+  try {
+    await conCupoAudio(async () => {
+      if (plan.watermarkPreview && wm && wm.voice_filename) {
+        await applyWatermark({ inputPath: fuente, watermarkPath: path.join(UPLOADS_WATERMARK, wm.voice_filename), outputPath: tmp,
+          intervalSeconds: wm.interval_seconds, volume: wm.volume, kbps: 192 });
+      } else await transcodificarMp3(fuente, tmp, 192);
+      await cortarMuestra(tmp, path.join(UPLOADS_AUDIO, nuevo), st, plan.muestraSegundos);
+    });
+  } finally { fs.promises.unlink(tmp).catch(() => {}); }
+  db.prepare('UPDATE tracks SET audio_filename = ?, muestra_inicio = ?, preview_marca = ? WHERE id = ?')
+    .run(nuevo, st, plan.watermarkPreview && wm && wm.voice_filename ? 1 : 0, trackId);
+  if (t.audio_filename && t.audio_filename !== nuevo) fs.promises.unlink(path.join(UPLOADS_AUDIO, t.audio_filename)).catch(() => {});
+  return st;
+}
+const activosDe = (producerId, salvo = 0) => db.prepare("SELECT COUNT(*) as c FROM tracks WHERE producer_id = ? AND approval_status != 'rejected' AND sold = 0 AND is_pack = 0 AND id != ?").get(producerId, salvo).c;
+
+// Plan Free: el productor sube el WAV sin tag (3 minutos como máximo) de un beat pausado o sin WAV.
+// Se guarda, se rehace la muestra, se verifica con AudD y el beat vuelve a revisión (si le queda lugar).
+route('POST', '/api/producer/tracks/:id/wav-sin-tag', async (req, res, params) => {
+  const producer = getAuthedProducer(req);
+  if (!producer) return sendJSON(res, 401, { error: 'No autorizado' });
+  const t = db.prepare('SELECT * FROM tracks WHERE id = ? AND producer_id = ?').get(params.id, producer.id);
+  if (!t) return sendJSON(res, 404, { error: 'Beat no encontrado' });
+  if (t.sold || basicaUnicaVendida(t.id)) return sendJSON(res, 409, { error: 'La Básica monetizable de este beat ya se entregó.' });
+  const full = producerFull(producer.id);
+  const plan = getPlan(full);
+  let d;
+  try { d = jsonObjeto((await readBody(req, 4096)).toString('utf8') || '{}'); } catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
+  let wav;
+  try { wav = tomarSubida(d.wavUploadId, `p:${producer.id}`, 'wav'); } catch (err) { return sendJSON(res, err.status || 400, { error: err.error || 'Falta el WAV' }); }
+  if (!wav) return sendJSON(res, 400, { error: 'Sube el WAV sin tag del beat completo.' });
+  const bits = await bitsWav(wav.path);
+  if (bits && bits < 24) return sendJSON(res, 400, { error: `El WAV tiene que ser de 24 bits y este es de ${bits} bits. Expórtalo de nuevo a 24 bits.` });
+  if (plan.maxSegundos) {
+    let seg = 0;
+    try { seg = await getDurationSeconds(wav.path); } catch { seg = 0; }
+    if (seg > plan.maxSegundos + 1) return sendJSON(res, 400, { error: `En el plan ${plan.label} cada beat dura como máximo ${plan.maxSegundos / 60} minutos (este dura ${formatoMinutos(seg)}).` });
+  }
+  try { await guardarWavSinTag(t, wav); } catch (e) { console.error('WAV sin tag:', e.message); return sendJSON(res, 500, { error: 'No se pudo guardar el WAV.' }); }
+  try { await regenerarMuestra(t.id, d.muestraInicio !== undefined ? d.muestraInicio : Math.max(0, t.muestra_inicio)); } catch (e) { console.error('Muestra:', e.message); }
+  let reactivado = false, aviso = '';
+  if (t.pausa_free) {
+    if (plan.maxBeats !== Infinity && activosDe(producer.id, t.id) >= plan.maxBeats) {
+      aviso = `WAV guardado. El beat sigue pausado porque ya tienes ${plan.maxBeats} beats activos: elimina o pausa otro para activarlo.`;
+    } else {
+      db.prepare("UPDATE tracks SET approval_status = 'pending', rejection_reason = '', pausa_free = '' WHERE id = ?").run(t.id);
+      reactivado = true;
+    }
+  }
+  // el audio cambió: AudD lo escanea de nuevo (gratis para el productor)
+  db.prepare("INSERT INTO originalidad (track_id, estado) VALUES (?, 'pendiente') ON CONFLICT(track_id) DO UPDATE SET estado = 'pendiente', error = ''").run(t.id);
+  programarOriginalidad(t.id);
+  sendJSON(res, 200, { ok: true, reactivado, aviso });
+});
+
+// El productor pide la revisión manual de un beat que AudD marcó
+route('POST', '/api/producer/tracks/:id/revision-manual', (req, res, params) => {
+  const producer = getAuthedProducer(req);
+  if (!producer) return sendJSON(res, 401, { error: 'No autorizado' });
+  const t = db.prepare('SELECT * FROM tracks WHERE id = ? AND producer_id = ?').get(params.id, producer.id);
+  if (!t) return sendJSON(res, 404, { error: 'Beat no encontrado' });
+  if (estadoMonet(t) !== 'rechazada') return sendJSON(res, 409, { error: 'Este beat no necesita revisión manual.' });
+  anotar(producer.id, 'Pediste la revisión manual de la originalidad', `«${t.title}»: el administrador revisa las coincidencias`, t.id, 60);
+  db.prepare("UPDATE originalidad SET estado_previo = 'revision_pedida' WHERE track_id = ? AND COALESCE(estado_previo, '') = ''").run(t.id);
+  sendJSON(res, 200, { ok: true });
+});
+
+// ---- Panel: verificaciones pagadas por comprobante ----
+route('GET', '/api/admin/verificaciones', (req, res) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  const base = `SELECT v.*, t.title as track_title, COALESCE(p.name, '') as producer_name, p.contact_phone as producer_phone
+    FROM verificaciones v LEFT JOIN tracks t ON t.id = v.track_id LEFT JOIN producers p ON p.id = v.producer_id`;
+  const fix = (v) => ({ ...v, created_at: normalizarFecha(v.created_at), resolved_at: normalizarFecha(v.resolved_at) });
+  sendJSON(res, 200, {
+    precio: precioVerificacion(), sugeridos: preciosSugeridos(), rangosFree: RANGOS_FREE,
+    cupos: { pro: PRODUCER_PLANS.pro.auddMes, studio: PRODUCER_PLANS.studio.auddMes },
+    pendientes: db.prepare(base + " WHERE v.status = 'pending' ORDER BY v.id ASC").all().map(fix),
+    historial: db.prepare(base + " WHERE v.status != 'pending' ORDER BY v.id DESC LIMIT 100").all().map(fix),
+  });
+});
+route('GET', '/api/admin/verificaciones/:id/receipt', (req, res, params) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  const r = db.prepare('SELECT receipt_filename FROM verificaciones WHERE id = ?').get(params.id);
+  if (!r || !r.receipt_filename) return sendJSON(res, 404, { error: 'Comprobante no encontrado' });
+  sendFile(res, path.join(UPLOADS_RECEIPTS, r.receipt_filename), contentTypeForImage(path.extname(r.receipt_filename).toLowerCase()));
+});
+route('POST', '/api/admin/verificaciones/:id/approve', (req, res, params) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  const v = db.prepare('SELECT * FROM verificaciones WHERE id = ?').get(params.id);
+  if (!v) return sendJSON(res, 404, { error: 'Pedido no encontrado' });
+  if (v.status !== 'pending') return sendJSON(res, 409, { error: 'Este pedido ya fue respondido' });
+  db.prepare("UPDATE verificaciones SET status = 'approved', resolved_at = datetime('now') WHERE id = ?").run(v.id);
+  const t = db.prepare('SELECT id, title FROM tracks WHERE id = ?').get(v.track_id);
+  if (t) {
+    marcarVerifPagada(t.id, 'productor');
+    anotar(v.producer_id, 'Confirmó el pago de tu verificación AudD', `«${t.title}» · se está verificando`, t.id);
+  }
+  sendJSON(res, 200, { ok: true });
+});
+route('POST', '/api/admin/verificaciones/:id/reject', async (req, res, params) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  let d = {};
+  try { d = jsonObjeto((await readBody(req, 4096)).toString('utf8') || '{}'); } catch { d = {}; }
+  const v = db.prepare('SELECT * FROM verificaciones WHERE id = ?').get(params.id);
+  if (!v) return sendJSON(res, 404, { error: 'Pedido no encontrado' });
+  if (v.status !== 'pending') return sendJSON(res, 409, { error: 'Este pedido ya fue respondido' });
+  const motivo = limpiarTexto(d.reason, 300);
+  db.prepare("UPDATE verificaciones SET status = 'rejected', reject_reason = ?, resolved_at = datetime('now') WHERE id = ?").run(motivo, v.id);
+  const t = db.prepare('SELECT id, title FROM tracks WHERE id = ?').get(v.track_id);
+  anotar(v.producer_id, 'Rechazó el pago de tu verificación AudD', `«${t ? t.title : 'beat'}»` + (motivo ? ` · motivo: ${motivo}` : ''), v.track_id);
+  sendJSON(res, 200, { ok: true });
+});
+route('POST', '/api/admin/verificaciones/config', async (req, res) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  let d;
+  try { d = jsonObjeto((await readBody(req, 4096)).toString('utf8') || '{}'); } catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
+  const precio = parsePrecio(d.precio);
+  if (!(precio > 0)) return sendJSON(res, 400, { error: 'Pon el precio de la verificación en CUP.' });
+  const sug = {};
+  for (const k of Object.keys(SUGERIDOS_FABRICA)) { const n = parsePrecio(d.sugeridos && d.sugeridos[k]); if (n > 0) sug[k] = n; }
+  db.prepare('UPDATE platform_config SET verif_precio_cup = ?, precios_sugeridos_json = ? WHERE id = 1').run(precio, JSON.stringify(sug));
+  sendJSON(res, 200, { ok: true, precio: precioVerificacion(), sugeridos: preciosSugeridos() });
+});
+// Revisión manual: el administrador aprueba la venta monetizable de un beat (por ejemplo sin AudD disponible,
+// o tras revisar las coincidencias). Queda anotado con el motivo.
+route('POST', '/api/admin/tracks/:id/monetizable', async (req, res, params) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  let d = {};
+  try { d = jsonObjeto((await readBody(req, 4096)).toString('utf8') || '{}'); } catch { d = {}; }
+  const t = db.prepare('SELECT * FROM tracks WHERE id = ?').get(params.id);
+  if (!t) return sendJSON(res, 404, { error: 'No encontrada' });
+  const motivo = limpiarTexto(d.motivo, 300);
+  if (motivo.length < 10) return sendJSON(res, 400, { error: 'Escribe el motivo de la revisión manual (mínimo 10 caracteres).' });
+  if (!filaOriginalidad(t.id)) db.prepare("INSERT OR IGNORE INTO originalidad (track_id, estado) VALUES (?, 'pendiente')").run(t.id);
+  db.prepare("UPDATE originalidad SET override_motivo = ?, override_at = datetime('now') WHERE track_id = ?").run(motivo, t.id);
+  // si el productor ya tenía un crédito por este beat y el admin lo aprueba, el crédito se anula (si no lo usó)
+  db.prepare("UPDATE verificaciones SET credito = 'anulado', resultado = 'ok' WHERE track_id = ? AND credito = 'disponible'").run(t.id);
+  anotar(t.producer_id, 'Aprobó a mano la venta monetizable de tu beat', `«${t.title}» · motivo: ${motivo}`, t.id);
+  alTerminarVerificacion(t.id);
+  sendJSON(res, 200, { ok: true, estado: estadoMonet(t) });
+});
+
+// ---- Migración única al modelo de licencias 2 ----
+// Free: la Básica vieja (MP3 sin monetizar) pasa a ser la Básica práctica (precio dentro de 800–1200 CUP).
+// Pro y Studio ya no venden Básica: se quita (si era la única licencia, el beat queda sin precio y se avisa).
+// Los beats del administrador conservan su precio y pasan a práctica.
+function migrarLicenciasV2() {
+  if (db.prepare("SELECT 1 FROM app_secrets WHERE clave = 'mig_licencias_v2'").get()) return;
+  db.exec('BEGIN');
+  try {
+    const filas = db.prepare("SELECT l.track_id, l.price_cup, t.producer_id, t.title FROM track_licenses l JOIN tracks t ON t.id = l.track_id WHERE l.license_type = 'basic'").all();
+    const aDemo = [];
+    for (const f of filas) {
+      const k = f.producer_id ? planClave(producerFull(f.producer_id)) : 'admin';
+      if (k === 'free' || k === 'admin') {
+        const precio = 0;                              // la Básica práctica ahora es gratis
+        if (db.prepare("SELECT 1 FROM track_licenses WHERE track_id = ? AND license_type = 'practice'").get(f.track_id)) {
+          db.prepare("DELETE FROM track_licenses WHERE track_id = ? AND license_type = 'basic'").run(f.track_id);
+        } else {
+          db.prepare("UPDATE track_licenses SET license_type = 'practice', price_cup = ? WHERE track_id = ? AND license_type = 'basic'").run(precio, f.track_id);
+        }
+        aDemo.push(f.track_id);
+        if (f.producer_id) anotar(f.producer_id, 'Tu Básica ahora es la Básica práctica', `«${f.title}»: demo de 1 minuto sin monetizar, gratis cuando el beat pase AudD. Pon precio a la Básica monetizable con «Editar».`, f.track_id);
+      } else {
+        db.prepare("DELETE FROM track_licenses WHERE track_id = ? AND license_type = 'basic'").run(f.track_id);
+        anotar(f.producer_id, 'Tu plan ya no vende la Básica', `«${f.title}»: ${k === 'pro' ? 'el plan Pro vende la Premium' : 'el plan Studio vende Premium, Ilimitada y Exclusiva'}. Revisa sus precios con «Editar».`, f.track_id);
+      }
+      recalcularPrecio(f.track_id);
+    }
+    db.prepare("INSERT INTO app_secrets (clave, valor) VALUES ('mig_licencias_v2', datetime('now'))").run();
+    db.exec('COMMIT');
+    aDemo.forEach(programarDemo);
+    if (filas.length) console.log(`Licencias 2: ${filas.length} licencia(s) Básica revisada(s)`);
+  } catch (e) {
+    db.exec('ROLLBACK');
+    console.error('No se pudo pasar al modelo de licencias 2:', e.message);
+  }
+}
+
+// ---- Migración única: la Básica práctica pasa a ser gratis ----
+// Las prácticas con precio quedan a 0 CUP y todos los beats del plan Free ofrecen la demo gratis.
+// Los pedidos de práctica ya vendidos conservan su licencia (si hay que devolver algo, se hace a mano).
+function migrarPracticaGratis() {
+  if (db.prepare("SELECT 1 FROM app_secrets WHERE clave = 'mig_practica_gratis'").get()) return;
+  db.exec('BEGIN');
+  try {
+    const conPrecio = db.prepare("SELECT l.track_id, t.producer_id, t.title FROM track_licenses l JOIN tracks t ON t.id = l.track_id WHERE l.license_type = 'practice' AND l.price_cup > 0").all();
+    db.prepare("UPDATE track_licenses SET price_cup = 0 WHERE license_type = 'practice'").run();
+    const nuevas = [];
+    for (const t of db.prepare("SELECT id, producer_id, title FROM tracks WHERE producer_id IS NOT NULL AND is_playlist = 0 AND is_pack = 0 AND is_exclusive = 0 AND sold = 0").all()) {
+      if (planClave(producerFull(t.producer_id)) !== 'free') continue;
+      if (db.prepare("SELECT 1 FROM track_licenses WHERE track_id = ? AND license_type = 'practice'").get(t.id)) continue;
+      db.prepare("INSERT INTO track_licenses (track_id, license_type, price_cup) VALUES (?, 'practice', 0)").run(t.id);
+      nuevas.push(t.id);
+    }
+    const tocadas = [...new Set([...conPrecio.map(f => f.track_id), ...nuevas])];
+    tocadas.forEach(recalcularPrecio);
+    for (const f of conPrecio) {
+      if (!f.producer_id) continue;
+      const sinBasica = !db.prepare("SELECT 1 FROM track_licenses WHERE track_id = ? AND license_type != 'practice'").get(f.track_id);
+      anotar(f.producer_id, 'La Básica práctica ahora es gratis', `«${f.title}»: la demo de 1 minuto se descarga gratis cuando el beat pasa AudD. ` +
+        (sinBasica ? 'Pon precio a la Básica monetizable (1 900–3 000 CUP) con «Editar» para ganar con este beat.' : 'Tus ventas siguen con la Básica monetizable.'), f.track_id);
+    }
+    db.prepare("INSERT INTO app_secrets (clave, valor) VALUES ('mig_practica_gratis', datetime('now'))").run();
+    db.exec('COMMIT');
+    tocadas.forEach(programarDemo);
+    if (tocadas.length) console.log(`Práctica gratis: ${tocadas.length} beat(s) actualizados`);
+  } catch (e) {
+    db.exec('ROLLBACK');
+    console.error('No se pudo pasar la Básica práctica a gratis:', e.message);
+  }
+}
+
+// ---- Migración única: plan Free nuevo ----
+// Se deja de vender la Básica práctica. Los beats Free que no cumplen (sin WAV sin tag o de más de 3 minutos)
+// y los que pasan de 2 activos se pausan con aviso; los que quedan pasan a la muestra de 1 minuto y a AudD.
+function migrarFreeV3() {
+  if (db.prepare("SELECT 1 FROM app_secrets WHERE clave = 'mig_free_v3'").get()) return;
+  const muestras = [];
+  db.exec('BEGIN');
+  try {
+    const conPractica = db.prepare("SELECT DISTINCT track_id FROM track_licenses WHERE license_type = 'practice'").all().map(r => r.track_id);
+    db.prepare("DELETE FROM track_licenses WHERE license_type = 'practice'").run();
+    conPractica.forEach(recalcularPrecio);
+    const plan = PRODUCER_PLANS.free;
+    for (const p of db.prepare('SELECT id FROM producers').all()) {
+      if (planClave(producerFull(p.id)) !== 'free') continue;
+      const pistas = db.prepare("SELECT * FROM tracks WHERE producer_id = ? AND is_playlist = 0 AND is_pack = 0 AND sold = 0 AND approval_status != 'rejected' ORDER BY id DESC").all(p.id);
+      let quedan = 0;
+      for (const t of pistas) {
+        const sinWav = !archivoExiste(t.wav_filename);
+        const largo = Number(t.duration_seconds) > plan.maxSegundos + 1;
+        let motivo = '';
+        if (sinWav || largo) motivo = 'Pausado por el plan Free nuevo: ' + [sinWav ? 'sube el WAV sin tag' : '', largo ? `el beat dura más de ${plan.maxSegundos / 60} minutos` : ''].filter(Boolean).join(' y ') + '.';
+        else if (quedan >= plan.maxBeats) motivo = `Pausado por el plan Free nuevo: máximo ${plan.maxBeats} beats activos.`;
+        if (motivo) {
+          db.prepare("UPDATE tracks SET approval_status = 'rejected', rejection_reason = ?, pausa_free = ? WHERE id = ?").run(motivo, largo ? 'largo' : (sinWav ? 'wav' : 'limite'), t.id);
+          anotar(p.id, 'Tu beat quedó pausado', `«${t.title}» · ${motivo}` + (largo ? ' Súbelo de nuevo recortado (máx. 3 min), en WAV y MP3 sin tag.' : sinWav ? ' Hazlo desde «Mis beats» → «Subir WAV sin tag».' : ' Elimina o vende otro para activarlo.'), t.id);
+        } else {
+          quedan++;
+          muestras.push(t.id);
+          // AudD lo verifica gratis (ya no hace falta pagar la verificación en el plan Free)
+          db.prepare("UPDATE originalidad SET estado = 'pendiente', error = '' WHERE track_id = ? AND audd_at = ''").run(t.id);
+        }
+      }
+    }
+    db.prepare("INSERT INTO app_secrets (clave, valor) VALUES ('mig_free_v3', datetime('now'))").run();
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    console.error('No se pudo pasar al plan Free nuevo:', e.message);
+    return;
+  }
+  // la muestra de 1 minuto se hace en segundo plano
+  (async () => { for (const id of muestras) { try { await regenerarMuestra(id, 0); } catch (e) { console.error(`Muestra de la pista ${id}:`, e.message); } } })();
+}
+
+// ---- Migración única: las pistas del administrador dejan de vender la Básica ----
+function migrarAdminSinBasica() {
+  if (db.prepare("SELECT 1 FROM app_secrets WHERE clave = 'mig_admin_sin_basica'").get()) return;
+  const ids = db.prepare("SELECT l.track_id FROM track_licenses l JOIN tracks t ON t.id = l.track_id WHERE t.producer_id IS NULL AND l.license_type = 'basic'").all().map(r => r.track_id);
+  db.prepare("DELETE FROM track_licenses WHERE license_type = 'basic' AND track_id IN (SELECT id FROM tracks WHERE producer_id IS NULL)").run();
+  ids.forEach(recalcularPrecio);
+  db.prepare("INSERT INTO app_secrets (clave, valor) VALUES ('mig_admin_sin_basica', datetime('now'))").run();
+  if (ids.length) console.log(`Pistas del administrador: se quitó la Básica de ${ids.length}`);
+}
 
 // ---------- Originalidad: huella propia + reconocimiento externo, obligatoria antes de publicar ----------
 const originalidadEnCola = new Set();
@@ -3345,9 +4260,15 @@ function fallaAudd() {
   try { const f = db.prepare("SELECT valor FROM app_secrets WHERE clave = 'audd_falla'").get(); return f ? JSON.parse(f.valor) : null; } catch { return null; }
 }
 async function verificarOriginalidad(id) {
+  await verificarOriginalidadPista(id);
+  try { alTerminarVerificacion(id); } catch (e) { console.error(`Después de verificar la pista ${id}:`, e.message); }
+}
+async function verificarOriginalidadPista(id) {
   const t = db.prepare('SELECT * FROM tracks WHERE id = ?').get(id);
   if (!t) { db.prepare('DELETE FROM originalidad WHERE track_id = ?').run(id); return; }
-  const candidatos = [t.master_filename, t.mp3_filename].filter(Boolean).map(f => path.join(UPLOADS_MASTERS, f));
+  // Free: primero el WAV sin tag, que es lo que se entrega y lo que tiene que pasar AudD
+  const wavPrimero = t.producer_id && archivoExiste(t.wav_filename) && planClave(producerFull(t.producer_id)) === 'free';
+  const candidatos = [wavPrimero ? t.wav_filename : '', t.master_filename, t.mp3_filename].filter(Boolean).map(f => path.join(UPLOADS_MASTERS, f));
   candidatos.push(path.join(UPLOADS_AUDIO, t.audio_filename || '-'));
   const archivo = candidatos.find(f => fs.existsSync(f));
   if (!archivo) throw new Error('no se encontró el audio para verificar');
@@ -3376,12 +4297,24 @@ async function verificarOriginalidad(id) {
   let externas = [];
   let servicio = '';
   let nota = '';
-  if (originalidad.externoActivo()) {
+  const previa = filaOriginalidad(id);
+  const dec = decisionAudd(t, previa);
+  const guardado = resultadoAuddGuardado(previa, archivo);
+  if (guardado) {
+    // este mismo audio ya pasó por AudD: se usa lo que respondió entonces, sin gastar consultas
+    externas = guardado;
+    servicio = 'AudD';
+    anotarConsumoAudd(0, id, 'reutilizada');
+    if (!previa.audd_archivo) db.prepare('UPDATE originalidad SET audd_archivo = ?, audd_json = ? WHERE track_id = ?').run(firmaArchivo(archivo), JSON.stringify(guardado), id);
+  } else if (!dec.ok) nota = dec.nota;
+  else if (originalidad.externoActivo()) {
     try {
       externas = await originalidad.reconocerExterno(archivo) || [];
       servicio = 'AudD';
       if (externas.consultas) anotarConsumoAudd(externas.consultas, id, 'verificacion');
       db.prepare("DELETE FROM app_secrets WHERE clave = 'audd_falla'").run();
+      if (!previa || !previa.audd_at) db.prepare("UPDATE originalidad SET audd_at = datetime('now') WHERE track_id = ?").run(id);
+      db.prepare('UPDATE originalidad SET audd_archivo = ?, audd_json = ? WHERE track_id = ?').run(firmaArchivo(archivo), JSON.stringify([...externas]), id);
     } catch (e) {
       externas = [];
       const msg = String((e && e.message) || 'sin respuesta').slice(0, 240);
@@ -3392,6 +4325,7 @@ async function verificarOriginalidad(id) {
   const estado = internas.length || externas.length ? 'coincidencias' : 'limpio';
   db.prepare(`UPDATE originalidad SET estado = ?, huella = ?, internas_json = ?, externas_json = ?, servicio = ?, error = ?, checked_at = datetime('now') WHERE track_id = ?`)
     .run(estado, originalidad.aTexto(h), JSON.stringify(internas), JSON.stringify(externas), servicio, nota, id);
+  if (internas.length) revisarFiltracion(id, internas).catch(() => {});
   if (t.producer_id && estado === 'coincidencias') {
     anotar(t.producer_id, 'Verificación de originalidad: coincidencias', `«${t.title}»: ` +
       [...internas.map(x => `se parece ${x.similitud} % a «${x.titulo}» de ${x.productor}`), ...externas.map(x => `coincide con «${x.titulo}» de ${x.artista}`)].join(' · ').slice(0, 400), id);
@@ -3414,6 +4348,18 @@ async function verificarOriginalidad(id) {
     anotar(t.producer_id, t.is_pack ? 'Retiró tu Sample Pack de la tienda' : 'Retiró tu beat de la tienda', `«${t.title}» · ${motivo}`, id);
   }
 }
+// «nombre:tamaño» del archivo escaneado: si el productor sube otro audio (p. ej. el WAV sin tag), cambia
+function firmaArchivo(f) {
+  try { return path.basename(f) + ':' + fs.statSync(f).size; } catch { return path.basename(f); }
+}
+// Resultado de AudD ya guardado para este mismo audio (null si nunca se escaneó o si el audio cambió)
+function resultadoAuddGuardado(o, archivo) {
+  if (!o || !o.audd_at) return null;
+  if (o.audd_archivo && o.audd_archivo !== firmaArchivo(archivo)) return null;
+  const fuente = o.audd_json || (o.servicio === 'AudD' ? o.externas_json : '');
+  if (!fuente) return null;                              // escaneo viejo sin resultado guardado: se repite una vez
+  try { const r = JSON.parse(fuente); return Array.isArray(r) ? r : null; } catch { return null; }
+}
 function autoRetiroActivo() {
   const c = db.prepare('SELECT orig_auto_retiro FROM platform_config WHERE id = 1').get();
   return !c || c.orig_auto_retiro !== 0;
@@ -3426,7 +4372,9 @@ function originalidadPublica(trackId, completa) {
   let internas = [], externas = [];
   try { internas = JSON.parse(v.internas_json || '[]'); } catch { internas = []; }
   try { externas = JSON.parse(v.externas_json || '[]'); } catch { externas = []; }
-  return { ...base, error: v.error, internas, externas, override: v.override_motivo ? { motivo: v.override_motivo, fecha: v.override_at } : null };
+  let filtracion = null;
+  try { filtracion = v.forense_json ? JSON.parse(v.forense_json) : null; } catch { filtracion = null; }
+  return { ...base, error: v.error, internas, externas, filtracion, override: v.override_motivo ? { motivo: v.override_motivo, fecha: v.override_at } : null };
 }
 // revisa lo que falta verificar (al arrancar, cada 10 minutos, y cuando se conecta el servicio externo)
 function revisarOriginalidadPendiente() {
@@ -3435,8 +4383,8 @@ function revisarOriginalidadPendiente() {
   const externo = originalidad.externoActivo();
   const filas = db.prepare(`SELECT t.id FROM tracks t LEFT JOIN originalidad o ON o.track_id = t.id
     WHERE o.track_id IS NULL OR o.estado = 'pendiente' OR (o.estado = 'error' AND o.checked_at < datetime('now', '-1 hour'))
-    ${externo ? "OR (o.servicio = '' AND o.error = '' AND o.estado IN ('limpio', 'coincidencias')) OR (o.servicio = '' AND o.error LIKE 'Solo se comparó dentro%' AND o.checked_at < datetime('now', '-6 hours'))" : ''}
-    ORDER BY t.approval_status = 'pending' DESC, t.id DESC LIMIT 5`).all();
+    ${externo ? "OR (o.servicio = '' AND o.error = '' AND o.estado IN ('limpio', 'coincidencias')) OR (o.servicio = '' AND o.error LIKE 'Solo se comparó dentro%' AND o.checked_at < datetime('now', '-6 hours')) OR (o.servicio = '' AND o.error LIKE 'En cola%' AND o.checked_at < datetime('now', 'start of month'))" : ''}
+    ORDER BY t.approval_status = 'pending' DESC, (SELECT CASE p.plan WHEN 'studio' THEN 0 WHEN 'pro' THEN 1 ELSE 2 END FROM producers p WHERE p.id = t.producer_id) ASC, t.id DESC LIMIT 5`).all();
   for (const f of filas) programarOriginalidad(f.id);
 }
 // Pistas que todavía no tienen forma de onda (las subidas antes de esta función): de a pocas
@@ -3537,7 +4485,7 @@ function packParaPanel(t, nombres) {
     archivo: Boolean(t.stems_remote) || existe(t.stems_filename), peso,
     procesando: archivoGrandeEnProceso(t), externo: almacen.activo(),
     originalidad: originalidadPublica(t.id, Boolean(nombres)),
-    ventas: db.prepare("SELECT COUNT(*) as c FROM orders WHERE track_id = ? AND status = 'approved'").get(t.id).c,
+    ventas: db.prepare("SELECT COUNT(*) as c FROM orders WHERE track_id = ? AND status = 'approved' AND COALESCE(pago_metodo, '') != 'gratis'").get(t.id).c,
     registro: (db.prepare('SELECT codigo FROM registros WHERE track_id = ?').get(t.id) || {}).codigo || '',
   };
 }
@@ -3573,7 +4521,7 @@ function productorConPacks(req, res) {
   if (!producer) { sendJSON(res, 401, { error: 'No autorizado' }); return null; }
   const full = producerFull(producer.id);
   const plan = planEfectivo(full);
-  if (!plan.packs) { sendJSON(res, 403, { error: `Tu plan ${plan.label} no permite vender Sample Packs. Sube al plan Pro o Studio.` }); return null; }
+  if (!plan.packs) { sendJSON(res, 403, { error: `Tu plan ${plan.label} no permite vender Sample Packs. Son del plan Studio.` }); return null; }
   return full;
 }
 
@@ -3673,7 +4621,8 @@ route('POST', '/api/admin/tracks', async (req, res) => {
   catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   let r;
   try {
-    r = await crearPistaDesdeSubidas(d, 'admin', { watermark: false });
+    // el administrador vende Premium, Ilimitada y Exclusiva (la Básica es del plan Free)
+    r = await crearPistaDesdeSubidas(d, 'admin', { watermark: false, allowedLicenses: LICENCIAS_ADMIN, planLabel: 'de administrador' });
   } catch (err) {
     if (!err || !err.status) console.error(err);
     return sendJSON(res, (err && err.status) || 500, { error: (err && err.error) || 'Error al procesar la pista' });
@@ -3721,7 +4670,11 @@ route('POST', '/api/producer/tracks', async (req, res) => {
       allowPlaylist: plan.playlist,
       allowedLicenses: licenciasPermitidas(full),
       requireMp3_320: true,
+      requireWav24: true,
       planLabel: plan.label,
+      planKey: planClave(full),
+      maxSegundos: plan.maxSegundos || 0,
+      muestraSegundos: plan.muestraSegundos || 0,
     });
   } catch (err) {
     if (!err || !err.status) console.error(err);
@@ -3738,7 +4691,7 @@ route('POST', '/api/producer/tracks', async (req, res) => {
   const registro = registrarObra(id);
   programarOriginalidad(id);
   if (r.stemsFilename) programarArchivo(id);
-  sendJSON(res, 201, { id, registro: registro ? registro.codigo : null });
+  sendJSON(res, 201, { id, registro: registro ? registro.codigo : null, avisos: (r.validacion && r.validacion.avisos) || [] });
 });
 
 route('GET', '/api/admin/tracks', (req, res, params, query) => {
@@ -3761,6 +4714,7 @@ route('GET', '/api/admin/tracks', (req, res, params, query) => {
     licenses: type === 'catalog' ? getTrackLicenses(t.id) : [],
     archivos: archivosDePista(t),
     originalidad: originalidadPublica(t.id, true),
+    monet: t.is_playlist || t.is_pack ? null : estadoMonet(t),
   }));
 
   sendJSON(res, 200, { tracks, servicioExterno: originalidad.externoActivo() });
@@ -3784,7 +4738,7 @@ function contarCoincidencias() {
 route('GET', '/api/admin/coincidencias', (req, res) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   const filas = db.prepare(`SELECT t.id, t.title, t.producer_id, t.approval_status, t.rejection_reason, t.is_pack, t.is_playlist, t.cover_filename, t.created_at,
-      o.internas_json, o.externas_json, o.servicio, o.checked_at, o.retirada_auto, p.name as producer_name, p.contact_phone as producer_phone
+      o.internas_json, o.externas_json, o.servicio, o.checked_at, o.retirada_auto, o.forense_json, p.name as producer_name, p.contact_phone as producer_phone
     FROM originalidad o JOIN tracks t ON t.id = o.track_id LEFT JOIN producers p ON p.id = t.producer_id
     WHERE ${sinDecidir} ORDER BY (o.externas_json != '[]') DESC, o.checked_at DESC`).all();
   const existe = db.prepare('SELECT id, approval_status FROM tracks WHERE id = ?');
@@ -3798,9 +4752,10 @@ route('GET', '/api/admin/coincidencias', (req, res) => {
         id: f.id, titulo: f.title, productor: f.producer_id ? (f.producer_name || 'Productor eliminado') : '', productorTel: f.producer_phone || '',
         tipo: f.is_pack ? 'pack' : (f.is_playlist ? 'playlist' : 'beat'), estado: f.approval_status, motivo: f.rejection_reason || '',
         retiradaAuto: Boolean(f.retirada_auto), portada: Boolean(f.cover_filename), subida: f.created_at, verificada: f.checked_at, servicio: f.servicio,
-        ventas: db.prepare("SELECT COUNT(*) as c FROM orders WHERE track_id = ? AND status = 'approved'").get(f.id).c,
+        ventas: db.prepare("SELECT COUNT(*) as c FROM orders WHERE track_id = ? AND status = 'approved' AND COALESCE(pago_metodo, '') != 'gratis'").get(f.id).c,
         externas,
         internas: internas.map(x => ({ ...x, existe: Boolean(existe.get(x.trackId)) })),
+        filtracion: (() => { try { return f.forense_json ? JSON.parse(f.forense_json) : null; } catch { return null; } })(),
       };
     }),
   });
@@ -3869,7 +4824,10 @@ function consumoAudd() {
   const ult = db.prepare("SELECT consultas FROM audd_uso WHERE tipo = 'verificacion' ORDER BY id DESC LIMIT 20").all().map(r => r.consultas);
   const porCancion = ult.length ? Math.max(1, Math.round(ult.reduce((a, b) => a + b, 0) / ult.length)) : 5;
   return { incluidas, usadas, quedan, porCancion, cancionesPlan: Math.floor(incluidas / porCancion), alcanzaPara: Math.floor(quedan / porCancion),
-    desde, verificaciones: db.prepare(`SELECT COUNT(*) as n FROM audd_uso WHERE tipo = 'verificacion' ${desde ? 'AND creado > ?' : ''}`).get(...(desde ? [desde] : [])).n };
+    desde, verificaciones: db.prepare(`SELECT COUNT(*) as n FROM audd_uso WHERE tipo = 'verificacion' ${desde ? 'AND creado > ?' : ''}`).get(...(desde ? [desde] : [])).n,
+    // veces que se volvió a verificar un beat ya escaneado sin gastar consultas, y beats que ya tienen su resultado guardado
+    reutilizadas: db.prepare("SELECT COUNT(*) as n FROM audd_uso WHERE tipo = 'reutilizada'").get().n,
+    escaneados: db.prepare("SELECT COUNT(*) as n FROM originalidad WHERE audd_at != ''").get().n };
 }
 route('POST', '/api/admin/originalidad/consumo', async (req, res) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
@@ -3899,12 +4857,14 @@ route('POST', '/api/admin/tracks/:id/price', async (req, res, params) => {
     const body = await readBody(req, 1024 * 5);
     const raw = jsonObjeto(body.toString('utf8'));
     const prices = {
+      practice: 0,
       basic: parsePrecio(raw.priceBasic ?? raw.priceCup),
       premium: parsePrecio(raw.pricePremium),
       unlimited: parsePrecio(raw.priceUnlimited),
       exclusive: parsePrecio(raw.priceExclusive),
     };
 
+    if (!track.producer_id && prices.basic > 0) return sendJSON(res, 403, { error: 'La Básica es solo del plan Free: tus pistas se venden con Premium, Ilimitada o Exclusiva.' });
     const validation = validateLicenseCombination(prices);
     if (!validation.ok) {
       return sendJSON(res, 400, { error: validation.error });
@@ -3924,9 +4884,9 @@ route('POST', '/api/admin/tracks/:id/price', async (req, res, params) => {
       }
     }
 
-    const antes = getTrackLicenses(track.id).map(l => `${LICENSE_LABELS[l.license_type] || l.license_type} ${l.price_cup}`).join(', ') || 'sin precio';
+    const antes = getTrackLicenses(track.id).map(l => `${etiquetaLicencia(l.license_type, 2)} ${l.price_cup}`).join(', ') || 'sin precio';
     aplicarPrecios(track.id, prices, validation);
-    const despues = getTrackLicenses(track.id).map(l => `${LICENSE_LABELS[l.license_type] || l.license_type} ${l.price_cup}`).join(', ') || 'sin precio';
+    const despues = getTrackLicenses(track.id).map(l => `${etiquetaLicencia(l.license_type, 2)} ${l.price_cup}`).join(', ') || 'sin precio';
     if (antes !== despues) anotar(track.producer_id, 'Cambió los precios de un beat', `«${track.title}»: antes ${antes} CUP · ahora ${despues} CUP`, track.id);
     sendJSON(res, 200, { ok: true });
   } catch {
@@ -4662,7 +5622,7 @@ function saldoDisponible(producerId) {
            COALESCE(NULLIF(wallet_currency, ''), 'CUP') as moneda, paid_units, producer_earning_units,
            COALESCE(NULLIF(approved_at, ''), created_at) as fecha
     FROM orders
-    WHERE producer_id = ? AND status = 'approved' AND NOT (COALESCE(producer_paid, 0) = 1 AND withdrawal_id IS NULL)
+    WHERE producer_id = ? AND status = 'approved' AND COALESCE(pago_metodo, '') != 'gratis' AND NOT (COALESCE(producer_paid, 0) = 1 AND withdrawal_id IS NULL)
     ORDER BY fecha ASC
   `).all(producerId);
   const creditos = db.prepare('SELECT * FROM producer_credits WHERE producer_id = ? ORDER BY id').all(producerId);
@@ -4723,10 +5683,10 @@ function normalizarFecha(f) {
 function movimientosProductor(producerId) {
   const lista = [];
   const ventas = db.prepare(`
-    SELECT id, track_title, license_type, commission_percent_at_sale, producer_earning_cup, producer_paid, withdrawal_id,
+    SELECT id, track_title, license_type, terms_v, commission_percent_at_sale, producer_earning_cup, producer_paid, withdrawal_id,
            COALESCE(NULLIF(wallet_currency, ''), 'CUP') as moneda, paid_units, producer_earning_units, price_cup_at_sale,
            COALESCE(NULLIF(approved_at, ''), created_at) as fecha
-    FROM orders WHERE producer_id = ? AND status = 'approved'
+    FROM orders WHERE producer_id = ? AND status = 'approved' AND COALESCE(pago_metodo, '') != 'gratis'
   `).all(producerId);
   for (const o of ventas) {
     const antiguo = o.producer_paid && !o.withdrawal_id;
@@ -4734,21 +5694,21 @@ function movimientosProductor(producerId) {
       clave: 'venta:' + o.id, id: o.id, borrable: true,
       fecha: normalizarFecha(o.fecha), tipo: 'venta',
       titulo: `Venta · ${o.track_title}`,
-      detalle: `${LICENSE_LABELS[o.license_type] || o.license_type} · el comprador pagó ${fmtMonto(o.paid_units || o.price_cup_at_sale, o.moneda)} ${etiquetaMoneda(o.moneda)} · comisión ${o.commission_percent_at_sale || 0}%`,
+      detalle: `${etiquetaLicencia(o.license_type, o.terms_v)} · el comprador pagó ${fmtMonto(o.paid_units || o.price_cup_at_sale, o.moneda)} ${etiquetaMoneda(o.moneda)} · comisión ${o.commission_percent_at_sale || 0}%`,
       moneda: o.moneda, label: etiquetaMoneda(o.moneda), unidades: Number(o.producer_earning_units) || 0,
       estado: antiguo ? 'cobrada antes' : '',
     });
   }
   // Ventas que el administrador todavía no aprueba: se ven, pero no suman hasta aprobarse
   for (const o of db.prepare(`
-    SELECT id, track_title, license_type, created_at, COALESCE(NULLIF(wallet_currency, ''), 'CUP') as moneda, paid_units, price_cup_at_sale
+    SELECT id, track_title, license_type, terms_v, created_at, COALESCE(NULLIF(wallet_currency, ''), 'CUP') as moneda, paid_units, price_cup_at_sale
     FROM orders WHERE producer_id = ? AND status = 'pending'
   `).all(producerId)) {
     lista.push({
       clave: 'venta:' + o.id, id: o.id, borrable: false,
       fecha: normalizarFecha(o.created_at), tipo: 'venta',
       titulo: `Venta · ${o.track_title}`,
-      detalle: `${LICENSE_LABELS[o.license_type] || o.license_type} · el comprador pagó ${fmtMonto(o.paid_units || o.price_cup_at_sale, o.moneda)} ${etiquetaMoneda(o.moneda)} · se suma cuando el administrador apruebe el pago`,
+      detalle: `${etiquetaLicencia(o.license_type, o.terms_v)} · el comprador pagó ${fmtMonto(o.paid_units || o.price_cup_at_sale, o.moneda)} ${etiquetaMoneda(o.moneda)} · se suma cuando el administrador apruebe el pago`,
       moneda: o.moneda, label: etiquetaMoneda(o.moneda), unidades: 0, estado: 'esperando aprobación',
     });
   }
@@ -5151,8 +6111,8 @@ route('GET', '/api/producer/stats', (req, res) => {
   if (plan.stats) {
     const pistas = db.prepare(`
       SELECT t.id, t.title, t.plays, t.likes, t.is_playlist, t.approval_status, t.sold,
-             (SELECT COUNT(*) FROM orders o WHERE o.track_id = t.id AND o.status = 'approved') as ventas,
-             (SELECT COALESCE(SUM(o.producer_earning_cup),0) FROM orders o WHERE o.track_id = t.id AND o.status = 'approved') as ganado
+             (SELECT COUNT(*) FROM orders o WHERE o.track_id = t.id AND o.status = 'approved' AND COALESCE(o.pago_metodo, '') != 'gratis') as ventas,
+             (SELECT COALESCE(SUM(o.producer_earning_cup),0) FROM orders o WHERE o.track_id = t.id AND o.status = 'approved' AND COALESCE(o.pago_metodo, '') != 'gratis') as ganado
       FROM tracks t WHERE t.producer_id = ? ORDER BY t.plays DESC
     `).all(full.id);
     out.pistas = pistas;
@@ -5162,6 +6122,10 @@ route('GET', '/api/producer/stats', (req, res) => {
       ventas: pistas.reduce((s, t) => s + (t.ventas || 0), 0),
       ganado: redondear(pistas.reduce((s, t) => s + (t.ganado || 0), 0)),
     };
+    // reporte básico (Pro): lo de este mes; Studio además descarga el reporte mensual en PDF
+    const m = datosMes(full.id, mesActual());
+    out.mes = { clave: m.clave, texto: m.texto, ventas: m.ventas, ganado: m.ganado };
+    if (planClave(full) === 'studio') out.reportes = [mesActual(), mesAnterior()].map(k => ({ mes: k, texto: textoMes(k) }));
   }
   if ((full.plan || 'free') === 'studio' && plan === PRODUCER_PLANS.studio) {
     out.bonoLikes = {
@@ -5174,12 +6138,59 @@ route('GET', '/api/producer/stats', (req, res) => {
   sendJSON(res, 200, out);
 });
 
+// ---------- Reportes ----------
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const mesActual = () => new Date().toISOString().slice(0, 7);
+const mesAnterior = () => { const d = new Date(); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - 1); return d.toISOString().slice(0, 7); };
+const textoMes = (k) => { const [y, m] = String(k).split('-').map(Number); return `${MESES[(m || 1) - 1]} de ${y}`; };
+function datosMes(producerId, clave) {
+  const fechaVenta = "substr(COALESCE(NULLIF(o.approved_at, ''), o.created_at), 1, 7)";
+  const ventas = db.prepare(`SELECT o.track_title, o.license_type, o.terms_v, o.producer_earning_cup, o.price_cup_at_sale, o.verif_suplemento
+    FROM orders o WHERE o.producer_id = ? AND o.status = 'approved' AND COALESCE(o.pago_metodo, '') != 'gratis' AND ${fechaVenta} = ?`).all(producerId, clave);
+  const demos = db.prepare(`SELECT COUNT(*) as c FROM orders o WHERE o.producer_id = ? AND o.status = 'approved' AND o.pago_metodo = 'gratis' AND ${fechaVenta} = ?`).get(producerId, clave).c;
+  const porLic = new Map(), porBeat = new Map();
+  for (const v of ventas) {
+    const n = etiquetaLicencia(v.license_type, v.terms_v);
+    const a = porLic.get(n) || { nombre: n, ventas: 0, ganado: 0 }; a.ventas++; a.ganado += v.producer_earning_cup || 0; porLic.set(n, a);
+    const b = porBeat.get(v.track_title) || { titulo: v.track_title, ventas: 0, ganado: 0 }; b.ventas++; b.ganado += v.producer_earning_cup || 0; porBeat.set(v.track_title, b);
+  }
+  const retiros = db.prepare("SELECT COUNT(*) as c, COALESCE(SUM(amount_cup), 0) as t FROM producer_withdrawals WHERE producer_id = ? AND status = 'paid' AND substr(COALESCE(NULLIF(resolved_at, ''), created_at), 1, 7) = ?").get(producerId, clave);
+  return {
+    clave, texto: textoMes(clave), ventas: ventas.length, demos,
+    ganado: redondear(ventas.reduce((s, v) => s + (v.producer_earning_cup || 0), 0)),
+    vendido: redondear(ventas.reduce((s, v) => s + (v.price_cup_at_sale || 0) - (v.verif_suplemento || 0), 0)),
+    porLicencia: [...porLic.values()].sort((a, b) => b.ganado - a.ganado),
+    porBeat: [...porBeat.values()].sort((a, b) => b.ventas - a.ventas || b.ganado - a.ganado).slice(0, 8),
+    retiros: retiros.c, retirado: retiros.t,
+    hots: db.prepare("SELECT COUNT(*) as c FROM hot_requests WHERE producer_id = ? AND status = 'approved' AND substr(created_at, 1, 7) = ?").get(producerId, clave).c,
+    verificaciones: db.prepare("SELECT COUNT(*) as c FROM originalidad o JOIN tracks t ON t.id = o.track_id WHERE t.producer_id = ? AND substr(o.audd_at, 1, 7) = ?").get(producerId, clave).c,
+  };
+}
+route('GET', '/api/producer/reporte', (req, res, params, query) => {
+  const producer = getAuthedProducer(req);
+  if (!producer) return sendJSON(res, 401, { error: 'No autorizado' });
+  const full = producerFull(producer.id);
+  if (planClave(full) !== 'studio') return sendJSON(res, 403, { error: 'El reporte mensual en PDF es del plan Studio.' });
+  const clave = String(query.get('mes') || mesActual());
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(clave)) return sendJSON(res, 400, { error: 'Mes inválido' });
+  const d = datosMes(full.id, clave);
+  const perfil = db.prepare('SELECT artist_name FROM profile WHERE id = 1').get();
+  const pdf = buildReporteMensualPdf({
+    ...d, productor: full.name, mesTexto: d.texto,
+    escuchados: db.prepare('SELECT title as titulo, plays, likes FROM tracks WHERE producer_id = ? AND is_pack = 0 ORDER BY plays DESC LIMIT 5').all(full.id),
+    generado: new Date().toLocaleDateString('es', { day: '2-digit', month: 'long', year: 'numeric', timeZone: 'America/Havana' }),
+    platformName: (perfil && perfil.artist_name) || 'Zona Beats',
+  });
+  res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': dispositionAdjunto(`Reporte ${d.texto}.pdf`), 'Content-Length': pdf.length, 'Cache-Control': 'private, no-store' });
+  res.end(pdf);
+});
+
 route('GET', '/api/admin/orders-history', (req, res) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
   const orders = db.prepare(`
     SELECT o.*, p.name as producer_name
     FROM orders o LEFT JOIN producers p ON p.id = o.producer_id
-    WHERE o.status IN ('approved', 'rejected') ORDER BY COALESCE(NULLIF(o.approved_at, ''), NULLIF(o.rejected_at, ''), o.created_at) DESC, o.id DESC
+    WHERE o.status IN ('approved', 'rejected') AND COALESCE(o.pago_metodo, '') != 'gratis' ORDER BY COALESCE(NULLIF(o.approved_at, ''), NULLIF(o.rejected_at, ''), o.created_at) DESC, o.id DESC
     LIMIT 3000
   `).all();
   const oc = clavesOcultas('admin:compras');
@@ -5278,13 +6289,15 @@ route('GET', '/api/admin/tracks/:id/file', (req, res, params, query) => {
 
 route('GET', '/api/admin/pending-tracks', (req, res) => {
   if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
-  const tracks = db.prepare(`
+  const filas = db.prepare(`
     SELECT t.*, p.name as producer_name, p.email as producer_email, p.plan as producer_plan
     FROM tracks t
     LEFT JOIN producers p ON p.id = t.producer_id
     WHERE t.approval_status = 'pending' AND t.is_pack = 0
     ORDER BY t.created_at ASC
-  `).all().map(t => ({ ...t, licenses: getTrackLicenses(t.id), archivos: archivosDePista(t), originalidad: originalidadPublica(t.id, true) }));
+  `).all();
+  const mp = mapaPrioridad();
+  const tracks = ordenarPorPrioridad(filas, true).map(t => ({ ...t, prioridad: NOMBRE_PRIORIDAD[prioridadDe(mp, t.producer_id)], licenses: getTrackLicenses(t.id), archivos: archivosDePista(t), originalidad: originalidadPublica(t.id, true), monet: t.is_playlist || t.is_pack ? null : estadoMonet(t) }));
   sendJSON(res, 200, { tracks, servicioExterno: originalidad.externoActivo() });
 });
 
@@ -5465,7 +6478,7 @@ route('GET', '/api/admin/summary', (req, res, params, query) => {
   const desdeMes = reinicio && reinicio > inicioMes ? reinicio : inicioMes;
   const sumar = (desde) => db.prepare(`SELECT COUNT(*) as ventas, COALESCE(SUM(price_cup_at_sale),0) as total,
       COALESCE(SUM(CASE WHEN producer_id IS NULL THEN price_cup_at_sale ELSE price_cup_at_sale - producer_earning_cup END),0) as tuyo
-      FROM orders WHERE status = 'approved' AND datetime(COALESCE(NULLIF(approved_at, ''), created_at)) >= datetime(?)`).get(desde);
+      FROM orders WHERE status = 'approved' AND COALESCE(pago_metodo, '') != 'gratis' AND datetime(COALESCE(NULLIF(approved_at, ''), created_at)) >= datetime(?)`).get(desde);
   const mes = sumar(desdeMes);
   const siempre = sumar(reinicio || '0000-01-01 00:00:00');
   const deuda = db.prepare('SELECT id FROM producers').all().reduce((s, p) => s + deudaConProductor(p.id), 0);
@@ -5571,7 +6584,7 @@ route('POST', '/api/admin/orders/:id/reject', async (req, res, params) => {
   try { const b = await readBody(req, 2048); if (b.length) reason = limpiarTexto(jsonObjeto(b.toString('utf8')).reason, 300); }
   catch { return sendJSON(res, 400, { error: 'Solicitud inválida' }); }
   db.prepare("UPDATE orders SET status = 'rejected', reject_reason = ?, rejected_at = datetime('now') WHERE id = ?").run(reason, order.id);
-  anotar(order.producer_id, 'Rechazó un pago de tu beat', `«${order.track_title}» · ${LICENSE_LABELS[order.license_type] || order.license_type} · ${order.price_label}` + (reason ? ` · motivo: ${reason}` : ''), order.track_id);
+  anotar(order.producer_id, 'Rechazó un pago de tu beat', `«${order.track_title}» · ${etiquetaLicencia(order.license_type, order.terms_v)} · ${order.price_label}` + (reason ? ` · motivo: ${reason}` : ''), order.track_id);
   sendJSON(res, 200, { ok: true });
 });
 
@@ -5619,12 +6632,40 @@ function aprobarPedido(order, base) {
     return { status: 409, body: { error: 'El beat de este pedido fue eliminado. Rechaza el pedido y gestiona la devolución.' } };
   }
 
+  // El artista pagó la verificación de un beat Free sin verificar: el pago se confirma ahora y la licencia
+  // se entrega sola cuando la verificación AudD salga bien (y el productor haya subido el WAV sin tag).
+  if (Number(order.verif_suplemento) > 0) {
+    const tv = db.prepare('SELECT * FROM tracks WHERE id = ?').get(order.track_id);
+    const listo = estadoMonet(tv) === 'aprobada' && (!tv.producer_id || archivoExiste(tv.wav_filename));
+    if (!listo) {
+      if (order.verif_pago_ok) {
+        return { status: 409, body: { error: order.verif_estado === 'fallo'
+          ? 'El beat no pasó la verificación de originalidad: no se puede entregar la licencia monetizable. Ofrécele otro beat al artista o devuélvele el dinero.'
+          : 'Pago ya confirmado: la licencia se entrega sola cuando termine la verificación del beat.' } };
+      }
+      db.prepare("UPDATE orders SET verif_pago_ok = 1, verif_estado = 'esperando' WHERE id = ?").run(order.id);
+      if (!tv.verif_pagada) {
+        db.prepare("INSERT INTO verificaciones (producer_id, track_id, monto_cup, metodo, status, order_id, resolved_at) VALUES (?, ?, ?, 'artista', 'approved', ?, datetime('now'))")
+          .run(tv.producer_id || null, tv.id, order.verif_suplemento, order.id);
+        marcarVerifPagada(tv.id, 'artista');
+      }
+      const faltaWav = tv.producer_id && !archivoExiste(tv.wav_filename);
+      anotar(tv.producer_id, 'Un artista pagó la verificación de tu beat', `«${tv.title}» · quiere la Básica monetizable.` +
+        (faltaWav ? ' Sube el WAV sin tag del beat completo desde «Mis beats» para que se verifique y se entregue.' : ' Se está verificando con AudD.'), tv.id);
+      return { status: 200, body: { ok: true, esperandoVerificacion: true,
+        warning: 'Pago confirmado. La licencia se entrega sola cuando el beat pase la verificación AudD' + (faltaWav ? ' (el productor tiene que subir el WAV sin tag).' : '.') } };
+    }
+  }
+
   let trackMarkedSold = false;
   let wentToVip = false;
   let warning = null;
   const trackRow = db.prepare('SELECT id, sold, is_exclusive FROM tracks WHERE id = ?').get(order.track_id);
 
-  if (SINGLE_SALE_LICENSES.includes(order.license_type)) {
+  if (Number(order.terms_v) >= 2 && order.license_type === 'basic' && basicaUnicaVendida(order.track_id)) {
+    return { status: 409, body: { error: 'La Básica monetizable de este beat ya se vendió a otro artista (es venta única). Rechaza el pedido y gestiona la devolución.' } };
+  }
+  if (cierraElBeat(order)) {
     if (trackRow && trackRow.sold) {
       return { status: 409, body: { error: 'Este beat ya se vendió con licencia única. Rechaza el pedido y gestiona la devolución.' } };
     }
@@ -5648,7 +6689,7 @@ function aprobarPedido(order, base) {
   const pistaCompleta = db.prepare('SELECT * FROM tracks WHERE id = ?').get(order.track_id);
   const arch = archivosDePista(pistaCompleta);
   const faltan = [];
-  if (['premium', 'unlimited', 'exclusive'].includes(order.license_type) && !arch.wav) faltan.push('WAV');
+  if ((['premium', 'unlimited', 'exclusive'].includes(order.license_type) || (Number(order.terms_v) >= 2 && order.license_type === 'basic')) && !arch.wav) faltan.push('WAV');
   if (['unlimited', 'exclusive'].includes(order.license_type) && !arch.stems) faltan.push('STEMS');
   if (faltan.length) {
     const aviso = `Ojo: este beat no tiene ${faltan.join(' ni ')} subido, así que el comprador solo va a recibir lo que hay. Pídele esos archivos al productor y mándaselos por WhatsApp.`;
@@ -5666,9 +6707,13 @@ function aprobarPedido(order, base) {
     const prodRow = producerFull(order.producer_id);
     if (prodRow) {
       commissionPercent = planEfectivo(prodRow).commission;
-      producerEarning = Math.round((order.price_cup_at_sale || 0) * (1 - commissionPercent / 100) * 100) / 100;
+      // el suplemento de verificación (si el artista lo pagó) no es ganancia del productor
+      const total = Number(order.price_cup_at_sale) || 0;
+      const sup = Math.min(total, Number(order.verif_suplemento) || 0);
+      const parte = total > 0 ? (total - sup) / total : 1;
+      producerEarning = Math.round((total - sup) * (1 - commissionPercent / 100) * 100) / 100;
       // a la billetera del productor va lo que pagó el comprador, en su moneda, menos la comisión del plan
-      producerEarningUnits = redondearMoneda(pagado * (1 - commissionPercent / 100), monedaBilletera);
+      producerEarningUnits = redondearMoneda(pagado * parte * (1 - commissionPercent / 100), monedaBilletera);
     }
   }
 
@@ -5680,6 +6725,22 @@ function aprobarPedido(order, base) {
               wallet_currency = ?, paid_units = ?, producer_earning_units = ? WHERE id = ?`)
     .run(certificateId, certificateHash, commissionPercent, producerEarning, new Date().toISOString(), buyerToken,
       monedaBilletera, pagado, order.producer_id ? producerEarningUnits : 0, order.id);
+  if (order.verif_pago_ok) db.prepare("UPDATE orders SET verif_estado = '' WHERE id = ?").run(order.id);
+  // Básica monetizable: venta única. Se retira esa licencia; la práctica sigue a la venta.
+  if (Number(order.terms_v) >= 2 && order.license_type === 'basic') {
+    db.prepare("DELETE FROM track_licenses WHERE track_id = ? AND license_type = 'basic'").run(order.track_id);
+    recalcularPrecio(order.track_id);
+    // si no le queda otra licencia (plan Free), el beat sale del catálogo y libera su lugar
+    if (!db.prepare('SELECT 1 FROM track_licenses WHERE track_id = ?').get(order.track_id)) {
+      db.prepare('UPDATE tracks SET sold = 1, for_sale = 0 WHERE id = ?').run(order.track_id);
+      trackMarkedSold = true;
+    }
+  }
+  if (order.license_type === 'practice') prepararEntregaPractica(order.id).catch(() => {});
+  if (llevaForense(order)) {
+    db.prepare("UPDATE orders SET forense = 'pendiente' WHERE id = ?").run(order.id);
+    programarForense(order.id);
+  }
 
   return { status: 200, body: {
     ok: true, trackMarkedSold, wentToVip, warning, certificateId, commissionPercent, producerEarning,
@@ -5823,6 +6884,16 @@ function htmlConVistaPrevia(html, req, query) {
   let titulo = perfil.artist_name ? `${perfil.artist_name} · Zona Beats` : 'Zona Beats';
   let descripcion = perfil.bio || 'Beats, licencias y colaboraciones.';
   let imagen = perfil && fs.existsSync(path.join(UPLOADS_COVERS, String((db.prepare('SELECT avatar_filename FROM profile WHERE id = 1').get() || {}).avatar_filename || '-'))) ? `${base}/api/avatar?s=600` : '';
+  const idProd = Number(query && query.get('productor'));
+  if (idProd) {
+    const p = db.prepare('SELECT id, name, bio, avatar_filename FROM producers WHERE id = ? AND approved = 1 AND active = 1').get(idProd);
+    if (p) {
+      const n = db.prepare("SELECT COUNT(*) as c FROM tracks WHERE producer_id = ? AND approval_status = 'approved' AND sold = 0 AND is_pack = 0 AND is_playlist = 0").get(p.id).c;
+      titulo = `${p.name} · beats en Zona Beats`;
+      descripcion = (p.bio ? String(p.bio).slice(0, 150) + ' · ' : '') + `${n} beat${n === 1 ? '' : 's'} a la venta`;
+      if (p.avatar_filename) imagen = `${base}/api/producer/avatar/${p.id}?s=600`;
+    }
+  }
   const id = Number(query && query.get('pista'));
   if (id) {
     const t = db.prepare(`SELECT t.id, t.title, t.genre, t.cover_filename, t.approval_status, p.name as producer_name
@@ -5853,7 +6924,9 @@ function serveStatic(req, res, pathname, query) {
   }
   const legal = { '/terminos': 'terminos.html', '/privacidad': 'privacidad.html', '/denunciar': 'denunciar.html' }[pathname.replace(/\/$/, '')];
   if (legal) return sendFile(res, path.join(STATIC_DIRS[''], legal), 'text/html; charset=utf-8');
-  if (pathname === '/' || pathname === '/index.html') {
+  const perfilCompartido = pathname.match(/^\/productor\/(\d+)\/?$/);
+  if (pathname === '/' || pathname === '/index.html' || perfilCompartido) {
+    if (perfilCompartido) query = new URLSearchParams({ productor: perfilCompartido[1] });
     return fs.readFile(path.join(STATIC_DIRS[''], 'index.html'), 'utf8', (err, html) => {
       if (err) return sendJSON(res, 404, { error: 'No encontrado' });
       let out = html;
@@ -6014,6 +7087,10 @@ function volverUsdtBep20() {
   }
 }
 volverUsdtBep20();
+migrarLicenciasV2();
+migrarPracticaGratis();
+migrarFreeV3();
+migrarAdminSinBasica();
 
 server.listen(PORT, () => {
   console.log(`Servidor corriendo en http://localhost:${PORT}`);

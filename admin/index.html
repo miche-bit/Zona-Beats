@@ -281,6 +281,7 @@
             <button type="button" class="subtab active" data-sub="retiros">Retiros <span class="n"></span></button>
             <button type="button" class="subtab" data-sub="planes">Planes <span class="n"></span></button>
             <button type="button" class="subtab" data-sub="hots">Hots <span class="n"></span></button>
+            <button type="button" class="subtab" data-sub="audd">AudD <span class="n"></span></button>
             <button type="button" class="subtab" data-sub="reglas">Reglas</button>
           </div>
         </header>
@@ -373,6 +374,37 @@
                 <button type="button" class="hist-btn hist-restore" hidden>Restaurar borrados</button>
               </div>
               <div id="hots-history"></div>
+            </div>
+          </div>
+        </div>
+
+        <div data-grupo-panel="pagos" data-sub="audd" hidden>
+          <div class="panel" id="verif-panel">
+            <div class="panel-header-row">
+              <h2>Verificaciones AudD</h2>
+              <span class="badge-count" id="verif-count"></span>
+            </div>
+            <div class="subtabs mini" data-grupo="verif" role="group" aria-label="Verificaciones">
+              <button type="button" class="subtab active" data-sub="revisar">Por confirmar</button>
+              <button type="button" class="subtab" data-sub="precios">Precios</button>
+              <button type="button" class="subtab" data-sub="historial">Historial</button>
+            </div>
+            <div data-grupo-panel="verif" data-sub="revisar">
+              <p class="panel-hint compact" id="verif-reglas"></p>
+              <div id="verif-pending"><div class="skel-wrap skel-filas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-row"></div></div></div>
+            </div>
+            <div data-grupo-panel="verif" data-sub="precios" hidden>
+              <form class="hots-config verif-config" id="verif-config">
+                <label class="mini-field"><span>Verificación (CUP)</span><input type="text" id="verif-precio" inputmode="decimal" placeholder="1000"></label>
+                <label class="mini-field"><span>Premium sugerido</span><input type="text" id="verif-sug-premium" inputmode="decimal" placeholder="3000"></label>
+                <label class="mini-field"><span>Ilimitada sugerido</span><input type="text" id="verif-sug-unlimited" inputmode="decimal" placeholder="6000"></label>
+                <label class="mini-field"><span>Exclusiva sugerido</span><input type="text" id="verif-sug-exclusive" inputmode="decimal" placeholder="15000"></label>
+                <button type="submit" class="btn-secondary">Guardar</button>
+              </form>
+              <p class="panel-hint compact">El plan Free se verifica gratis al subir (6 al mes). Pro y Studio no tienen mínimo ni máximo: ven el precio sugerido y un aviso si ponen menos de la mitad.</p>
+            </div>
+            <div data-grupo-panel="verif" data-sub="historial" hidden>
+              <div id="verif-history"></div>
             </div>
           </div>
         </div>
@@ -550,11 +582,7 @@
                       </label>
                     </div>
                     <div id="license-mode-fields">
-                      <div class="lic-grid">
-                        <div class="field">
-                          <label for="price-basic-input">Básica <span class="opt">MP3</span></label>
-                          <div class="price-input"><input type="text" id="price-basic-input" inputmode="decimal" placeholder="Ej: 500"><span aria-hidden="true">CUP</span></div>
-                        </div>
+                      <div class="lic-grid dos">
                         <div class="field">
                           <label for="price-premium-input">Premium <span class="opt">MP3 + WAV</span></label>
                           <div class="price-input"><input type="text" id="price-premium-input" inputmode="decimal" placeholder="Requiere WAV"><span aria-hidden="true">CUP</span></div>
@@ -564,7 +592,7 @@
                           <div class="price-input"><input type="text" id="price-unlimited-input" inputmode="decimal" placeholder="Requiere WAV y STEMS"><span aria-hidden="true">CUP</span></div>
                         </div>
                       </div>
-                      <p class="field-hint">Premium e Ilimitada admiten varias ventas. Deja vacía la licencia que no ofrezcas.</p>
+                      <p class="field-hint">Se vende cuando la pista pase la verificación AudD. Premium e Ilimitada admiten varias ventas; la Exclusiva, una sola. La Básica es solo del plan Free.</p>
                     </div>
                     <div id="exclusive-mode-fields" style="display:none;">
                       <p class="exclusive-warning">Venta única: al venderse, la pista sale del catálogo y pasa a Beats VIP. No se combina con otras licencias y se entrega con WAV y STEMS.</p>
@@ -824,6 +852,7 @@
           <h1 id="t-ajustes">Ajustes</h1>
           <div class="subtabs" data-grupo="ajustes" role="group" aria-label="Partes de Ajustes">
             <button type="button" class="subtab active" data-sub="originalidad">Originalidad <span class="n"></span></button>
+            <button type="button" class="subtab" data-sub="rastrear">Rastrear</button>
             <button type="button" class="subtab" data-sub="titular">Titular</button>
             <button type="button" class="subtab" data-sub="copias">Copias</button>
             <button type="button" class="subtab" data-sub="tag">Tag de voz</button>
@@ -837,6 +866,7 @@
               <div class="audd-uso-top">
                 <div><strong id="audd-quedan-canciones">—</strong><span>canciones disponibles para verificar</span></div>
                 <div class="audd-uso-sub" id="audd-quedan-txt"></div>
+                <div class="audd-uso-sub" id="audd-ahorro-txt"></div>
               </div>
               <div class="bar"><div class="bar-fill" id="audd-barra"></div></div>
               <details class="audd-ajustes">
@@ -859,6 +889,21 @@
             <label class="orig-auto"><input type="checkbox" id="orig-auto-retiro"> Retirar automáticamente de la tienda las obras que coincidan con canciones publicadas</label>
             <button type="button" class="btn-secondary" id="orig-probar" hidden>Probar conexión con AudD</button>
             <p class="panel-hint compact" id="orig-probar-res" role="status"></p>
+          </div>
+        </div>
+
+        <div data-grupo-panel="ajustes" data-sub="rastrear" hidden>
+          <div class="panel" id="rastreo-panel">
+            <h2>¿De quién es este archivo?</h2>
+            <p class="panel-hint">Los beats de los planes Free y Studio se entregan con una marca de agua forense: el código de cada compra va escondido en el sonido. Sube el archivo que encontraste filtrado (MP3, WAV, M4A…) y la app te dice de qué compra salió.</p>
+            <label class="file-drop" id="rastreo-drop">
+              <span class="fd-txt" id="rastreo-label">Elegir el archivo sospechoso</span>
+              <span class="fd-btn" aria-hidden="true">Elegir</span>
+              <input type="file" id="rastreo-input" accept=".mp3,.wav,.m4a,.ogg,.flac,audio/*" aria-labelledby="rastreo-label">
+            </label>
+            <button type="button" class="btn-primary btn-inline" id="rastreo-btn">Rastrear</button>
+            <p class="panel-hint compact" id="rastreo-progreso" role="status"></p>
+            <div id="rastreo-resultado" aria-live="polite"></div>
           </div>
         </div>
 

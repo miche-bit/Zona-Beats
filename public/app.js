@@ -366,9 +366,39 @@
           <h2>${escapeHtml(nombre)}</h2>
           <p>${escapeHtml(bio || '')}</p>
           ${insigniasHtml(insignias)}
-          ${socialHtml ? `<div class="hero-social">${socialHtml}</div>` : ''}
+          <div class="producer-detail-actions">
+            ${socialHtml ? `<div class="hero-social">${socialHtml}</div>` : ''}
+            <button type="button" class="producer-share" data-compartir-productor="${id}" data-nombre="${escapeHtml(nombre)}" aria-label="Compartir el perfil de ${escapeHtml(nombre)}">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.8 7.6-4.4M8.2 13.2l7.6 4.4"/></svg>
+              <span class="ps-txt">Compartir perfil</span>
+            </button>
+          </div>
         </div>
       </div>`;
+  }
+  // el enlace /productor/ID abre la tienda directo en ese perfil (y por WhatsApp se ve su foto y su nombre)
+  async function compartirProductor(id, nombre, labelEl) {
+    const url = location.origin + '/productor/' + id;
+    try {
+      if (navigator.share) { await navigator.share({ title: nombre + ' en Zona Beats', text: 'Escucha los beats de ' + nombre + ' en Zona Beats', url }); return; }
+    } catch (e) { if (e && e.name === 'AbortError') return; }
+    try {
+      await navigator.clipboard.writeText(url);
+      if (labelEl) { const prev = labelEl.textContent; labelEl.textContent = '¡Enlace copiado!'; setTimeout(() => { labelEl.textContent = prev; }, 1800); }
+    } catch { prompt('Copia este enlace para compartir:', url); }
+  }
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest && e.target.closest('[data-compartir-productor]');
+    if (b) compartirProductor(Number(b.dataset.compartirProductor), b.dataset.nombre || 'Productor', b.querySelector('.ps-txt'));
+  });
+  async function abrirProductorCompartido() {
+    const m = location.pathname.match(/^\/productor\/(\d+)\/?$/);
+    const id = m ? Number(m[1]) : Number(new URLSearchParams(location.search).get('productor'));
+    if (!id) return;
+    history.replaceState(null, '', '/');
+    const tab = document.querySelector('.section-tab[data-section="producers"]');
+    if (tab && currentSection !== 'producers') tab.click();
+    setTimeout(() => openProducerDetail(id, null), 350);
   }
   function volverAProductores(id) {
     const card = producersGrid.querySelector('.producer-card[data-id="' + id + '"]');
@@ -619,7 +649,9 @@
         const liked = isTrackLiked(track.id);
         return `<button type="button" class="track-like-btn${clase}${liked ? ' liked' : ''}" data-track-id="${track.id}" aria-label="Me gusta ${escapeHtml(track.title)}" aria-pressed="${liked}">${ICONO_CORAZON}<span class="track-like-count">${track.likes || 0}</span></button>`;
       };
-      if ((seccion === 'catalog' || esPacks) && track.for_sale && track.price_cup > 0) {
+      if ((seccion === 'catalog' || esPacks) && track.enVerificacion) {
+        fin = (seccion === 'catalog' ? botonMeGusta(' tr-like') : '') + `<button type="button" class="tr-buy en-verif" aria-label="${escapeHtml(track.title)}: en verificación de originalidad"><span class="tr-desde">en</span><span class="tr-price">verificación</span></button>`;
+      } else if ((seccion === 'catalog' || esPacks) && track.for_sale && track.price_cup > 0) {
         const priceText = formatPriceInCurrency(track.price_cup, selectedCurrency);
         const multiples = (track.licenses || []).length > 1;
         const tieneDescuento = discountPercent > 0 && track.original_cup && track.original_cup > track.price_cup;
@@ -1117,17 +1149,21 @@
   let receiptFile = null;
 
   const LICENSE_INFO = {
+    practice: {
+      label: 'Básica práctica',
+      description: 'Demo de 1 minuto con el tag del productor. Para practicar y grabar maquetas: no sirve para lanzar la canción ni para monetizar.',
+    },
     basic: {
-      label: 'Básica',
-      description: 'MP3. Distribución sin monetización. No exclusiva.',
+      label: 'Básica monetizable',
+      description: 'WAV + MP3 sin tag del beat completo. Monetizable. Venta única: solo un artista la tiene.',
     },
     premium: {
       label: 'Premium',
-      description: 'MP3 + WAV. Distribución sin monetización, en máxima calidad. No exclusiva.',
+      description: 'WAV + MP3 sin tag. Distribución y monetización. No exclusiva.',
     },
     unlimited: {
       label: 'Ilimitada',
-      description: 'MP3 + WAV + STEMS. Distribución y monetización ilimitadas. Venta única: el beat sale del catálogo.',
+      description: 'WAV + MP3 + STEMS sin tag. Monetización sin límites. No exclusiva.',
     },
     pack: {
       label: 'Sample Pack',
@@ -1135,10 +1171,14 @@
     },
     exclusive: {
       label: 'Exclusiva',
-      description: 'MP3 + WAV + STEMS. Exclusividad y todos los derechos comerciales. El beat pasa a Beats VIP a tu nombre.',
+      description: 'WAV + MP3 + STEMS sin tag. Exclusividad y todos los derechos comerciales. El beat sale del catálogo y pasa a Beats VIP a tu nombre.',
     },
   };
-  const LICENSE_ORDER = ['basic', 'premium', 'unlimited', 'exclusive', 'pack'];
+  const LICENSE_ORDER = ['practice', 'basic', 'premium', 'unlimited', 'exclusive', 'pack'];
+  const MONETIZABLES = ['basic', 'premium', 'unlimited', 'exclusive'];
+  // precio total de una licencia (con el suplemento de verificación si el artista la paga)
+  const precioLicencia = (lic) => (Number(lic.price_cup) || 0) + (lic.venta === 'suplemento' ? Number(lic.suplemento_cup) || 0 : 0);
+  const textoPrecio = (lic) => formatPriceInCurrency(precioLicencia(lic), selectedCurrency);
 
   let selectedLicenseType = null;
   const buyBox = document.getElementById('buy-box');
@@ -1180,14 +1220,19 @@
 
     licenseList.innerHTML = licenses.map((lic) => {
       const info = LICENSE_INFO[lic.license_type] || { label: lic.license_type, description: '' };
-      const priceText = formatPriceInCurrency(lic.price_cup, selectedCurrency);
+      const priceText = textoPrecio(lic);
+      const espera = lic.venta === 'verificando';
+      const nota = espera ? 'Se habilita cuando el beat termine la verificación de originalidad (AudD).'
+        : lic.venta === 'suplemento' ? 'Incluye ' + formatPriceInCurrency(lic.suplemento_cup, selectedCurrency) + ' de verificación de originalidad (AudD). Recibes la licencia cuando el beat la pase.'
+        : MONETIZABLES.includes(lic.license_type) ? '✓ Beat verificado con AudD' : '';
       return `
-        <button type="button" class="license-option" data-type="${lic.license_type}">
+        <button type="button" class="license-option${espera ? ' en-verificacion' : ''}" data-type="${lic.license_type}"${espera ? ' disabled aria-disabled="true"' : ''}>
           <div class="license-option-top">
             <span class="license-option-label">${escapeHtml(info.label)}</span>
-            <span class="license-option-price">${escapeHtml(priceText)}</span>
+            <span class="license-option-price">${espera ? 'En verificación' : escapeHtml(priceText)}</span>
           </div>
           <div class="license-option-desc">${escapeHtml(info.description)}</div>
+          ${nota ? `<div class="license-option-nota${lic.venta === 'ok' ? ' ok' : ''}">${escapeHtml(nota)}</div>` : ''}
         </button>
       `;
     }).join('');
@@ -1215,21 +1260,22 @@
     orderSubmitBtn.classList.add('disabled');
 
     modalOverlay.classList.add('active');
-    // si solo hay una licencia, ya queda elegida
-    if (licenses.length === 1) selectLicense(licenses[0].license_type);
+    // si solo hay una licencia que se puede comprar, ya queda elegida
+    const comprables = licenses.filter(l => l.venta !== 'verificando');
+    if (comprables.length === 1 && licenses.length === 1) selectLicense(comprables[0].license_type);
   }
 
   function selectLicense(type) {
     selectedLicenseType = type;
     const track = activeModalTrack;
     const lic = (track.licenses || []).find(l => l.license_type === type);
-    if (!lic) return;
+    if (!lic || lic.venta === 'verificando') return;
 
     document.querySelectorAll('.license-option').forEach((btn) => {
       btn.classList.toggle('selected', btn.dataset.type === type);
     });
 
-    modalPrice.textContent = formatPriceInCurrency(lic.price_cup, selectedCurrency);
+    modalPrice.textContent = textoPrecio(lic);
     document.getElementById('modal-price').style.display = 'block';
     const contrato = document.getElementById('modal-contract-link');
     contrato.href = '/api/tracks/' + track.id + '/contrato/' + encodeURIComponent(type) + '?moneda=' + encodeURIComponent(selectedCurrency);
@@ -1612,7 +1658,7 @@
       if (n >= 1024 * 1024 * 1024) return ' · ' + (n / 1024 / 1024 / 1024).toLocaleString('es', { maximumFractionDigits: 1 }) + ' GB';
       return ' · ' + Math.max(1, Math.round(n / 1024 / 1024)) + ' MB';
     };
-    const CHIP = { approved: ['ok', 'Lista'], pending: ['pend', 'En revisión'], esperando_pago: ['pend', 'Sin pagar'], rejected: ['bad', 'No aprobada'], missing: ['bad', 'No encontrada'] };
+    const CHIP = { approved: ['ok', 'Lista'], pending: ['pend', 'En revisión'], verificando: ['pend', 'Verificando'], esperando_pago: ['pend', 'Sin pagar'], rejected: ['bad', 'No aprobada'], missing: ['bad', 'No encontrada'] };
     purchasesList.innerHTML = lista.map((c, idx) => {
       const d = comprasEstado[c.token] || {};
       const fecha = new Date(d.createdAt || c.createdAt || Date.now()).toLocaleDateString('es', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -1636,6 +1682,15 @@
       if (d.status === 'pending' && d.qvapay && d.qvapay.pagado) {
         estado = '<span class="purchase-status pending">Pago recibido por QvaPay · en revisión</span>';
       }
+      // el artista pagó la verificación del beat: el pago está confirmado y se espera a AudD
+      if (d.status === 'pending' && d.verificacion === 'esperando') {
+        estado = '<span class="purchase-status pending">Pago confirmado · verificando el beat</span>' +
+          '<span class="purchase-meta">Recibes la licencia y los archivos en cuanto el beat pase la verificación de originalidad (AudD).</span>';
+      }
+      if (d.status === 'pending' && d.verificacion === 'fallo') {
+        estado = '<span class="purchase-status missing">El beat no pasó la verificación</span>' +
+          '<span class="purchase-meta">No se puede entregar como monetizable. El vendedor te escribe por WhatsApp para ofrecerte otro beat o resolverlo.</span>';
+      }
       if (d.status === 'missing') estado = '<span class="purchase-status missing">Compra no encontrada. Contáctanos por WhatsApp.</span>';
       if (d.status === 'rejected') {
         estado = '<span class="purchase-status missing">Pago no aprobado</span>' +
@@ -1645,7 +1700,9 @@
         estado = '<span class="purchase-status approved">Aprobada · Licencia ' + escapeHtml(d.certificateId || '') + '</span>';
         const archivos = Array.isArray(d.files) ? d.files : [];
         acciones = '<div class="purchase-actions">' +
-          (archivos.length
+          (d.preparando && !archivos.length
+            ? '<span class="purchase-meta">Preparando tus archivos con la marca de tu licencia… Vuelve a abrir «Mis compras» en uno o dos minutos.</span>'
+            : archivos.length
             ? archivos.map((f, i) => '<a class="' + (i === 0 ? 'purchase-dl' : 'purchase-pdf') + '" href="' + escapeHtml(f.url) + '" download>Descargar ' + escapeHtml(f.label || f.f) + pesoTxt(f.size) + '</a>').join('')
             : '<span class="purchase-meta">Recibirás tus archivos por WhatsApp.</span>') +
           (d.pdfUrl ? '<a class="purchase-pdf" href="' + escapeHtml(d.pdfUrl) + '" target="_blank" rel="noopener">Licencia en PDF</a>' : '') +
@@ -1694,7 +1751,7 @@
       if (comprobante && d.status === 'esperando_pago' && acciones) acciones = acciones.replace('</div>', comprobante + '</div>');
       else if (comprobante && d.status !== 'approved') acciones = '<div class="purchase-actions">' + comprobante + '</div>';
       else if (comprobante) acciones = acciones.replace('</div>', comprobante + '</div>');
-      const chip = CHIP[d.status] || ['pend', 'Comprobando'];
+      const chip = (d.status === 'pending' && d.verificacion === 'esperando' ? CHIP.verificando : CHIP[d.status]) || ['pend', 'Comprobando'];
       const abierta = comprasAbiertas.has(c.token) ? comprasAbiertas.get(c.token) : idx === 0;
       return '<details class="purchase-card' + (d.status === 'approved' ? ' is-approved' : (d.status === 'rejected' ? ' is-rejected' : '')) + '" data-token="' + c.token + '"' + (abierta ? ' open' : '') + '>' +
         '<summary class="purchase-sum"><span class="purchase-sum-main"><span class="purchase-title">' + escapeHtml(c.title || d.trackTitle || 'Beat') + '</span>' +
@@ -1866,6 +1923,7 @@
     loadHots();
     await loadTracksForSection('catalog');
     abrirPistaCompartida();
+    abrirProductorCompartido();
   }
 
   init();

@@ -467,9 +467,12 @@ db.exec(`
 // Código de referido para los productores que se registraron antes de existir el sistema de referidos
 db.exec("UPDATE producers SET referral_code = upper(substr(hex(randomblob(4)), 1, 7)) WHERE referral_code IS NULL OR referral_code = ''");
 
+// (solo los beats de antes de existir las licencias, que no tienen ninguna: así no vuelve a aparecer
+// una Básica que se quitó a propósito, por ejemplo la monetizable ya vendida o la de un plan que no la vende)
 const existingLicenseTracks = db.prepare(`
   SELECT id, price_cup, is_exclusive FROM tracks
   WHERE is_playlist = 0 AND for_sale = 1 AND price_cup > 0
+    AND NOT EXISTS (SELECT 1 FROM track_licenses l WHERE l.track_id = tracks.id)
 `).all();
 for (const t of existingLicenseTracks) {
   const type = t.is_exclusive ? 'exclusive' : 'basic';
@@ -675,5 +678,56 @@ db.exec(`CREATE TABLE IF NOT EXISTS reclamos_cid (
   created_at TEXT DEFAULT (datetime('now')),
   resuelto_at TEXT DEFAULT ''
 )`);
+
+// ---------- Modelo de licencias 2 (nov. 2026) ----------
+// Free vende la Básica práctica (demo de 1 minuto, sin monetizar) y la Básica monetizable única;
+// Pro vende Premium; Studio, Premium, Ilimitada y Exclusiva. Todo lo monetizable exige la verificación AudD.
+agregarCol('tracks', 'demo_filename', "TEXT DEFAULT ''");        // demo de 1 minuto (MP3 con tag) de la Básica práctica
+agregarCol('tracks', 'demo_wav_filename', "TEXT DEFAULT ''");    // la misma demo en WAV (si el productor subió el WAV con tag)
+agregarCol('tracks', 'tagwav_filename', "TEXT DEFAULT ''");      // WAV con tag que sube el plan Free (solo para la demo)
+agregarCol('tracks', 'mon_mp3_filename', "TEXT DEFAULT ''");     // MP3 sin tag sacado del WAV sin tag (Básica monetizable del Free)
+agregarCol('tracks', 'verif_pagada', 'INTEGER DEFAULT 0');       // ya se pagó la verificación AudD de este beat (nunca se cobra dos veces)
+agregarCol('tracks', 'verif_pagador', "TEXT DEFAULT ''");        // 'productor' | 'artista'
+agregarCol('originalidad', 'audd_at', "TEXT DEFAULT ''");        // primera verificación AudD que salió bien (cuenta para el cupo del mes)
+// Resultado guardado de AudD: el mismo audio nunca se vuelve a mandar (ahorra consultas para los beats nuevos)
+// Plan Free: segundo donde empieza la muestra de 1 minuto de la tienda (-1 = escucha completa)
+agregarCol('tracks', 'muestra_inicio', 'INTEGER DEFAULT -1');
+// beats Free pausados al pasar a las reglas nuevas (WAV + MP3 sin tag, 3 minutos, 2 beats)
+agregarCol('tracks', 'pausa_free', "TEXT DEFAULT ''");
+// Marca de agua forense por pedido (planes Free y Studio): '' | 'pendiente' | 'lista' | 'error'
+agregarCol('orders', 'forense', "TEXT DEFAULT ''");
+agregarCol('orders', 'forense_wav', "TEXT DEFAULT ''");
+agregarCol('orders', 'forense_mp3', "TEXT DEFAULT ''");
+// si un beat subido coincide con uno vendido con marca forense: de qué pedido salió (JSON)
+agregarCol('originalidad', 'forense_json', "TEXT DEFAULT ''");
+agregarCol('originalidad', 'audd_archivo', "TEXT DEFAULT ''");   // qué archivo se escaneó (nombre:tamaño)
+agregarCol('originalidad', 'audd_json', "TEXT DEFAULT ''");      // lo que respondió AudD para ese archivo
+agregarCol('orders', 'terms_v', 'INTEGER DEFAULT 1');            // versión de los términos de la licencia (los pedidos viejos son la 1)
+agregarCol('orders', 'verif_suplemento', 'REAL DEFAULT 0');      // CUP que pagó el artista por verificar un beat Free sin verificar
+agregarCol('orders', 'verif_pago_ok', 'INTEGER DEFAULT 0');      // el admin confirmó el pago; falta que la verificación salga bien
+agregarCol('orders', 'verif_estado', "TEXT DEFAULT ''");         // '' | 'esperando' | 'fallo'
+agregarCol('platform_config', 'verif_precio_cup', 'REAL DEFAULT 1000');
+agregarCol('platform_config', 'precios_sugeridos_json', "TEXT DEFAULT ''");
+db.exec(`CREATE TABLE IF NOT EXISTS verificaciones (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  producer_id INTEGER,
+  track_id INTEGER,
+  monto_cup REAL DEFAULT 0,
+  metodo TEXT DEFAULT 'comprobante',
+  currency TEXT DEFAULT 'CUP',
+  receipt_filename TEXT DEFAULT '',
+  status TEXT DEFAULT 'pending',
+  reject_reason TEXT DEFAULT '',
+  resultado TEXT DEFAULT '',
+  credito TEXT DEFAULT '',
+  credito_usado_en INTEGER,
+  order_id INTEGER,
+  created_at TEXT DEFAULT (datetime('now')),
+  resolved_at TEXT DEFAULT ''
+)`);
+db.exec('CREATE INDEX IF NOT EXISTS idx_verif_track ON verificaciones (track_id)');
+db.exec('CREATE INDEX IF NOT EXISTS idx_verif_productor ON verificaciones (producer_id)');
+
+agregarCol('hot_requests', 'descuento_pct', 'REAL DEFAULT 0');          // descuento del plan aplicado a ese Hot
 
 module.exports = db;

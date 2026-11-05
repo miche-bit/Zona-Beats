@@ -698,7 +698,7 @@ label, .ff-lbl { display: block; margin: 0 0 6px; font-size: var(--fs-sm); font-
 .lic-grid { display: grid; grid-template-columns: 1fr; gap: 0 12px; }
 .files-grid { display: grid; grid-template-columns: 1fr; gap: 0 14px; }
 .file-field { margin-bottom: 12px; }
-@media (min-width: 720px) { .lic-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } .files-grid { grid-template-columns: 1fr 1fr; } }
+@media (min-width: 720px) { .lic-grid.dos { grid-template-columns: repeat(2, minmax(0, 1fr)); } .lic-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } .files-grid { grid-template-columns: 1fr 1fr; } }
 @media (min-width: 960px) {
   .up-panel { max-width: 860px; }
   .up-paso[data-paso="1"] { display: grid; grid-template-columns: 1fr 1fr; column-gap: 14px; }
@@ -789,6 +789,9 @@ label, .ff-lbl { display: block; margin: 0 0 6px; font-size: var(--fs-sm); font-
 .backup-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 12px; }
 .backup-actions .btn-inline { flex: 1 1 200px; }
 #restore-drop { margin-bottom: 6px; }
+#rastreo-drop { margin: 4px 0 10px; }
+.rastreo-ok, .rastreo-no { margin-top: 10px; padding: 12px 14px; border-radius: var(--r-md); font-size: var(--fs-sm); line-height: 1.6; border: 1px solid var(--line); background: var(--bg-elevated); }
+.rastreo-ok { border-color: rgba(var(--warn-rgb), 0.5); }
 .audd-uso { margin: 4px 0 12px; padding: 12px 14px; border-radius: var(--r-md); background: var(--bg-elevated); border: 1px solid var(--line); }
 .audd-uso-top strong { display: block; font-size: var(--fs-2xl); font-weight: 800; color: var(--live); font-variant-numeric: tabular-nums; }
 .audd-uso-top span { font-size: var(--fs-sm); color: var(--text-dim); }
@@ -898,3 +901,9 @@ body:not(:has(.admin-shell.on)) .toast { bottom: 24px; }
   .admin-main { padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) + 10px); }
   .summary-card { padding: 8px 10px; }
 }
+
+/* prioridad del plan en «Beats por revisar» (Studio alta, Pro media, Free baja) */
+.prio { font-weight: 700; }
+.prio-alta { color: var(--live); }
+.prio-media { color: var(--gold); }
+.prio-baja { color: var(--text-faint); }

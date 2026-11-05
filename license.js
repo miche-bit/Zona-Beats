@@ -1,4 +1,6 @@
+// Términos 1: los de los pedidos hechos antes de noviembre de 2026 (no cambian nunca).
 const LICENSE_LABELS = {
+  practice: 'Licencia Básica Práctica',
   basic: 'Licencia Básica',
   premium: 'Licencia Premium',
   unlimited: 'Licencia Ilimitada',
@@ -49,6 +51,61 @@ const LICENSE_TERMS = {
     'No otorga la propiedad de los sonidos.',
   ],
 };
+
+// Términos 2 (desde noviembre de 2026). Solo la Básica tiene versión práctica; lo demás es monetizable
+// y se vende solo con la verificación de originalidad (AudD) aprobada.
+const LICENSE_LABELS_V2 = {
+  practice: 'Licencia Básica Práctica',
+  basic: 'Licencia Básica Monetizable (única)',
+  premium: 'Licencia Premium Monetizable',
+  unlimited: 'Licencia Ilimitada Monetizable',
+  exclusive: 'Licencia Exclusiva Monetizable',
+  pack: 'Licencia de Sample Pack',
+};
+const LICENSE_TERMS_V2 = {
+  practice: [
+    'Archivos entregados: demo de 1 minuto en MP3 (y WAV si el productor lo subió), con el tag del productor y una marca de identificación en el archivo.',
+    'Solo para practicar, ensayar y grabar maquetas o demos.',
+    'NO sirve para lanzar una canción completa.',
+    'NO autoriza monetizar ni distribuir en plataformas digitales. Monetizar con esta licencia es un incumplimiento.',
+    'Licencia NO exclusiva: el productor puede vender el mismo beat a otros artistas.',
+    'Crédito obligatorio al productor.',
+  ],
+  basic: [
+    'Archivos entregados: WAV y MP3 sin tag del beat completo.',
+    'Beat con la verificación de originalidad aprobada.',
+    'SÍ autoriza distribuir y monetizar la canción en plataformas digitales y redes sociales.',
+    'Venta única: después de esta compra el beat no se vuelve a vender con licencia monetizable.',
+    'No otorga propiedad del beat ni derecho a revenderlo o sublicenciarlo.',
+    'Crédito obligatorio al productor.',
+  ],
+  premium: [
+    'Archivos entregados: WAV y MP3 sin tag.',
+    'Beat con la verificación de originalidad aprobada.',
+    'SÍ autoriza distribuir y monetizar la canción en plataformas digitales y redes sociales.',
+    'Licencia NO exclusiva: el productor puede vender el mismo beat a otros artistas.',
+    'No otorga propiedad del beat ni derecho a revenderlo o sublicenciarlo.',
+    'Crédito obligatorio al productor.',
+  ],
+  unlimited: [
+    'Archivos entregados: WAV, MP3 y STEMS sin tag.',
+    'Beat con la verificación de originalidad aprobada.',
+    'SÍ autoriza distribuir y monetizar sin límite de streams ni ventas, en plataformas digitales y redes sociales.',
+    'Licencia NO exclusiva: el productor puede vender el mismo beat a otros artistas.',
+    'No otorga propiedad del beat ni derecho a revenderlo o sublicenciarlo.',
+    'Crédito obligatorio al productor.',
+  ],
+  exclusive: [
+    'Archivos entregados: WAV, MP3 y STEMS sin tag.',
+    'Beat con la verificación de originalidad aprobada.',
+    'Compra única: el beat se vende una sola vez y se retira del catálogo por completo.',
+    'Otorga derechos de uso comercial, monetización, masterización y sincronización de la pista.',
+    'El beat se publica en la sección Beats VIP a nombre del comprador, si este lo autoriza.',
+    'Crédito obligatorio al productor.',
+  ],
+  pack: LICENSE_TERMS.pack,
+};
+const etiquetaLicencia = (tipo, v) => ((v >= 2 ? LICENSE_LABELS_V2 : LICENSE_LABELS)[tipo] || tipo);
 
 // El PDF usa fuentes Latin-1: primero se pasan a Latin-1 los signos comunes y lo demás (emojis, otros
 // alfabetos) queda como «?». Si no, un carácter fuera de Latin-1 podía convertirse en «(» o «)» y
@@ -173,8 +230,9 @@ function formatDate(isoLike) {
 }
 
 function buildLicensePdf(data) {
-  const licenseLabel = LICENSE_LABELS[data.licenseType] || data.licenseType;
-  const terms = LICENSE_TERMS[data.licenseType] || [];
+  const v2 = Number(data.termsV) >= 2;
+  const licenseLabel = etiquetaLicencia(data.licenseType, v2 ? 2 : 1);
+  const terms = (v2 ? LICENSE_TERMS_V2 : LICENSE_TERMS)[data.licenseType] || [];
 
   const blocks = [
     ...(data.ejemplo ? [
@@ -288,7 +346,7 @@ function buildPedidoPdf(data) {
 
 // Carta para impugnar un reclamo de derechos de autor en cualquier plataforma (Content ID y equivalentes)
 function buildCartaContentIdPdf(data) {
-  const lic = LICENSE_LABELS[data.licenseType] || data.licenseType;
+  const lic = etiquetaLicencia(data.licenseType, Number(data.termsV) || 1);
   const fecha = formatDate(data.createdAt);
   const blocks = [
     { text: 'CARTA DE LICENCIA PARA RECLAMOS DE DERECHOS DE AUTOR', size: 15, bold: true, gap: 2 },
@@ -317,4 +375,34 @@ function buildCartaContentIdPdf(data) {
   return buildPdf(blocks);
 }
 
-module.exports = { buildLicensePdf, buildRegistroPdf, buildPedidoPdf, buildCartaContentIdPdf, LICENSE_LABELS };
+// Reporte mensual del plan Studio: ventas, ganancias, licencias y beats del mes (una página)
+function buildReporteMensualPdf(d) {
+  const cup = (n) => Number(n || 0).toLocaleString('es', { maximumFractionDigits: 2 }) + ' CUP';
+  const gris = '0.45 0.45 0.50';
+  const blocks = [
+    { text: 'REPORTE MENSUAL', size: 18, bold: true, gap: 2 },
+    { text: `${d.productor} · ${d.mesTexto}`, size: 11, gap: 14, color: gris },
+    { rule: true, gap: 14 },
+    { text: 'RESUMEN DEL MES', size: 9, bold: true, gap: 8, color: gris },
+    { text: `Ventas aprobadas: ${d.ventas}`, size: 11, gap: 3 },
+    ...(d.demos ? [{ text: `Demos gratis descargadas: ${d.demos}`, size: 11, gap: 3 }] : []),
+    { text: `Ganado (después de la comisión): ${cup(d.ganado)}`, size: 11, gap: 3 },
+    { text: `Vendido en total: ${cup(d.vendido)}`, size: 11, gap: 3 },
+    { text: `Retiros pagados: ${d.retiros} (${cup(d.retirado)})`, size: 11, gap: 3 },
+    { text: `Hots del mes: ${d.hots} · Verificaciones AudD: ${d.verificaciones}`, size: 11, gap: 12 },
+    { text: 'VENTAS POR LICENCIA', size: 9, bold: true, gap: 8, color: gris },
+    ...(d.porLicencia.length ? d.porLicencia.map(l => ({ text: `- ${l.nombre}: ${l.ventas} venta${l.ventas === 1 ? '' : 's'} · ${cup(l.ganado)}`, size: 10, gap: 2, indent: 6 })) : [{ text: 'Sin ventas este mes.', size: 10, gap: 2 }]),
+    { spacer: 10 },
+    { text: 'BEATS QUE MÁS VENDIERON', size: 9, bold: true, gap: 8, color: gris },
+    ...(d.porBeat.length ? d.porBeat.map((b, i) => ({ text: `${i + 1}. ${b.titulo}: ${b.ventas} venta${b.ventas === 1 ? '' : 's'} · ${cup(b.ganado)}`, size: 10, gap: 2, indent: 6 })) : [{ text: 'Sin ventas este mes.', size: 10, gap: 2 }]),
+    { spacer: 10 },
+    { text: 'TUS BEATS MÁS ESCUCHADOS (ACUMULADO)', size: 9, bold: true, gap: 8, color: gris },
+    ...(d.escuchados.length ? d.escuchados.map((b, i) => ({ text: `${i + 1}. ${b.titulo}: ${b.plays} reproducciones · ${b.likes} me gusta`, size: 10, gap: 2, indent: 6 })) : [{ text: 'Todavía no hay reproducciones.', size: 10, gap: 2 }]),
+    { spacer: 12 },
+    { rule: true, gap: 10 },
+    { text: `Generado el ${d.generado} por ${d.platformName || 'Zona Beats'}. Las cifras salen de las ventas aprobadas por el administrador en ese mes.`, size: 9, gap: 4, color: '0.35 0.35 0.40' },
+  ];
+  return buildPdf(blocks);
+}
+
+module.exports = { buildReporteMensualPdf, buildLicensePdf, buildRegistroPdf, buildPedidoPdf, buildCartaContentIdPdf, LICENSE_LABELS, LICENSE_LABELS_V2, etiquetaLicencia };

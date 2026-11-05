@@ -20,7 +20,6 @@
   const playlistOnlyFields = document.getElementById('playlist-only-fields');
   const catalogOnlyFields = document.getElementById('catalog-only-fields');
   const isExclusiveInput = document.getElementById('is-exclusive-input');
-  const priceBasicInput = document.getElementById('price-basic-input');
   const pricePremiumInput = document.getElementById('price-premium-input');
   const priceUnlimitedInput = document.getElementById('price-unlimited-input');
   const priceExclusiveInput = document.getElementById('price-exclusive-input');
@@ -166,6 +165,7 @@
     'productores:contentid': ['productores', 'reclamos', 'reclamos', 'cid'],
     'productores:planes': ['pagos', 'planes'],
     'productores:hots': ['pagos', 'hots'],
+    'productores:verificaciones': ['pagos', 'audd'],
     'productores:retiros': ['pagos', 'retiros'],
     'musica:coincidencias': ['musica', 'coincidencias'],
     'musica:packs': ['musica', 'packs'],
@@ -226,6 +226,7 @@
     loadHistory();
     loadPlanRequests();
     loadHotsAdmin();
+    loadVerificacionesAdmin();
     loadDenuncias();
     loadReclamosCid();
     loadResenasAdmin();
@@ -356,7 +357,6 @@
       isExclusiveInput.checked = false;
       licenseModeFields.style.display = 'block';
       exclusiveModeFields.style.display = 'none';
-      priceBasicInput.value = '';
       pricePremiumInput.value = '';
       priceUnlimitedInput.value = '';
       priceExclusiveInput.value = '';
@@ -369,7 +369,6 @@
     licenseModeFields.style.display = exclusive ? 'none' : 'block';
     exclusiveModeFields.style.display = exclusive ? 'block' : 'none';
     if (exclusive) {
-      priceBasicInput.value = '';
       pricePremiumInput.value = '';
       priceUnlimitedInput.value = '';
     } else {
@@ -442,7 +441,7 @@
     if (n === 1 && !titleInput.value.trim()) return { msg: 'Ponle título a la pista.', el: titleInput };
     if (n === 2 && !pl) {
       if (isExclusiveInput.checked) { if (!numPos(priceExclusiveInput.value)) return { msg: 'Ponle el precio exclusivo a la pista.', el: priceExclusiveInput }; }
-      else if (![priceBasicInput, pricePremiumInput, priceUnlimitedInput].some(el => numPos(el.value))) return { msg: 'Ponle precio a al menos una licencia (Básica, Premium o Ilimitada).', el: priceBasicInput };
+      else if (![pricePremiumInput, priceUnlimitedInput].some(el => numPos(el.value))) return { msg: 'Ponle precio a la Premium o a la Ilimitada.', el: pricePremiumInput };
     }
     return null;
   }
@@ -477,10 +476,10 @@
 
     const esPlaylist = isPlaylistInput.checked;
     const isExclusiveMode = isExclusiveInput.checked && !esPlaylist;
-    const prices = esPlaylist ? { basic: '', premium: '', unlimited: '', exclusive: '' }
+    const prices = esPlaylist ? { practice: '', basic: '', premium: '', unlimited: '', exclusive: '' }
       : isExclusiveMode
-        ? { basic: '', premium: '', unlimited: '', exclusive: priceExclusiveInput.value }
-        : { basic: priceBasicInput.value, premium: pricePremiumInput.value, unlimited: priceUnlimitedInput.value, exclusive: '' };
+        ? { practice: '', basic: '', premium: '', unlimited: '', exclusive: priceExclusiveInput.value }
+        : { practice: '', basic: '', premium: pricePremiumInput.value, unlimited: priceUnlimitedInput.value, exclusive: '' };
     const wav = esPlaylist ? null : adminWavInput.files[0];
     const stems = esPlaylist ? null : adminStemsInput.files[0];
 
@@ -495,7 +494,7 @@
     }
     if (!esPlaylist) {
       if (!Object.values(prices).some(numPos)) {
-        showToast(isExclusiveMode ? 'Ponle el precio exclusivo a la pista.' : 'Ponle precio a al menos una licencia (Básica, Premium o Ilimitada).', true);
+        showToast(isExclusiveMode ? 'Ponle el precio exclusivo a la pista.' : 'Ponle precio a al menos una licencia.', true);
         return;
       }
       const hayWav = Boolean(wav) || extDe(audio) === '.wav';
@@ -612,7 +611,6 @@
         priceEditHtml = `
           <div class="price-edit">
             <div class="license-price-grid">
-              <label>Básica <input type="text" class="lic-price" data-type="basic" placeholder="CUP" value="${licMap.basic || ''}"></label>
               <label>Premium <input type="text" class="lic-price" data-type="premium" placeholder="CUP" value="${licMap.premium || ''}"></label>
               <label>Ilimitada <input type="text" class="lic-price" data-type="unlimited" placeholder="CUP" value="${licMap.unlimited || ''}"></label>
               <label>Exclusiva <input type="text" class="lic-price" data-type="exclusive" placeholder="CUP" value="${licMap.exclusive || ''}"></label>
@@ -634,7 +632,7 @@
           <div class="t">${escapeHtml(track.title)}${estado}</div>
           <div class="m">${escapeHtml(track.genre || 'Sin género')}${metaExtra} · ${track.plays} repr. · ${track.likes || 0} me gusta${archivosTxt}</div>
           <div class="m">${track.producer_id ? 'Productor: ' + escapeHtml(track.producer_name || '') : 'Tuya'}</div>
-          ${lineaOrigAdmin(track.originalidad)}
+          ${lineaOrigAdmin(track.originalidad)}${currentAdminListSection === 'catalog' && !track.sold ? lineaMonet(track) : ''}
         </div>
         ${priceEditHtml}
         <div class="track-row-actions">
@@ -660,7 +658,7 @@
           const priceInputs = item.querySelectorAll('.lic-price');
           const prices = {};
           priceInputs.forEach(inp => { prices[inp.dataset.type] = inp.value; });
-          const anyPrice = Object.values(prices).some(v => parseFloat(v) > 0);
+          const anyPrice = ['premium', 'unlimited', 'exclusive'].some(k => parseFloat(prices[k]) > 0);
           if (!anyPrice) {
             showToast('Ponle precio a al menos una licencia.', true);
             return;
@@ -717,7 +715,7 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        priceBasic: prices.basic,
+        priceBasic: '',
         pricePremium: prices.premium,
         priceUnlimited: prices.unlimited,
         priceExclusive: prices.exclusive,
@@ -825,6 +823,12 @@
               ${x.enlace ? `<a class="btn-secondary coin-link" href="${escapeHtml(x.enlace)}" target="_blank" rel="noopener noreferrer">Escuchar la original</a>` : ''}
             </div>
           </div>`).join('')}
+        ${o.filtracion && o.filtracion.pedido ? `
+          <div class="coin-match ext">
+            <div class="coin-label">Marca forense: copia de una compra</div>
+            <div class="coin-song">Sale del pedido <strong>${escapeHtml(o.filtracion.pedido.pedido)}</strong> de «${escapeHtml(o.filtracion.beatOriginal.titulo)}», vendido a <strong>${escapeHtml(o.filtracion.pedido.comprador)}</strong></div>
+            <div class="coin-meta">${escapeHtml(o.filtracion.pedido.licencia)} · ${escapeHtml(o.filtracion.pedido.certificado || '')} · WhatsApp ${escapeHtml(o.filtracion.pedido.telefono || '')}</div>
+          </div>` : ''}
         ${o.internas.map(x => `
           <div class="coin-match int">
             <div class="coin-label">Otra obra de la tienda</div>
@@ -880,6 +884,51 @@
     else { ev.target.checked = !ev.target.checked; showToast('No se pudo guardar.', true); }
   });
 
+  // ---- Rastreo forense: ¿de qué compra salió este archivo? ----
+  const rastreoInput = document.getElementById('rastreo-input');
+  rastreoInput.addEventListener('change', () => {
+    const f = rastreoInput.files[0];
+    document.getElementById('rastreo-label').textContent = f ? f.name : 'Elegir el archivo sospechoso';
+    document.getElementById('rastreo-drop').classList.toggle('has-file', Boolean(f));
+    document.getElementById('rastreo-resultado').innerHTML = '';
+  });
+  document.getElementById('rastreo-btn').addEventListener('click', async (ev) => {
+    const f = rastreoInput.files[0];
+    const prog = document.getElementById('rastreo-progreso');
+    const out = document.getElementById('rastreo-resultado');
+    if (!f) { showToast('Elige el archivo que quieres rastrear.', true); return; }
+    const Z = window.ZBSubidas;
+    const err = Z.validarTamano('audio', f);
+    if (err) { showToast(err, true); return; }
+    const btn = ev.currentTarget;
+    btn.disabled = true; out.innerHTML = '';
+    try {
+      const ids = await Z.subirVarios([{ kind: 'audio', file: f, etiqueta: 'el archivo' }], {
+        alAvanzar: (p) => { prog.textContent = 'Subiendo… ' + p.pct + '%'; },
+        alReintentar: (et, n) => { prog.textContent = 'Se cortó la conexión. Reintentando (intento ' + n + ')…'; },
+      });
+      prog.textContent = 'Analizando el sonido (puede tardar un minuto)…';
+      const res = await fetch('/api/admin/forense/rastrear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ uploadId: ids.audio }) });
+      const d = await res.json().catch(() => ({}));
+      prog.textContent = '';
+      if (!res.ok) { showToast(d.error || 'No se pudo rastrear.', true); return; }
+      const beat = d.beat ? '«' + escapeHtml(d.beat.titulo) + '»' + (d.beat.similitud ? ' (' + d.beat.similitud + ' % igual)' : '') : '';
+      if (d.encontrado && d.pedido) {
+        const p = d.pedido;
+        out.innerHTML = '<div class="rastreo-ok"><strong>Sale del pedido ' + escapeHtml(p.pedido) + '</strong> de ' + beat + '.<br>' +
+          'Comprador: <strong>' + escapeHtml(p.comprador) + '</strong> · WhatsApp ' + escapeHtml(p.telefono || '—') + '<br>' +
+          escapeHtml(p.licencia) + ' · ' + escapeHtml(p.certificado || '') + ' · ' + escapeHtml(String(p.fecha || '').slice(0, 10)) + '<br>' +
+          '<span class="muted">Se analizaron ' + d.segundosAnalizados + ' s · confianza ' + p.confianza + ' (desde 8 ya no es casualidad)</span></div>';
+      } else {
+        out.innerHTML = '<div class="rastreo-no">' + (beat ? 'Es ' + beat + ', pero no' : 'No') + ' se encontró la marca de ninguna compra. ' + escapeHtml(d.motivo || 'Puede ser una copia anterior a la marca forense o un archivo muy alterado.') + '</div>';
+      }
+      Z.olvidar('audio', f);
+    } catch (e) {
+      prog.textContent = '';
+      showToast(e && e.message ? e.message : 'Se perdió la conexión. Intenta de nuevo.', true);
+    } finally { btn.disabled = false; }
+  });
+
   function pintarConsumoAudd(c, activo) {
     const box = document.getElementById('audd-uso');
     box.hidden = !activo || !c;
@@ -887,6 +936,8 @@
     const pct = c.incluidas ? Math.min(100, Math.round(c.usadas / c.incluidas * 100)) : 100;
     document.getElementById('audd-quedan-canciones').textContent = c.alcanzaPara + ' de ' + c.cancionesPlan;
     document.getElementById('audd-quedan-txt').textContent = 'Quedan ' + c.quedan.toLocaleString('es') + ' de ' + c.incluidas.toLocaleString('es') + ' consultas · usadas ' + c.usadas.toLocaleString('es') + ' · unas ' + c.porCancion + ' por canción';
+    document.getElementById('audd-ahorro-txt').textContent = (c.escaneados || 0) + ' beats ya escaneados: no se vuelven a mandar a AudD' +
+      (c.reutilizadas ? ' (' + c.reutilizadas + ' verificaciones repetidas sin gastar consultas)' : '');
     const barra = document.getElementById('audd-barra');
     barra.style.width = pct + '%';
     box.classList.toggle('poco', c.alcanzaPara <= 5);
@@ -1089,7 +1140,7 @@
     return d.toLocaleString('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
   }
 
-  const LIC_NOMBRES = { basic: 'Básica', premium: 'Premium', unlimited: 'Ilimitada', exclusive: 'Exclusiva', pack: 'Sample Pack' };
+  const LIC_NOMBRES = { practice: 'Práctica', basic: 'Básica monetizable', premium: 'Premium', unlimited: 'Ilimitada', exclusive: 'Exclusiva', pack: 'Sample Pack' };
   const soloDigitos = (t) => String(t || '').replace(/[^0-9]/g, '');
   const etiquetaDe = (code) => { const c = configuredCurrencies.find(x => x.code === code); return (c && c.label) || code || 'CUP'; };
   const unidades = (n, code) => Number(n || 0).toLocaleString('es', { minimumFractionDigits: ZBUI.decimales(code), maximumFractionDigits: ZBUI.decimales(code) }) + ' ' + etiquetaDe(code);
@@ -1143,6 +1194,12 @@
         ? '<div class="order-reclamo"><strong>Reclamo del comprador</strong> (' + formatOrderDate(order.reclamo_at) + '): ' + escapeHtml(order.reclamo_texto) + '</div>' : '';
       const plazoHtml = order.vencido ? '<div class="order-warning">Plazo de confirmación vencido.</div>' : '';
       const repetidoHtml = (order.repetidos || []).length ? avisoRepetido(order.repetidos) : '';
+      // el artista pagó también la verificación AudD del beat (plan Free sin verificar)
+      const verifHtml = order.verif_pago_ok
+        ? (order.verif_estado === 'fallo'
+          ? '<div class="order-warning">El beat no pasó la verificación AudD: no se puede entregar como monetizable. Ofrécele otro beat al artista o devuélvele el dinero, y rechaza el pedido.</div>'
+          : '<div class="order-code">Pago confirmado · la licencia se entrega sola cuando el beat pase la verificación AudD.</div>')
+        : (Number(order.verif_suplemento) > 0 ? '<div class="order-code">Incluye ' + escapeHtml(fmtCup(order.verif_suplemento)) + ' de verificación AudD (no va al productor).</div>' : '');
 
       const lic = LIC_NOMBRES[order.license_type] || order.license_type || '';
       const avisoVendida = order.track_sold
@@ -1165,10 +1222,10 @@
           ${order.pago_metodo === 'qvapay'
             ? `<div class="order-reclamo"><strong>Pagado con QvaPay</strong> (${escapeHtml(order.transaction_ref || order.qvapay_uuid || '')}). No se entregó automáticamente: ${escapeHtml(order.qvapay_error || 'revísalo')}</div>`
             : (order.transaction_ref ? `<div class="order-code">Transacción: ${escapeHtml(order.transaction_ref)}</div>` : '<div class="order-code">Sin número de transacción</div>')}
-          ${avisoVendida}${repetidoHtml}${plazoHtml}${reclamoHtml}
+          ${avisoVendida}${verifHtml}${repetidoHtml}${plazoHtml}${reclamoHtml}
         </div>
         <div class="actions">
-          <button class="btn-approve-order" type="button">Aprobar</button>
+          ${order.verif_pago_ok ? '' : '<button class="btn-approve-order" type="button">' + (Number(order.verif_suplemento) > 0 ? 'Confirmar pago' : 'Aprobar') + '</button>'}
           ${rechazada ? '' : '<button class="btn-reject-track btn-reject-order" type="button">Rechazar</button>'}
           ${order.conReclamo ? '<button class="btn-toggle-producer btn-reclamo-ok" type="button">Reclamo atendido</button>' : ''}
           ${waRecibido ? `<a class="btn-toggle-producer" href="${waRecibido}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
@@ -1181,7 +1238,8 @@
         receiptModalImg.src = `/api/admin/orders/${order.id}/receipt`;
         receiptModalOverlay.classList.add('active');
       });
-      item.querySelector('.btn-approve-order').addEventListener('click', (ev) => approveOrder(order, item, ev.target));
+      const bApr = item.querySelector('.btn-approve-order');
+      if (bApr) bApr.addEventListener('click', (ev) => approveOrder(order, item, ev.target));
       const bRech = item.querySelector('.btn-reject-order');
       if (bRech) bRech.addEventListener('click', () => rejectOrder(order));
       const bDel = item.querySelector('.btn-delete');
@@ -1202,6 +1260,11 @@
     const res = await fetch(`/api/admin/orders/${order.id}/approve`, { method: 'POST' });
     if (res.ok) {
       const result = await res.json();
+      if (result.esperandoVerificacion) {
+        showToast(result.warning || 'Pago confirmado: se entrega cuando el beat pase la verificación.');
+        loadOrders(); loadSummary();
+        return;
+      }
       let msg = 'Pedido aprobado.';
       if (result.wentToVip) msg = 'Aprobado. La pista pasó a Beats VIP.';
       else if (result.trackMarkedSold) msg = 'Aprobado. La pista salió del catálogo.';
@@ -2056,6 +2119,28 @@
   let servicioExternoActivo = false;
   let origTimer = null;
 
+  // Venta monetizable: solo con la verificación AudD aprobada, o con la revisión manual del administrador
+  const MONET_TXT = { aprobada: '✓ Monetizable a la venta (AudD o revisión manual)', rechazada: 'Monetizable bloqueada: no pasó la verificación', verificando: 'Monetizable: esperando la verificación AudD', en_cola: 'Monetizable: en cola (el productor agotó su cupo AudD del mes)', sin_verificar: 'Monetizable: sin verificar (plan Free; la paga el productor o el artista al comprar)' };
+  function lineaMonet(t) {
+    if (!t.monet) return '';
+    const txt = MONET_TXT[t.monet] || '';
+    const boton = t.monet !== 'aprobada' ? '<button type="button" class="btn-link btn-monet-manual" data-id="' + t.id + '" data-titulo="' + escapeHtml(t.title) + '">Aprobar a mano</button>' : '';
+    return '<div class="orig-decl' + (t.monet === 'aprobada' ? '' : ' warn') + ' monet-linea">' + escapeHtml(txt) + (boton ? ' ' + boton : '') + '</div>';
+  }
+  document.addEventListener('click', async (e) => {
+    const b = e.target.closest && e.target.closest('.btn-monet-manual');
+    if (!b) return;
+    const motivo = prompt('Revisión manual de «' + b.dataset.titulo + '»: ¿por qué apruebas la venta monetizable? (mínimo 10 caracteres)');
+    if (motivo === null) return;
+    b.disabled = true;
+    const r = await fetch('/api/admin/tracks/' + b.dataset.id + '/monetizable', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ motivo }) });
+    const d = await r.json().catch(() => ({}));
+    b.disabled = false;
+    if (!r.ok) { if (r.status !== 401) showToast(d.error || 'No se pudo aprobar.', true); return; }
+    showToast('Venta monetizable aprobada a mano.');
+    loadTracks(); loadPendingTracks(); loadCoincidencias();
+  });
+
   function bloqueOriginalidad(t) {
     const o = t.originalidad || { estado: 'pendiente' };
     const declarado = t.prelanzado
@@ -2072,7 +2157,7 @@
       cuerpo = '<div class="orig-estado warn">Coincidencias encontradas</div><ul class="orig-lista">' + filas.join('') + '</ul>';
     }
     const reverif = o.estado === 'pendiente' ? '' : '<button type="button" class="btn-secondary btn-reverif">Verificar de nuevo</button>';
-    return '<div class="orig-box"><div class="orig-title">Originalidad / Content ID</div>' + cuerpo + declarado + sinExterno + reverif + '</div>';
+    return '<div class="orig-box"><div class="orig-title">Originalidad / Content ID</div>' + cuerpo + declarado + sinExterno + lineaMonet(t) + reverif + '</div>';
   }
 
   function renderPendingTracks(tracks) {
@@ -2101,7 +2186,7 @@
         <div class="info">
           <div class="t">${escapeHtml(t.title)}${t.is_playlist ? ' <span class="tag-pending">Playlist</span>' : ''}</div>
           <div class="m">${escapeHtml(t.genre || 'Sin género')}${licencias ? ' · ' + escapeHtml(licencias) : ''}</div>
-          <div class="producer">${escapeHtml(t.producer_name || 'Sin productor')} · plan ${escapeHtml(PLAN_INFO[t.producer_plan] ? PLAN_INFO[t.producer_plan].label : (t.producer_plan || 'Free'))} · ${escapeHtml(t.producer_email || '')}</div>
+          <div class="producer">${escapeHtml(t.producer_name || 'Sin productor')} · plan ${escapeHtml(PLAN_INFO[t.producer_plan] ? PLAN_INFO[t.producer_plan].label : (t.producer_plan || 'Free'))}${t.prioridad ? ' · <span class="prio prio-' + escapeHtml(t.prioridad) + '">prioridad ' + escapeHtml(t.prioridad) + '</span>' : ''} · ${escapeHtml(t.producer_email || '')}</div>
           ${t.description ? `<div class="m desc">${escapeHtml(t.description)}</div>` : ''}
           ${archivos}
           ${t.is_playlist ? '' : bloqueOriginalidad(t)}
@@ -2710,6 +2795,73 @@
     }));
   }
 
+  // ---------- Verificaciones AudD pagadas por comprobante ----------
+  const METODO_VERIF = { comprobante: 'transferencia', saldo: 'con su saldo', credito: 'con un crédito', artista: 'la pagó un artista' };
+  const RESULTADO_VERIF = { ok: 'pasó', no_original: 'no original' };
+  async function loadVerificacionesAdmin() {
+    const res = await fetch('/api/admin/verificaciones');
+    if (!res.ok) return;
+    const d = await res.json();
+    const setVal = (id, v) => { const el = document.getElementById(id); if (document.activeElement !== el) el.value = v || ''; };
+    setVal('verif-precio', d.precio);
+    ['premium', 'unlimited', 'exclusive'].forEach(k => setVal('verif-sug-' + k, d.sugeridos[k]));
+    document.getElementById('verif-reglas').textContent = 'Cuesta ' + fmtCup(d.precio) + '. Pro tiene ' + d.cupos.pro + ' verificaciones automáticas al mes y Studio ' + d.cupos.studio + '; al pasarse, pagan una extra. Nunca se cobra dos veces por el mismo beat.';
+    const cnt = document.getElementById('verif-count');
+    cnt.textContent = d.pendientes.length || ''; cnt.classList.toggle('show', d.pendientes.length > 0);
+    actualizarNav('productores', 'verificaciones', d.pendientes.length);
+    const pend = document.getElementById('verif-pending');
+    pend.innerHTML = d.pendientes.length ? '' : '<div class="empty-hint">No hay verificaciones por confirmar.</div>';
+    d.pendientes.forEach((v) => {
+      const item = document.createElement('div');
+      item.className = 'order-item';
+      const wa = soloDigitos(v.producer_phone);
+      item.innerHTML =
+        (v.receipt_filename ? '<img class="receipt-thumb" src="/api/admin/verificaciones/' + v.id + '/receipt" alt="Comprobante">' : '<div class="receipt-thumb receipt-gone">sin foto</div>') +
+        '<div class="info">' +
+          '<div class="buyer">' + escapeHtml(v.producer_name || 'Productor') + '</div>' +
+          '<div class="track">Verificación AudD · ' + escapeHtml(v.track_title || 'Beat eliminado') + ' · <strong>' + fmtCup(v.monto_cup) + '</strong>' + (v.currency && v.currency !== 'CUP' ? ' (pagó en ' + escapeHtml(etiquetaDe(v.currency)) + ')' : '') + '</div>' +
+          '<div class="meta">' + fechaHora(v.created_at) + '</div>' +
+        '</div>' +
+        '<div class="actions">' +
+          '<button type="button" class="btn-approve-order v-ok">Confirmar y verificar</button>' +
+          '<button type="button" class="btn-reject-track v-no">Rechazar</button>' +
+          (wa ? '<a class="btn-toggle-producer" href="https://wa.me/' + wa + '" target="_blank" rel="noopener">WhatsApp</a>' : '') +
+        '</div>';
+      const th = item.querySelector('img.receipt-thumb');
+      if (th) th.addEventListener('click', () => { receiptModalImg.src = '/api/admin/verificaciones/' + v.id + '/receipt'; receiptModalOverlay.classList.add('active'); });
+      item.querySelector('.v-ok').addEventListener('click', async (ev) => {
+        if (!confirm('¿Recibiste ' + fmtCup(v.monto_cup) + ' de ' + (v.producer_name || 'el productor') + '? «' + v.track_title + '» se manda a AudD.')) return;
+        ev.target.disabled = true;
+        const r = await fetch('/api/admin/verificaciones/' + v.id + '/approve', { method: 'POST' });
+        const e2 = await r.json().catch(() => ({}));
+        if (r.ok) { showToast('Pago confirmado: el beat se está verificando con AudD.'); loadVerificacionesAdmin(); }
+        else { showToast(e2.error || 'No se pudo confirmar.', true); ev.target.disabled = false; }
+      });
+      item.querySelector('.v-no').addEventListener('click', async () => {
+        const reason = prompt('Motivo del rechazo:');
+        if (reason === null) return;
+        const r = await fetch('/api/admin/verificaciones/' + v.id + '/reject', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }) });
+        showToast(r.ok ? 'Pago rechazado.' : 'No se pudo rechazar.', !r.ok);
+        loadVerificacionesAdmin();
+      });
+      pend.appendChild(item);
+    });
+    document.getElementById('verif-history').innerHTML = d.historial.length ? d.historial.map(v =>
+      '<div class="payout-history-row"><span>' + fechaHora(v.resolved_at || v.created_at) + '</span>' +
+      '<span>' + escapeHtml(v.track_title || 'Beat eliminado') + ' · ' + escapeHtml(v.producer_name || 'tuyo') + ' · ' + escapeHtml(METODO_VERIF[v.metodo] || v.metodo) + '</span>' +
+      '<strong>' + (v.status === 'rejected' ? 'rechazada' : (RESULTADO_VERIF[v.resultado] || 'verificando')) + (v.credito === 'disponible' ? ' · crédito' : '') + '</strong></div>').join('')
+      : '<div class="empty-hint">Todavía no hay verificaciones.</div>';
+  }
+  document.getElementById('verif-config').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const v = (id) => document.getElementById(id).value.trim();
+    const r = await fetch('/api/admin/verificaciones/config', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ precio: v('verif-precio'), sugeridos: { premium: v('verif-sug-premium'), unlimited: v('verif-sug-unlimited'), exclusive: v('verif-sug-exclusive') } }) });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok) { showToast('Guardado: la verificación cuesta ' + fmtCup(d.precio) + '.'); loadVerificacionesAdmin(); }
+    else if (r.status !== 401) showToast(d.error || 'No se pudo guardar.', true);
+  });
+
   async function loadHotsAdmin() {
     const res = await fetch('/api/admin/hots');
     if (!res.ok) return;
@@ -3013,7 +3165,7 @@
     fila.classList.toggle('open', abrir);
     b.setAttribute('aria-expanded', String(abrir));
   });
-  [['orders-list', '.order-item'], ['history-list', '.order-item'], ['plan-requests-list', '.order-item'], ['hots-pending', '.order-item'],
+  [['orders-list', '.order-item'], ['history-list', '.order-item'], ['plan-requests-list', '.order-item'], ['hots-pending', '.order-item'], ['verif-pending', '.order-item'],
    ['pending-tracks-list', '.pending-track-item'], ['producers-list', '.producer-item'], ['track-list', '.track-list-item'], ['payouts-list', '.payout-item']]
     .forEach(([id, sel]) => plegarFilas(document.getElementById(id), sel));
 
@@ -3021,7 +3173,7 @@
   const PAGINAS = {};
   [['orders-list', 4, 3], ['history-list', 4, 4], ['pending-tracks-list', 3, 4], ['producers-list', 4, 6],
    ['payouts-list', 3, 5], ['payouts-unrequested', 7, 10], ['payouts-history', 7, 10], ['plan-requests-list', 4, 6],
-   ['hots-pending', 3, 5], ['hots-active', 6, 8], ['hots-history', 7, 10], ['denuncias-list', 3, 5], ['cid-list', 3, 5],
+   ['hots-pending', 3, 5], ['hots-active', 6, 8], ['hots-history', 7, 10], ['verif-pending', 3, 5], ['verif-history', 7, 10], ['denuncias-list', 3, 5], ['cid-list', 3, 5],
    ['resenas-list', 4, 6], ['track-list', 5, 4], ['coincidencias-list', 1, 2], ['exchange-rates-list', 4, 8], ['payout-rates-list', 7, 12], ['accounts-list', 2, 6], ['social-links-list', 4, 6]]
     .forEach(([id, movil, pc]) => { PAGINAS[id] = ZBUI.paginarDom(document.getElementById(id), { porPagina: () => ZBUI.filasPorPagina(movil, pc), filas: ':not(.rate-base)' }); });
   document.getElementById('history-search').addEventListener('input', () => { if (PAGINAS['history-list']) PAGINAS['history-list'].primera(); });

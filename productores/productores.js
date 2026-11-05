@@ -1,6 +1,34 @@
 (() => {
   window.ZB_PANEL = 'productor';
   const $ = (id) => document.getElementById(id);
+  const NOMBRES_LIC = { practice: 'Básica práctica', basic: 'Básica monetizable', premium: 'Premium', unlimited: 'Ilimitada', exclusive: 'Exclusiva', pack: 'Sample pack' };
+  const precioDe = (el) => (el ? ((window.ZBSubidas ? window.ZBSubidas.precio(el.value) : parseFloat(String(el.value).replace(',', '.'))) || 0) : 0);
+  const cupTxt = (n) => Number(n).toLocaleString('es') + ' CUP';
+  // Avisos al escribir el precio: los rangos del plan Free (obligatorios) y el precio sugerido de Pro y Studio
+  function avisoDePrecio(p, k, v) {
+    if (!p || !(v > 0)) return '';
+    const r = p.planClave === 'free' && p.rangosFree && p.rangosFree[k];
+    if (r) {
+      if (v < r[0]) return r[1] ? 'En el plan Free va de ' + cupTxt(r[0]) + ' a ' + cupTxt(r[1]) + '.' : 'En el plan Free cuesta como mínimo ' + cupTxt(r[0]) + '.';
+      return r[1] && v > r[1] ? 'En el plan Free cuesta como máximo ' + cupTxt(r[1]) + '.' : '';
+    }
+    const sug = p.planClave !== 'free' && p.preciosSugeridos && p.preciosSugeridos[k];
+    return sug && v < sug * 0.5 ? 'Muy por debajo del precio sugerido (' + cupTxt(sug) + ').' : '';
+  }
+  function avisosDePrecio(p, campos, prefijo) {
+    for (const [k, el] of Object.entries(campos)) {
+      const box = $(prefijo + k);
+      if (box) box.textContent = el && el.offsetParent !== null ? avisoDePrecio(p, k, precioDe(el)) : '';
+    }
+  }
+  function problemaDeRango(p, campos) {
+    if (!p || p.planClave !== 'free') return null;
+    for (const [k, el] of Object.entries(campos)) {
+      const txt = el && el.closest('.lic-field') && el.closest('.lic-field').style.display !== 'none' ? avisoDePrecio(p, k, precioDe(el)) : '';
+      if (txt) return { msg: NOMBRES_LIC[k] + ': ' + txt, el };
+    }
+    return null;
+  }
   const loginScreen = $('login-screen');
   const dashShell = $('dash-shell');
   const emailInput = $('email-input');
@@ -387,14 +415,17 @@
     $('rail-plan').textContent = 'Plan ' + perfil.planLabel;
     $('home-plan-name').textContent = perfil.planLabel;
     ponerNombre(perfil.name);
-    const nombresLic = { basic: 'Básica', premium: 'Premium', unlimited: 'Ilimitada', exclusive: 'Exclusiva', pack: 'Sample pack' };
+    const nombresLic = NOMBRES_LIC;
     const medidorBeats = medidor(perfil.beatsUsados, perfil.planMaxBeats, 'beats activos');
     $('plan-facts').innerHTML =
       '<div class="plan-fact wide">' + medidorBeats + '</div>' +
       (perfil.planPaidUntil && perfil.plan !== 'free' ? fact('Pagado hasta', perfil.planPaidUntil) : '') +
       fact('Comisión de la plataforma', perfil.planCommission + '%', 'dup') +
       fact('Te pagamos en', perfil.planPayout, 'dup') +
-      fact('Licencias que puedes vender', perfil.licenciasPermitidas.map(l => nombresLic[l]).join(', '), 'dup');
+      fact('Licencias que puedes vender', perfil.licenciasPermitidas.map(l => nombresLic[l]).join(', '), 'dup') +
+      (perfil.verificacion && perfil.verificacion.cupo.cap
+        ? '<div class="plan-fact wide">' + medidor(perfil.verificacion.cupo.usados, perfil.verificacion.cupo.cap, 'verificaciones AudD este mes') + '</div>'
+        : (perfil.planClave === 'free' && perfil.verificacion ? fact('Verificación AudD', formatCup(perfil.verificacion.precio) + ' por beat' + (perfil.verificacion.creditos ? ' · ' + perfil.verificacion.creditos + ' crédito' + (perfil.verificacion.creditos === 1 ? '' : 's') : ''), 'dup') : ''));
     $('home-meter').innerHTML = medidorBeats +
       '<div class="hp-meta"><span>Comisión ' + escapeHtml(perfil.planCommission) + '%</span><span>Cobras en ' + escapeHtml(perfil.planPayout) + '</span>' +
       (perfil.planPaidUntil && perfil.plan !== 'free' ? '<span>Pagado hasta ' + escapeHtml(perfil.planPaidUntil) + '</span>' : '') + '</div>';
@@ -499,9 +530,9 @@
     // el plazo de pago lo pone el administrador
     const pago = (k) => { const pl = perfil.planes.find(x => x.key === k); return 'Pago en ' + (pl && pl.payout ? pl.payout : ''); };
     const feats = {
-      free: ['5 beats activos', 'Comisión 30%', 'Previews con tag', 'Solo MP3 (320 kbps)', 'Solo licencia Básica', pago('free'), 'Estadística de referidos'],
-      pro: ['50 beats activos', 'Comisión 20%', 'Previews sin tag', 'WAV / MP3 (320 kbps)', 'Licencias Básica y Premium', 'Sample Packs', 'Estadísticas', 'Tus redes en tu perfil', pago('pro')],
-      studio: ['Beats ilimitados', 'Playlist', 'Sample Packs', 'Comisión 10%', 'Estadísticas', 'STEMS + WAV + MP3', 'Todas las licencias + Exclusivas', pago('studio'), 'Bono por me gusta en Playlist'],
+      free: ['2 beats activos', 'Comisión 30%', 'WAV de 24 bits + MP3 de 320 kbps, sin tag', 'Beats de 3 minutos como máximo', 'Básica monetizable de venta única (desde 1 900 CUP, sin techo)', 'Verificación AudD gratis al subir', 'Muestra de 1 minuto en la tienda (tú eliges cuál)', 'Marca de agua forense en cada venta (rastreable)', 'Prioridad baja', 'Sin Hots ni reportes', pago('free')],
+      pro: ['50 beats activos', 'Comisión 20%', 'WAV de 24 bits + MP3 de 320 kbps, sin tag', 'Beats de 10 minutos como máximo', 'Licencia Premium monetizable, sin mínimo ni máximo', 'Verificación AudD automática: 50 beats al mes', 'Beat completo en la tienda (sin demo)', 'Estadísticas y tus redes en el perfil', 'Prioridad media', 'Hots con 10% de descuento desde 5 ventas', pago('pro')],
+      studio: ['150 beats activos', 'Comisión 10%', 'WAV de 24 bits + MP3 de 320 kbps + STEMS, sin tag', 'Beats de 20 minutos como máximo', 'Premium, Ilimitada y Exclusiva monetizables', 'Verificación AudD automática: 150 beats al mes', 'Marca de agua forense en cada venta (rastreable)', 'Estadísticas y tus redes en el perfil', 'Prioridad alta', '1 Hot al mes con 20% de descuento desde 10 ventas', 'Reporte mensual en PDF', 'Playlist y Sample Packs', pago('studio'), 'Bono por me gusta en Playlist'],
     };
     // En el teléfono se ve un plan a la vez (se elige arriba); en pantallas grandes, los tres juntos
     if (!perfil.planes.some(pl => pl.key === planVisto)) planVisto = perfil.plan === 'free' ? 'pro' : perfil.plan;
@@ -580,12 +611,18 @@
     const lic = p.licenciasPermitidas || ['basic'];
     document.querySelectorAll('.lic-field').forEach(f => {
       const ok = lic.includes(f.dataset.lic);
+      f.dataset.plan = ok ? '1' : '0';
       f.style.display = ok ? '' : 'none';
-      if (!ok) f.querySelector('input').value = '';
+      const inp = f.querySelector('input');
+      if (!ok && inp) inp.value = '';
     });
     const exWrap = $('exclusive-toggle-wrap');
     exWrap.style.display = lic.includes('exclusive') && !isPlaylistInput.checked ? '' : 'none';
     if (!lic.includes('exclusive')) makeExclusiveInput.checked = false;
+    // Studio (más de una licencia): primero elige qué licencias vende con este beat
+    const vendibles = ['premium', 'unlimited', 'exclusive'].filter(k => lic.includes(k));
+    $('lic-elegir').hidden = vendibles.length < 2;
+    document.querySelectorAll('[data-elegir]').forEach(b => { b.hidden = !vendibles.includes(b.dataset.elegir); });
     $('playlist-toggle-wrap').style.display = p.puedePlaylist ? '' : 'none';
     if (!p.puedePlaylist) isPlaylistInput.checked = false;
 
@@ -595,13 +632,22 @@
     if (!p.puedeStems) stemsInput.value = '';
 
     audioInput.accept = p.soloMp3 ? '.mp3,audio/mpeg' : '.mp3,.wav,audio/mpeg,audio/wav';
-    audioDefault = p.soloMp3 ? 'MP3 320 kbps · máx 250 MB' : 'MP3 320 kbps o WAV · máx 250 MB';
+    const esFree = p.planClave === 'free';
+    const maxMin = p.maxSegundos ? ' · máx ' + p.maxSegundos / 60 + ' min' : ' · máx 250 MB';
+    audioDefault = p.soloMp3 ? 'MP3 320 kbps' + maxMin : 'MP3 o WAV' + maxMin;
     if (!audioInput.files.length) $('audio-drop-label').textContent = audioDefault;
+    $('audio-hint').textContent = esFree ? 'AudD lo verifica gratis al subir.' : 'De este archivo salen el preview y el MP3 de entrega.';
+    $('wav-lbl').firstChild.textContent = 'WAV sin tag ';
+    WAV_LABEL = 'WAV de 24 bits' + (p.maxSegundos ? ' · máx ' + p.maxSegundos / 60 + ' min' : ' · máx 1 GB');
+    $('muestra-field').hidden = !p.muestraSegundos;
+    if (!wavInput.files.length) $('wav-drop-label').textContent = WAV_LABEL;
+    $('precio-hint').textContent = esFree
+      ? 'Precio de la Básica monetizable: mínimo 1 900 CUP, sin máximo. Se vende una sola vez (WAV + MP3 sin tag) cuando el beat pase AudD, que lo verifica gratis al subir; después sale del catálogo.'
+      : 'Sin mínimo ni máximo. Precio sugerido: ' + ['premium', 'unlimited', 'exclusive'].filter(k => lic.includes(k)).map(k => NOMBRES_LIC[k] + ' ' + formatCup((p.preciosSugeridos || {})[k] || 0)).join(', ') + '. Se verifica solo con AudD al subir.';
 
-    const nombres = { basic: 'Básica', premium: 'Premium', unlimited: 'Ilimitada', exclusive: 'Exclusiva', pack: 'Sample Pack' };
     const reglas = [
-      'Plan ' + p.planLabel + ': puedes vender ' + lic.map(l => nombres[l]).join(', ') + '.',
-      p.soloMp3 ? 'Audio solo en MP3 de 320 kbps.' : 'Audio en MP3 de 320 kbps o WAV.',
+      'Plan ' + p.planLabel + ': puedes vender ' + lic.map(l => NOMBRES_LIC[l]).join(', ') + '.',
+      esFree ? 'MP3 de 320 kbps y WAV, sin tag, de 3 minutos como máximo. Hasta ' + (p.planMaxBeats || 2) + ' beats activos.' : (p.soloMp3 ? 'Audio solo en MP3 de 320 kbps.' : 'Audio en MP3 de 320 kbps o WAV, sin tag.'),
       p.previewConMarca ? 'Tus previews llevan el tag de la plataforma.' : 'Tus previews van sin marca de agua.',
     ];
     if (!p.puedePlaylist) reglas.push('La Playlist es solo del plan Studio.');
@@ -618,26 +664,39 @@
   function actualizarFormulario() {
     if (!perfil) return;
     const esPlaylist = isPlaylistInput.checked;
+    const conElegir = !$('lic-elegir').hidden;
+    if (conElegir) makeExclusiveInput.checked = elegidas.has('exclusive');
     const exclusivo = makeExclusiveInput.checked && !esPlaylist;
     $('artist-credit-field').style.display = esPlaylist ? 'block' : 'none';
     $('sale-fields').style.display = esPlaylist ? 'none' : 'block';
     $('precio-playlist-nota').hidden = !esPlaylist;
     const stp2 = document.querySelector('#up-stepper .stp[data-paso="2"]');
     if (stp2) { stp2.classList.toggle('salta', esPlaylist); stp2.querySelector('.stp-t').textContent = esPlaylist ? 'Sin precio' : 'Precios'; }
-    $('license-mode-fields').style.display = exclusivo ? 'none' : 'block';
+    $('license-mode-fields').style.display = exclusivo || (conElegir && !elegidas.size) ? 'none' : 'block';
     $('exclusive-mode-fields').style.display = exclusivo ? 'block' : 'none';
     const lic = perfil.licenciasPermitidas || [];
-    $('exclusive-toggle-wrap').style.display = lic.includes('exclusive') && !esPlaylist ? '' : 'none';
+    $('exclusive-toggle-wrap').style.display = lic.includes('exclusive') && !esPlaylist && !conElegir ? '' : 'none';
+    if (conElegir) {
+      document.querySelectorAll('.lic-field').forEach(f => { f.style.display = f.dataset.plan === '1' && elegidas.has(f.dataset.lic) ? '' : 'none'; });
+      document.querySelectorAll('[data-elegir]').forEach(b => {
+        const on = elegidas.has(b.dataset.elegir);
+        b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on));
+      });
+    }
 
     const val = (el) => (window.ZBSubidas ? window.ZBSubidas.precio(el.value) : parseFloat(String(el.value).replace(',', '.'))) > 0;
     // si el audio principal ya es WAV, ese mismo archivo es el WAV que se entrega
     const audioEsWav = audioInput.files.length > 0 && /\.wav$/i.test(audioInput.files[0].name);
-    const necesitaWav = !esPlaylist && !audioEsWav && (exclusivo ? val(priceExclusiveInput) : (val(pricePremiumInput) || val(priceUnlimitedInput)));
+    const necesitaWav = !esPlaylist && !audioEsWav && (exclusivo ? val(priceExclusiveInput) : (val(priceBasicInput) || val(pricePremiumInput) || val(priceUnlimitedInput)));
+    avisosDePrecio(perfil, { basic: priceBasicInput, premium: pricePremiumInput, unlimited: priceUnlimitedInput, exclusive: priceExclusiveInput }, 'lic-aviso-');
     const necesitaStems = !esPlaylist && (exclusivo ? val(priceExclusiveInput) : val(priceUnlimitedInput));
     const puedeWav = $('wav-stems-field').dataset.allowed === '1';
     const puedeStems = $('stems-field').dataset.allowed === '1';
     $('wav-stems-field').style.display = puedeWav && !esPlaylist ? '' : 'none';
-    $('stems-field').style.display = puedeStems && !esPlaylist ? '' : 'none';
+    // con el selector de Studio, los STEMS solo se piden si vende Ilimitada o Exclusiva
+    const stemsUtiles = !conElegir || elegidas.has('unlimited') || elegidas.has('exclusive');
+    $('stems-field').style.display = puedeStems && !esPlaylist && stemsUtiles ? '' : 'none';
+    if (!stemsUtiles && stemsInput.files.length) { stemsInput.value = ''; stemsInput.dispatchEvent(new Event('change')); }
     $('wav-req').style.display = necesitaWav ? '' : 'none';
     $('wav-note').textContent = audioEsWav && !esPlaylist ? 'Tu audio principal ya es WAV: se entrega ese mismo, no hace falta subirlo otra vez.' : '';
     $('stems-req').style.display = necesitaStems ? '' : 'none';
@@ -645,6 +704,21 @@
     $('stems-drop').classList.toggle('required', necesitaStems && !stemsInput.files.length);
   }
   [pricePremiumInput, priceUnlimitedInput, priceExclusiveInput, priceBasicInput].forEach(el => el.addEventListener('input', actualizarFormulario));
+  // selector de licencias (Studio): Premium e Ilimitada se combinan; la Exclusiva va sola
+  const elegidas = new Set();
+  const inputDe = { premium: pricePremiumInput, unlimited: priceUnlimitedInput, exclusive: priceExclusiveInput };
+  document.querySelectorAll('[data-elegir]').forEach(b => b.addEventListener('click', () => {
+    const k = b.dataset.elegir;
+    if (elegidas.has(k)) elegidas.delete(k);
+    else {
+      if (k === 'exclusive') elegidas.clear(); else elegidas.delete('exclusive');
+      elegidas.add(k);
+    }
+    for (const [lk, el] of Object.entries(inputDe)) if (!elegidas.has(lk)) el.value = '';
+    actualizarFormulario();
+    const primero = [...elegidas].map(x => inputDe[x]).find(Boolean);
+    if (primero && elegidas.has(k)) primero.focus({ preventScroll: true });
+  }));
   isPlaylistInput.addEventListener('change', () => { if (isPlaylistInput.checked) makeExclusiveInput.checked = false; actualizarFormulario(); });
   makeExclusiveInput.addEventListener('change', () => {
     if (makeExclusiveInput.checked) { priceBasicInput.value = ''; pricePremiumInput.value = ''; priceUnlimitedInput.value = ''; }
@@ -666,11 +740,11 @@
     });
   }
   const COVER_LABEL = 'Cuadrada 3000x3000 px · JPG, PNG o WEBP · máx 8 MB';
-  const WAV_LABEL = 'WAV en alta calidad · máx 1 GB';
+  let WAV_LABEL = 'WAV en alta calidad · máx 1 GB';
   const STEMS_LABEL = 'ZIP (o RAR/7Z) con las pistas separadas · máx 4 GB';
   wireFileDrop($('audio-drop'), audioInput, $('audio-drop-label'), () => audioDefault);
   wireFileDrop($('cover-drop'), coverInput, $('cover-drop-label'), COVER_LABEL);
-  wireFileDrop($('wav-drop'), wavInput, $('wav-drop-label'), WAV_LABEL);
+  wireFileDrop($('wav-drop'), wavInput, $('wav-drop-label'), () => WAV_LABEL);
   wireFileDrop($('stems-drop'), stemsInput, $('stems-drop-label'), STEMS_LABEL);
 
   // Vista previa de la portada y aviso si no es cuadrada (la tienda la recorta al centro).
@@ -692,8 +766,58 @@
     else if (m.w < 1000) aviso.textContent = 'Tu portada mide ' + m.w + 'x' + m.h + ' px: se verá borrosa. Lo ideal es 3000x3000 px.';
   });
 
+  // ---- Muestra de 1 minuto (plan Free): el productor elige qué minuto suena en la tienda ----
+  const mmss = (s) => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+  const muestra = { url: '', audio: null, dur: 0, fin: 0 };
+  function pintarMuestra() {
+    const r = $('muestra-inicio');
+    const ini = Number(r.value) || 0;
+    $('muestra-txt').textContent = muestra.dur ? mmss(ini) + ' – ' + mmss(Math.min(muestra.dur, ini + 60)) : 'Elige el audio';
+  }
+  const ICO_PLAY = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 5.5v13l10-6.5z"/></svg>';
+  const ICO_PAUSA = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 5.5h3.5v13H7zM13.5 5.5H17v13h-3.5z"/></svg>';
+  function iconoMuestra(sonando) {
+    const b = $('muestra-play');
+    b.innerHTML = sonando ? ICO_PAUSA : ICO_PLAY;
+    b.setAttribute('aria-label', sonando ? 'Pausar' : 'Escuchar el minuto elegido');
+  }
+  function pararMuestra() { if (muestra.audio) { muestra.audio.pause(); } iconoMuestra(false); }
+  function cargarMuestra() {
+    pararMuestra();
+    if (muestra.url) { URL.revokeObjectURL(muestra.url); muestra.url = ''; }
+    muestra.dur = 0;
+    const r = $('muestra-inicio');
+    r.value = 0; r.max = 0; r.disabled = true; $('muestra-play').disabled = true;
+    const f = audioInput.files[0];
+    if (!f || !perfil || !(perfil.muestraSegundos || perfil.maxSegundos)) { pintarMuestra(); return; }
+    muestra.url = URL.createObjectURL(f);
+    const a = muestra.audio || (muestra.audio = new Audio());
+    a.preload = 'metadata';
+    a.onloadedmetadata = () => {
+      muestra.dur = a.duration || 0;
+      r.max = String(Math.max(0, Math.floor(muestra.dur - 60)));
+      r.disabled = !(Number(r.max) > 0); $('muestra-play').disabled = false;
+      pintarMuestra();
+      if (perfil.maxSegundos && muestra.dur > perfil.maxSegundos + 1) showToast('Este audio dura ' + mmss(muestra.dur) + ': en tu plan el beat dura como máximo ' + perfil.maxSegundos / 60 + ' minutos.', true);
+    };
+    a.ontimeupdate = () => { if (a.currentTime >= muestra.fin) pararMuestra(); };
+    a.src = muestra.url;
+  }
+  audioInput.addEventListener('change', cargarMuestra);
+  $('muestra-inicio').addEventListener('input', () => { pintarMuestra(); if (muestra.audio && !muestra.audio.paused) { muestra.audio.currentTime = Number($('muestra-inicio').value) || 0; muestra.fin = muestra.audio.currentTime + 60; } });
+  $('muestra-play').addEventListener('click', () => {
+    const a = muestra.audio;
+    if (!a || !muestra.dur) return;
+    if (!a.paused) { pararMuestra(); return; }
+    a.currentTime = Number($('muestra-inicio').value) || 0;
+    muestra.fin = a.currentTime + 60;
+    a.play().then(() => iconoMuestra(true)).catch(() => {});
+  });
+
   function resetUploadForm() {
     uploadForm.reset();
+    elegidas.clear();
+    setTimeout(cargarMuestra, 0);
     $('publicado-donde').hidden = true; $('cid-aviso').hidden = true;
     ['audio-drop', 'cover-drop', 'wav-drop', 'stems-drop'].forEach(id => $(id).classList.remove('has-file'));
     $('audio-drop-label').textContent = audioDefault;
@@ -747,15 +871,19 @@
     const esPlaylist = isPlaylistInput.checked;
     if (n === 1 && !titleInput.value.trim()) return { msg: 'Ponle título al beat.', el: titleInput };
     if (n === 2 && !esPlaylist) {
+      if (!$('lic-elegir').hidden && !elegidas.size) return { msg: 'Elige qué licencias vendes con este beat.', el: document.querySelector('[data-elegir]:not([hidden])') };
       if (makeExclusiveInput.checked) {
         if (!(leerPrecio(priceExclusiveInput) > 0)) return { msg: 'Ponle el precio exclusivo al beat.', el: priceExclusiveInput };
       } else {
         const campos = [priceBasicInput, pricePremiumInput, priceUnlimitedInput].filter(licPermitida);
         if (!campos.some(el => leerPrecio(el) > 0)) return { msg: 'Ponle precio a al menos una licencia.', el: campos[0] || priceBasicInput };
+        const fuera = problemaDeRango(perfil, { basic: priceBasicInput });
+        if (fuera) return fuera;
       }
     }
     if (n === 3) {
       if (!audioInput.files.length) return { msg: 'Elige el archivo de audio.', el: audioInput };
+      if (perfil && perfil.maxSegundos && muestra.dur > perfil.maxSegundos + 1) return { msg: 'En tu plan el beat dura como máximo ' + perfil.maxSegundos / 60 + ' minutos (este dura ' + mmss(muestra.dur) + ').', el: audioInput };
       if (!coverInput.files.length) return { msg: 'La portada es obligatoria (cuadrada, 3000x3000 px).', el: coverInput };
       if ($('wav-req').style.display !== 'none' && !wavInput.files.length) return { msg: 'Las licencias que pusiste requieren el archivo WAV.', el: wavInput };
       if ($('stems-req').style.display !== 'none' && !stemsInput.files.length) return { msg: 'Las licencias que pusiste requieren los STEMS.', el: stemsInput };
@@ -786,8 +914,9 @@
     const precio = (el) => fmt(leerPrecio(el), leerPrecio(el) % 1 ? 2 : 0) + ' CUP';
     const precios = esPlaylist ? 'Colaboración gratuita en la Playlist'
       : exclusivo ? 'Exclusiva ' + precio(priceExclusiveInput)
-      : [['Básica', priceBasicInput], ['Premium', pricePremiumInput], ['Ilimitada', priceUnlimitedInput]]
-        .filter(([, el]) => licPermitida(el) && leerPrecio(el) > 0).map(([n, el]) => n + ' ' + precio(el)).join(', ');
+      : [['Básica monetizable', priceBasicInput], ['Premium', pricePremiumInput], ['Ilimitada', priceUnlimitedInput]]
+        .filter(([, el]) => licPermitida(el) && leerPrecio(el) > 0).map(([n, el]) => n + ' ' + precio(el)).join(', ') +
+        (perfil && perfil.muestraSegundos && muestra.dur ? ' · Muestra desde ' + mmss(Number($('muestra-inicio').value)) : '');
     const audio = audioInput.files[0];
     const archivos = [audio ? (/\.wav$/i.test(audio.name) ? 'WAV' : 'MP3') : '', !esPlaylist && wavInput.files.length ? 'WAV' : '', !esPlaylist && stemsInput.files.length ? 'STEMS' : '', coverInput.files.length ? 'portada' : '']
       .filter((x, i, a) => x && a.indexOf(x) === i).join(', ');
@@ -856,9 +985,10 @@
     const esPlaylist = isPlaylistInput.checked;
     const exclusivo = makeExclusiveInput.checked && !esPlaylist;
     const leer = (el) => (window.ZBSubidas ? window.ZBSubidas.precio(el.value) : 0);
-    const precios = esPlaylist ? { basic: 0, premium: 0, unlimited: 0, exclusive: 0 }
-      : exclusivo ? { basic: 0, premium: 0, unlimited: 0, exclusive: leer(priceExclusiveInput) }
-      : { basic: leer(priceBasicInput), premium: leer(pricePremiumInput), unlimited: leer(priceUnlimitedInput), exclusive: 0 };
+    const precios = esPlaylist ? { practice: 0, basic: 0, premium: 0, unlimited: 0, exclusive: 0 }
+      : exclusivo ? { practice: 0, basic: 0, premium: 0, unlimited: 0, exclusive: leer(priceExclusiveInput) }
+      : { practice: 0, basic: licPermitida(priceBasicInput) ? leer(priceBasicInput) : 0,
+        premium: licPermitida(pricePremiumInput) ? leer(pricePremiumInput) : 0, unlimited: licPermitida(priceUnlimitedInput) ? leer(priceUnlimitedInput) : 0, exclusive: 0 };
     if (!esPlaylist && !Object.values(precios).some(v => v > 0)) {
       irPaso(2, true);
       return showToast(exclusivo ? 'Ponle el precio exclusivo al beat.' : 'Ponle precio a al menos una licencia.', true);
@@ -921,6 +1051,7 @@
           contentId: document.querySelector('input[name="content-id"]:checked').value === 'si',
           title: titleInput.value, genre: genreInput.value, description: descriptionInput.value,
           isPlaylist: esPlaylist, artistCredit: esPlaylist ? artistCreditInput.value : '',
+          muestraInicio: perfil && perfil.muestraSegundos ? Number($('muestra-inicio').value) || 0 : undefined,
           priceBasic: precios.basic, pricePremium: precios.premium, priceUnlimited: precios.unlimited, priceExclusive: precios.exclusive,
           audioUploadId: ids.audio, coverUploadId: ids.cover, wavUploadId: ids.wav || '', stemsUploadId: ids.stems || '',
         }),
@@ -928,7 +1059,7 @@
       const d = await res.json().catch(() => ({}));
       if (res.ok) {
         lista.forEach(x => Z.olvidar(x.kind, x.file));
-        showToast('Beat enviado a revisión.');
+        showToast('Beat enviado a revisión.' + (d.avisos && d.avisos.length ? ' Ojo: ' + d.avisos.join(' ') : ''), Boolean(d.avisos && d.avisos.length));
         resetUploadForm();
         loadTracks(); loadPerfil();
       } else if (res.status === 401) {
@@ -1016,7 +1147,7 @@
     const est = estadoBeat(t);
     const info = t.sold ? { text: t.is_exclusive ? 'Vendido (exclusiva)' : 'Vendido (ilimitada)', className: 'sold' } : STATUS_LABELS[est];
     const archivos = t.archivos || {};
-    const puedeHot = hotsInfo && hotsInfo.precioSemanaCup > 0 && !t.sold && !t.is_playlist && t.approval_status === 'approved';
+    const puedeHot = hotsInfo && hotsInfo.precioSemanaCup > 0 && (!hotsInfo.beneficio || hotsInfo.beneficio.permitido) && !t.sold && !t.is_playlist && t.approval_status === 'approved';
     const hotHasta = hotsInfo && hotsInfo.activos[t.id];
     const hotRevision = hotsInfo && hotsInfo.enRevision.includes(t.id);
     const st = statsPistas[t.id];
@@ -1025,9 +1156,14 @@
       hotHasta ? '<span class="chip hot"><span aria-hidden="true">🔥</span> En Hots hasta el ' + ZBHistorial.fechaHora(hotHasta) + '</span>'
         : hotRevision ? '<span class="chip"><span aria-hidden="true">🔥</span> Hot: falta confirmar el pago</span>' : '',
       chipOriginalidad(t.originalidad),
+      chipMonet(t.monet),
       t.rating && t.rating.total ? '<span class="chip gold">★ ' + t.rating.promedio.toLocaleString('es') + ' de 5 (' + t.rating.total + ' reseña' + (t.rating.total === 1 ? '' : 's') + ')</span>' : '',
     ].filter(Boolean).join('');
+    const m = t.monet || {};
     const acciones = [
+      m.faltaWav ? '<button type="button" class="act-btn hot" data-acc="wav-sin-tag">Subir WAV sin tag</button>' : '',
+      m.puedePagar ? '<button type="button" class="act-btn" data-acc="verificar">' + (perfil && perfil.planClave === 'free' ? 'Verificar para monetizar' : 'Verificación extra') + '</button>' : '',
+      m.puedeRevisionManual ? '<button type="button" class="act-btn" data-acc="revision">Pedir revisión manual</button>' : '',
       puedeHot && !hotRevision ? '<button type="button" class="act-btn hot" data-acc="hot">' + (hotHasta ? 'Extender Hot' : '<span aria-hidden="true">🔥</span> Poner en Hots') + '</button>' : '',
       t.registro ? '<a class="act-btn" href="/api/producer/registros/' + encodeURIComponent(t.registro) + '/pdf" download>Certificado</a>' : '',
       !t.sold ? '<button type="button" class="act-btn" data-acc="editar">Editar</button>' : '',
@@ -1054,10 +1190,23 @@
         '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m7 10 5 5 5-5"/></svg></button>' +
       '<div class="br-body" id="br-b-' + t.id + '">' +
         (chips ? '<div class="br-chips">' + chips + '</div>' : '') +
-        (t.approval_status === 'rejected' && t.rejection_reason ? '<p class="br-reject">Motivo: ' + escapeHtml(t.rejection_reason) + '. Corrígelo con «Editar» y vuelve a revisión.</p>' : '') +
+        (t.approval_status === 'rejected' && t.rejection_reason ? '<p class="br-reject">Motivo: ' + escapeHtml(t.rejection_reason) +
+          (t.pausaFree === 'largo' ? ' Súbelo de nuevo como beat nuevo, recortado a 3 minutos.' : t.pausaFree === 'wav' ? ' Sube el WAV sin tag con el botón de abajo y vuelve a revisión.' : t.pausaFree ? ' Elimina otro beat y sube su WAV de nuevo para activarlo.' : ' Corrígelo con «Editar» y vuelve a revisión.') + '</p>' : '') +
         (acciones ? '<div class="br-actions">' + acciones + '</div>' : '') +
       '</div>' +
     '</div>';
+  }
+
+  // venta monetizable: verificación AudD
+  function chipMonet(m) {
+    if (!m) return '';
+    if (m.faltaWav) return '<span class="chip warn">Falta el WAV sin tag (máx. 3 min): sin él no se vende</span>';
+    if (m.enRevisionPago) return '<span class="chip">Verificación AudD: falta confirmar el pago</span>';
+    if (m.estado === 'aprobada') return '<span class="chip ok">✓ Verificado AudD: monetizable a la venta</span>';
+    if (m.estado === 'rechazada') return '<span class="chip warn">No pasó AudD: no se vende monetizable</span>';
+    if (m.estado === 'en_cola') return '<span class="chip warn">AudD en cola: se agotó el cupo del mes</span>';
+    if (m.estado === 'sin_verificar') return m.ofreceBasica ? '<span class="chip">Básica monetizable sin verificar: la paga el artista al comprar, o verifícala tú</span>' : '';
+    return '<span class="chip">Verificando con AudD…</span>';
   }
 
   function chipOriginalidad(o) {
@@ -1093,6 +1242,9 @@
     const t = (misBeats || []).find(x => x.id === id);
     if (!t) return;
     if (b.dataset.acc === 'hot') abrirModalHot(t);
+    if (b.dataset.acc === 'verificar') abrirModalVerif(t, 'pagar');
+    if (b.dataset.acc === 'wav-sin-tag') abrirModalVerif(t, 'wav');
+    if (b.dataset.acc === 'revision') pedirRevision(t);
     else if (b.dataset.acc === 'editar') abrirEditor(t);
     else if (b.dataset.acc === 'borrar') deleteTrack(t.id, t.title);
   });
@@ -1161,21 +1313,37 @@
     const lic = (perfil && perfil.licenciasPermitidas) || ['basic'];
     const actuales = {};
     (t.licenses || []).forEach(l => { actuales[l.license_type] = l.price_cup; });
-    const nombres = { basic: 'Básica', premium: 'Premium', unlimited: 'Ilimitada', exclusive: 'Exclusiva (única venta)' };
+    const nombres = { ...NOMBRES_LIC, exclusive: 'Exclusiva (única venta)' };
     const esExclusivo = Boolean(t.is_exclusive);
-    const tipos = (esExclusivo ? ['exclusive'] : ['basic', 'premium', 'unlimited']).filter(k => lic.includes(k) || actuales[k]);
+    // la Básica monetizable ya vendida no vuelve (es venta única)
+    const tipos = (esExclusivo ? ['exclusive'] : ['basic', 'premium', 'unlimited']).filter(k => (lic.includes(k) || actuales[k]) && !(k === 'basic' && t.basicaVendida));
     $('edit-prices').innerHTML = t.is_playlist ? '' :
       '<span class="ff-lbl">Precios</span><div class="lic-grid' + (tipos.length > 1 ? ' tres' : '') + '">' +
       tipos.map(k =>
         '<div class="field"><label for="edit-p-' + k + '">' + nombres[k] + '</label>' +
         '<div class="price-input"><input type="text" inputmode="decimal" id="edit-p-' + k + '" data-lic="' + k + '" value="' + (actuales[k] || '') + '"' + (lic.includes(k) ? '' : ' disabled') + '><span aria-hidden="true">CUP</span></div></div>'
       ).join('') + '</div>' +
-      (tipos.length > 1 ? '<p class="field-hint edit-lic-hint">Premium requiere WAV; Ilimitada, WAV y STEMS. Deja vacía la licencia que no ofrezcas.</p>' : '');
+      tipos.map(k => '<span class="field-hint warn lic-aviso" id="edit-aviso-' + k + '"></span>').join('') +
+      (perfil && perfil.planClave === 'free' ? '<p class="field-hint edit-lic-hint">Básica monetizable: mínimo 1 900 CUP, sin máximo. Venta única.</p>'
+        : tipos.length > 1 ? '<p class="field-hint edit-lic-hint">Premium requiere WAV; Ilimitada, WAV y STEMS. Deja vacía la licencia que no ofrezcas.</p>' : '');
+    // plan Free: desde qué segundo suena la muestra de 1 minuto
+    const durEd = Number(t.duration_seconds) || 0;
+    if (perfil && perfil.muestraSegundos && !t.is_playlist && durEd > 0) {
+      const maxIni = Math.max(0, Math.floor(durEd - perfil.muestraSegundos));
+      const ini = Math.min(maxIni, Math.max(0, t.muestraInicio || 0));
+      $('edit-prices').insertAdjacentHTML('beforeend', '<div class="field edit-muestra"><label for="edit-muestra">Minuto de la muestra: <span id="edit-muestra-txt">' +
+        mmss(ini) + ' – ' + mmss(Math.min(durEd, ini + 60)) + '</span></label><input type="range" id="edit-muestra" min="0" max="' + maxIni + '" step="1" value="' + ini + '" data-inicial="' + ini + '"' + (maxIni ? '' : ' disabled') + '></div>');
+      $('edit-muestra').addEventListener('input', (ev) => { const v = Number(ev.target.value) || 0; $('edit-muestra-txt').textContent = mmss(v) + ' – ' + mmss(Math.min(durEd, v + 60)); });
+    }
+    const campos = Object.fromEntries(tipos.map(k => [k, $('edit-p-' + k)]));
+    Object.values(campos).forEach(el => el && el.addEventListener('input', () => avisosDePrecio(perfil, campos, 'edit-aviso-')));
     const a = t.archivos || {};
     $('edit-files-note').textContent = t.is_playlist ? '' :
-      'Este beat tiene: MP3' + (a.wav ? ', WAV' : '') + (a.stems ? ', STEMS' : '') + '. ' +
-      (!a.wav ? 'Premium, Ilimitada y Exclusiva requieren WAV. ' : (!a.stems ? 'Ilimitada y Exclusiva requieren STEMS. ' : '')) +
-      'Los archivos no se pueden reemplazar.';
+      (perfil && perfil.planClave === 'free'
+        ? 'Este beat tiene: MP3' + (a.wav ? ' y WAV sin tag.' : '. Falta el WAV sin tag: súbelo desde «Mis beats».') + ' Los archivos no se pueden reemplazar.'
+        : 'Este beat tiene: MP3' + (a.wav ? ', WAV' : '') + (a.stems ? ', STEMS' : '') + '. ' +
+          (!a.wav ? 'Premium, Ilimitada y Exclusiva requieren WAV. ' : (!a.stems ? 'Ilimitada y Exclusiva requieren STEMS. ' : '')) +
+          'Los archivos no se pueden reemplazar.');
     editModal.classList.add('active');
   }
   $('edit-close').addEventListener('click', () => editModal.classList.remove('active'));
@@ -1191,13 +1359,14 @@
         body: JSON.stringify({
           title: $('edit-title-input').value, genre: $('edit-genre-input').value,
           description: $('edit-description-input').value, artistCredit: $('edit-credit-input').value,
+          muestraInicio: $('edit-muestra') && $('edit-muestra').value !== $('edit-muestra').dataset.inicial ? Number($('edit-muestra').value) : undefined,
           priceBasic: valor('basic'), pricePremium: valor('premium'), priceUnlimited: valor('unlimited'), priceExclusive: valor('exclusive'),
         }),
       });
       const d = await res.json().catch(() => ({}));
       if (res.ok) {
         editModal.classList.remove('active');
-        showToast(d.reenviado ? 'Cambios guardados. El beat volvió a revisión.' : 'Cambios guardados.');
+        showToast((d.reenviado ? 'Cambios guardados. El beat volvió a revisión.' : 'Cambios guardados.') + (d.avisos && d.avisos.length ? ' Ojo: ' + d.avisos.join(' ') : ''), Boolean(d.avisos && d.avisos.length));
         loadTracks(); loadPerfil();
       } else if (res.status === 401) { showLogin(); }
       else showToast(d.error || 'No se pudieron guardar los cambios.', true);
@@ -1624,7 +1793,9 @@
         '<li><strong>' + fmt(tot.reproducciones) + '</strong><span>reproducciones</span></li>' +
         '<li><strong>' + fmt(tot.likes) + '</strong><span>me gusta</span></li>' +
         '<li><strong>' + fmt(tot.ventas) + '</strong><span>ventas</span></li>' +
-        '<li><strong class="gold">' + fmt(tot.ganado, 0) + '<small>CUP</small></strong><span>ganado</span></li></ul>';
+        '<li><strong class="gold">' + fmt(tot.ganado, 0) + '<small>CUP</small></strong><span>ganado</span></li></ul>' +
+        (st.mes ? '<p class="cat-mes">Este mes (' + escapeHtml(st.mes.texto) + '): <strong>' + fmt(st.mes.ventas) + ' venta' + (st.mes.ventas === 1 ? '' : 's') + '</strong> · <strong class="gold">' + formatCup(st.mes.ganado) + '</strong>' +
+          (st.reportes ? ' · Reporte en PDF: ' + st.reportes.map(r => '<a href="/api/producer/reporte?mes=' + encodeURIComponent(r.mes) + '" download>' + escapeHtml(r.texto.split(' de ')[0]) + '</a>').join(', ') : '') + '</p>' : '');
     }
     pintarBeats();
   }
@@ -1816,11 +1987,13 @@
   const hotModal = $('hot-modal');
   let hotState = { track: null, weeks: 1 };
   const semanasTxt = (w) => w + (w === 1 ? ' semana' : ' semanas');
+  // precio con el descuento del plan (Pro desde 5 ventas; Studio, 1 Hot al mes desde 10 ventas)
+  const precioHot = (w) => Math.round(hotsInfo.precioSemanaCup * w * (1 - (((hotsInfo.beneficio || {}).pct) || 0) / 100));
 
   function pintarHotSaldo() {
     const box = $('hot-balance-box');
     const bills = (retiros && retiros.billeteras) || [];
-    const total = hotsInfo.precioSemanaCup * hotState.weeks;
+    const total = precioHot(hotState.weeks);
     const opciones = bills.map(b => ({ b, costo: costoEnBilletera(total, b.code) })).filter(x => x.costo !== null);
     if (!opciones.length) { box.style.display = 'none'; return; }
     box.style.display = '';
@@ -1841,7 +2014,7 @@
   }
   function actualizarModalHot() {
     pintarHotSaldo();
-    const total = hotsInfo.precioSemanaCup * hotState.weeks;
+    const total = precioHot(hotState.weeks);
     $('hot-paso-resumen').textContent = semanasTxt(hotState.weeks) + ', ' + formatCup(total);
     const code = $('hot-currency').value || 'CUP';
     $('hot-total').textContent = code === 'CUP' ? formatCup(total) : montoEnMoneda(total, code) + ' (' + formatCup(total) + ')';
@@ -1858,6 +2031,7 @@
     const hres = await fetch('/api/producer/hots');
     if (hres.ok) hotsInfo = await hres.json();
     if (!hotsInfo || !hotsInfo.precioSemanaCup) { showToast('Los Hots aún no están disponibles.', true); return; }
+    if (hotsInfo.beneficio && !hotsInfo.beneficio.permitido) { showToast(hotsInfo.beneficio.texto, true); return; }
     const hasta = hotsInfo.activos[t.id];
     if (!hasta && hotsInfo.libres <= 0) {
       showToast('Los cupos de Hots están llenos.' + (hotsInfo.proximoLibre ? ' El próximo se libera el ' + ZBHistorial.fechaHora(hotsInfo.proximoLibre) + '.' : ''), true);
@@ -1867,7 +2041,8 @@
     $('hot-modal-title').textContent = (hasta ? 'Extender Hot: ' : 'Poner en Hots: ') + t.title;
     $('hot-modal-info').textContent = 'Tu beat sale en el carrusel de la portada de la tienda. ' + formatCup(hotsInfo.precioSemanaCup) + ' por semana' +
       (hotsInfo.precioSemanaUsd ? ' ($' + fmt(hotsInfo.precioSemanaUsd, hotsInfo.precioSemanaUsd % 1 ? 2 : 0) + ' USD)' : '') + '. ' +
-      (hasta ? 'Ya está en Hots hasta el ' + ZBHistorial.fechaHora(hasta) + ': el tiempo nuevo se suma a esa fecha.' : 'Quedan ' + hotsInfo.libres + ' de ' + hotsInfo.cupos + ' cupos libres.');
+      (hasta ? 'Ya está en Hots hasta el ' + ZBHistorial.fechaHora(hasta) + ': el tiempo nuevo se suma a esa fecha.' : 'Quedan ' + hotsInfo.libres + ' de ' + hotsInfo.cupos + ' cupos libres.') +
+      (hotsInfo.beneficio && hotsInfo.beneficio.texto ? ' ' + hotsInfo.beneficio.texto : '');
     const monedas = [...new Set(adminPago.accounts.map(a => a.currency))];
     $('hot-currency').innerHTML = (monedas.length ? monedas : ['CUP']).map(m => {
       const r = adminPago.rates.find(x => x.code === m);
@@ -1875,7 +2050,7 @@
     }).join('');
     hotModal.querySelectorAll('.week-opt').forEach(b => {
       b.classList.toggle('active', b.dataset.w === '1');
-      b.innerHTML = '<span>' + semanasTxt(Number(b.dataset.w)) + '</span><span class="opt-p">' + formatCup(hotsInfo.precioSemanaCup * Number(b.dataset.w)) + '</span>';
+      b.innerHTML = '<span>' + semanasTxt(Number(b.dataset.w)) + '</span><span class="opt-p">' + formatCup(precioHot(Number(b.dataset.w))) + '</span>';
     });
     $('hot-receipt-input').value = '';
     $('hot-receipt-label').textContent = 'Adjuntar comprobante de pago';
@@ -1945,6 +2120,154 @@
       btn.textContent = 'Enviar comprobante';
     }
   });
+
+  // ---------- Verificación AudD (pre-verificación del Free, verificación extra de Pro y Studio) ----------
+  const verifModal = $('verif-modal');
+  let verifState = { track: null, modo: 'pagar', info: null };
+  const VERIF_WAV_LABEL = 'Es lo que se verifica y lo que recibe el artista · máx 1 GB';
+  wireFileDrop($('verif-wav-drop'), $('verif-wav-input'), $('verif-wav-label'), VERIF_WAV_LABEL);
+  wireFileDrop($('verif-receipt-drop'), $('verif-receipt-input'), $('verif-receipt-label'), 'Adjuntar comprobante de pago');
+  const necesitaWavVerif = () => perfil && perfil.planClave === 'free' && verifState.track && !(verifState.track.monet || {}).wavSinTag;
+  function pintarVerifSaldo() {
+    const box = $('verif-balance-box');
+    const bills = (retiros && retiros.billeteras) || [];
+    const total = verifState.info.precio;
+    const opciones = bills.map(b => ({ b, costo: costoEnBilletera(total, b.code) })).filter(x => x.costo !== null);
+    if (!opciones.length) { box.style.display = 'none'; return; }
+    box.style.display = '';
+    const sel = $('verif-wallet');
+    const antes = sel.value;
+    sel.innerHTML = opciones.map(x => '<option value="' + escapeHtml(x.b.code) + '">' + montoUnidades(x.b.unidades, x.b.code, x.b.label) + (x.b.unidades + 1e-9 < x.costo ? ' (no alcanza)' : '') + '</option>').join('');
+    const alcanza = opciones.find(x => x.b.unidades + 1e-9 >= x.costo);
+    $('verif-balance-falta').textContent = alcanza ? '' : 'Tu saldo no alcanza para este pago.';
+    sel.value = opciones.some(x => x.b.code === antes) ? antes : (alcanza ? alcanza.b.code : opciones[0].b.code);
+    const x = opciones.find(o => o.b.code === sel.value);
+    $('verif-wallet-cost').textContent = fmt(x.costo, decimalesDe(x.b.code)) + ' ' + x.b.label;
+    $('verif-balance-btn').disabled = x.b.unidades + 1e-9 < x.costo;
+  }
+  function pintarVerifTransfer() {
+    const total = verifState.info.precio;
+    const code = $('verif-currency').value || 'CUP';
+    $('verif-paso-resumen').textContent = formatCup(total);
+    $('verif-total').textContent = code === 'CUP' ? formatCup(total) : montoEnMoneda(total, code) + ' (' + formatCup(total) + ')';
+    const cuentas = adminPago.accounts.filter(a => a.currency === code);
+    $('verif-accounts').innerHTML = cuentas.length
+      ? cuentas.map(a => '<div class="plan-account"><div><div class="pa-bank">' + escapeHtml(a.bank) + '</div><div class="pa-num">' + escapeHtml(a.number) + '</div></div><button type="button" class="pa-copy" data-n="' + escapeHtml(a.number) + '">Copiar</button></div>').join('')
+      : '<p class="panel-hint">No hay cuenta configurada para esa moneda.</p>';
+    $('verif-accounts').querySelectorAll('.pa-copy').forEach(b => b.addEventListener('click', () => {
+      if (navigator.clipboard) navigator.clipboard.writeText(b.dataset.n).then(() => { b.textContent = 'Copiado'; setTimeout(() => { b.textContent = 'Copiar'; }, 1400); });
+    }));
+  }
+  async function abrirModalVerif(t, modo) {
+    const [vres] = await Promise.all([fetch('/api/producer/verificaciones'), cargarDatosDePago(), loadWithdrawals()]);
+    if (vres.status === 401) return showLogin();
+    verifState = { track: t, modo, info: await vres.json() };
+    const free = perfil && perfil.planClave === 'free';
+    $('verif-modal-title').textContent = (modo === 'wav' ? 'WAV sin tag: ' : (free ? 'Verificar para monetizar: ' : 'Verificación extra: ')) + t.title;
+    $('verif-modal-info').textContent = modo === 'wav'
+      ? 'Sube el WAV sin tag del beat completo (3 minutos como máximo). De él salen el MP3 sin tag que recibe el artista y la muestra de 1 minuto. AudD lo verifica gratis y el beat vuelve a revisión.'
+      : free
+        ? 'AudD compara tu beat con millones de canciones publicadas. Si pasa, vendes la Básica monetizable sin suplemento para el artista. Cuesta ' + formatCup(verifState.info.precio) + ' una sola vez. Si no pasa por contenido no original, te queda un crédito para otro beat (sin reembolso en efectivo); si falla por un error técnico, se repite sin costo.'
+        : 'Usaste las ' + verifState.info.cupo.cap + ' verificaciones de este mes. Puedes esperar al mes que viene (se verifica solo) o pagar ' + formatCup(verifState.info.precio) + ' para verificarlo ya.';
+    $('verif-wav-field').hidden = !(modo === 'wav' || necesitaWavVerif());
+    $('verif-wav-input').value = ''; $('verif-wav-label').textContent = VERIF_WAV_LABEL; $('verif-wav-drop').classList.remove('has-file'); $('verif-wav-progreso').textContent = '';
+    $('verif-wav-solo-btn').hidden = modo !== 'wav';
+    $('verif-pago').hidden = modo === 'wav';
+    $('verif-credito-btn').hidden = !(verifState.info.creditos > 0);
+    $('verif-credito-btn').textContent = 'Usar un crédito de verificación (te queda' + (verifState.info.creditos === 1 ? ' 1)' : 'n ' + verifState.info.creditos + ')');
+    const monedas = [...new Set(adminPago.accounts.map(a => a.currency))];
+    $('verif-currency').innerHTML = (monedas.length ? monedas : ['CUP']).map(m => {
+      const r = adminPago.rates.find(x => x.code === m);
+      return '<option value="' + escapeHtml(m) + '">' + escapeHtml((r && r.label) || m) + '</option>';
+    }).join('');
+    $('verif-receipt-input').value = ''; $('verif-receipt-label').textContent = 'Adjuntar comprobante de pago'; $('verif-receipt-drop').classList.remove('has-file');
+    $('verif-modal-box').dataset.paso = '1';
+    if (modo !== 'wav') { pintarVerifSaldo(); pintarVerifTransfer(); }
+    verifModal.classList.add('active');
+  }
+  const cerrarVerif = () => verifModal.classList.remove('active');
+  $('verif-modal-close').addEventListener('click', cerrarVerif);
+  verifModal.addEventListener('click', (e) => { if (e.target === verifModal) cerrarVerif(); });
+  $('verif-wallet').addEventListener('change', pintarVerifSaldo);
+  $('verif-currency').addEventListener('change', pintarVerifTransfer);
+  $('verif-volver').addEventListener('click', () => { $('verif-modal-box').dataset.paso = '1'; });
+  $('verif-ir-transfer').addEventListener('click', () => {
+    if (necesitaWavVerif() && !$('verif-wav-input').files.length) { showToast('Primero elige el WAV sin tag del beat completo.', true); return; }
+    $('verif-modal-box').dataset.paso = '2';
+  });
+  // sube el WAV por partes (si hace falta) y devuelve su id
+  async function subirWavVerif() {
+    const f = $('verif-wav-input').files[0];
+    if (!f) return '';
+    if (!/\.wav$/i.test(f.name)) throw new Error('El archivo tiene que ser WAV.');
+    const Z = window.ZBSubidas;
+    const err = Z.validarTamano('wav', f);
+    if (err) throw new Error(err);
+    const ids = await Z.subirVarios([{ kind: 'wav', file: f, etiqueta: 'el WAV' }], {
+      alAvanzar: (p) => { $('verif-wav-progreso').textContent = 'Subiendo el WAV… ' + p.pct + '%'; },
+      alReintentar: (et, n) => { $('verif-wav-progreso').textContent = 'Se cortó la conexión. Reintentando (intento ' + n + ')…'; },
+    });
+    Z.olvidar('wav', f);
+    return ids.wav;
+  }
+  async function enviarVerif(metodo, boton, extra = {}) {
+    if (necesitaWavVerif() && !$('verif-wav-input').files.length) { showToast('Primero elige el WAV sin tag del beat completo.', true); return; }
+    boton.disabled = true;
+    const texto = boton.textContent;
+    boton.textContent = 'Enviando…';
+    try {
+      const wavId = necesitaWavVerif() ? await subirWavVerif() : '';
+      const fdv = new FormData();
+      fdv.append('trackId', String(verifState.track.id));
+      fdv.append('metodo', metodo);
+      if (wavId) fdv.append('wavUploadId', wavId);
+      for (const [k, v] of Object.entries(extra)) fdv.append(k, v);
+      const res = await fetch('/api/producer/verificaciones', { method: 'POST', body: fdv });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) {
+        cerrarVerif();
+        showToast(d.aprobada ? 'Listo: «' + verifState.track.title + '» se está verificando con AudD.' : 'Comprobante enviado. La verificación empieza cuando se confirme el pago.');
+        loadTracks(); loadPerfil(); loadWithdrawals(); loadEarnings();
+      } else if (res.status === 401) showLogin();
+      else showToast(d.error || 'No se pudo enviar.', true);
+    } catch (e) {
+      showToast(e && e.message ? e.message : 'Se perdió la conexión. Intenta de nuevo.', true);
+    } finally { boton.disabled = false; boton.textContent = texto; }
+  }
+  $('verif-credito-btn').addEventListener('click', (ev) => enviarVerif('credito', ev.currentTarget));
+  $('verif-balance-btn').addEventListener('click', (ev) => {
+    if (!confirm('¿Pagar la verificación de «' + verifState.track.title + '» con ' + $('verif-wallet-cost').textContent + ' de tu saldo?')) return;
+    enviarVerif('saldo', ev.currentTarget, { wallet: $('verif-wallet').value || 'CUP' });
+  });
+  $('verif-send-btn').addEventListener('click', async (ev) => {
+    const boton = ev.currentTarget;
+    let f = $('verif-receipt-input').files[0];
+    if (!f) { showToast('Adjunta la foto del comprobante.', true); return; }
+    if (window.ZBSubidas) f = await window.ZBSubidas.comprimirImagen(f, 1600, 0.82);
+    // el comprobante va como archivo en el mismo envío
+    enviarVerif('comprobante', boton, { currency: $('verif-currency').value || 'CUP', receipt: f });
+  });
+  $('verif-wav-solo-btn').addEventListener('click', async (ev) => {
+    const boton = ev.currentTarget;
+    if (!$('verif-wav-input').files.length) { showToast('Elige el WAV sin tag del beat completo.', true); return; }
+    boton.disabled = true;
+    try {
+      const wavUploadId = await subirWavVerif();
+      const res = await fetch('/api/producer/tracks/' + verifState.track.id + '/wav-sin-tag', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ wavUploadId }) });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) { cerrarVerif(); showToast(d.aviso || (d.reactivado ? 'WAV recibido: el beat vuelve a revisión y AudD lo está verificando.' : 'WAV recibido. AudD lo está verificando.'), Boolean(d.aviso)); loadTracks(); loadPerfil(); }
+      else showToast(d.error || 'No se pudo subir el WAV.', true);
+    } catch (e) {
+      showToast(e && e.message ? e.message : 'Se perdió la conexión. Intenta de nuevo.', true);
+    } finally { boton.disabled = false; }
+  });
+  async function pedirRevision(t) {
+    if (!confirm('¿Pedir que el administrador revise a mano las coincidencias de «' + t.title + '»?')) return;
+    const res = await fetch('/api/producer/tracks/' + t.id + '/revision-manual', { method: 'POST' });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok) { showToast('Listo: el administrador revisará las coincidencias.'); loadActividad(); }
+    else showToast(d.error || 'No se pudo pedir la revisión.', true);
+  }
 
   // ---------- Redes y cuentas ----------
   function renderSocial(links) {

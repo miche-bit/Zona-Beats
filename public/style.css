@@ -372,6 +372,8 @@ img { max-width: 100%; }
   line-height: 1.15; text-align: right; transition: background var(--dur), border-color var(--dur);
 }
 .tr-buy:hover { border-color: var(--gold); background: rgba(var(--gold-rgb), 0.12); }
+.tr-buy.en-verif { border-color: var(--line-strong); background: transparent; }
+.tr-buy.en-verif .tr-price { color: var(--text-dim); font-size: var(--fs-xs); }
 .tr-desde { font-size: 11px; color: var(--text-faint); }
 .tr-price { font-weight: 800; font-size: var(--fs-sm); color: var(--gold); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .price-strike { font-size: 11px; color: var(--text-faint); text-decoration: line-through; white-space: nowrap; }
@@ -482,6 +484,13 @@ body.con-reproductor .aviso-cookies { bottom: calc(92px + env(safe-area-inset-bo
 .producer-detail-head h2 { font-size: var(--fs-xl); font-weight: 800; margin: 0 0 2px; overflow-wrap: anywhere; }
 .producer-detail-head p { color: var(--text-dim); font-size: var(--fs-sm); margin: 0 0 6px; }
 .producer-detail-head .hero-social a { width: 30px; height: 30px; }
+.producer-detail-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.producer-share {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 12px; border-radius: var(--r-pill);
+  border: 1px solid var(--line-strong); color: var(--text); font-size: var(--fs-xs); font-weight: 700; background: transparent;
+}
+.producer-share:hover { border-color: var(--accent); }
+.producer-share svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
 .back-to-producers { display: inline-flex; align-items: center; min-height: 36px; color: var(--text-dim); font-size: var(--fs-sm); margin-bottom: 8px; }
 .back-to-producers:hover { color: var(--text); }
 .badges-prod { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0; }
@@ -672,6 +681,10 @@ body.con-reproductor .aviso-cookies { bottom: calc(92px + env(safe-area-inset-bo
 .license-option-label { font-weight: 800; font-size: var(--fs-md); color: var(--text); }
 .license-option-price { font-weight: 800; font-size: var(--fs-md); color: var(--gold); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .license-option-desc { font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.4; }
+.license-option-nota { margin-top: 4px; font-size: 11px; line-height: 1.35; color: var(--warn); }
+.license-option-nota.ok { color: var(--live); }
+.license-option.en-verificacion { opacity: 0.6; cursor: not-allowed; }
+.license-option.en-verificacion .license-option-price { font-size: var(--fs-xs); color: var(--text-faint); }
 .buy-links { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 12px 0 4px; }
 .modal-contract-link, .modal-terms-link {
   display: inline-flex; align-items: center; min-height: 32px; padding: 0;

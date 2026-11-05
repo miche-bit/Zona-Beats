@@ -18,6 +18,23 @@ function runFfmpeg(args, timeoutMs = 10 * 60 * 1000) {
   });
 }
 
+// Bits por muestra de un WAV (16, 24, 32…). 0 si no se pudo leer.
+function bitsWav(filePath) {
+  return new Promise((resolve) => {
+    const proc = spawn('ffprobe', ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=bits_per_sample,bits_per_raw_sample,sample_fmt', '-of', 'json', filePath]);
+    let out = '';
+    proc.stdout.on('data', (c) => { out += c; });
+    proc.on('error', () => resolve(0));
+    proc.on('close', () => {
+      try {
+        const s = (JSON.parse(out).streams || [])[0] || {};
+        const b = Number(s.bits_per_raw_sample) || Number(s.bits_per_sample) || 0;
+        resolve(b || (/^(s32|flt|dbl)/.test(s.sample_fmt || '') ? 32 : 0));
+      } catch { resolve(0); }
+    });
+  });
+}
+
 function getDurationSeconds(filePath) {
   return new Promise((resolve, reject) => {
     const proc = spawn('ffprobe', [
@@ -105,4 +122,32 @@ async function miniaturaImagen(inputPath, outputPath, lado) {
   return outputPath;
 }
 
-module.exports = { applyWatermark, getDurationSeconds, transcodificarMp3, miniaturaImagen };
+// Demo de la Básica práctica: el primer minuto del beat, con un fundido corto al final.
+// Sale en MP3 de 320 kbps o en WAV, según la extensión de salida.
+async function cortarDemo(inputPath, outputPath, segundos = 60) {
+  const wav = /\.wav$/i.test(outputPath);
+  await runFfmpeg(['-y', '-i', inputPath, '-vn', '-map_metadata', '-1', '-t', String(segundos),
+    '-af', `afade=t=out:st=${Math.max(0, segundos - 3)}:d=3`, '-ar', '44100', '-ac', '2',
+    ...(wav ? ['-codec:a', 'pcm_s16le'] : ['-codec:a', 'libmp3lame', '-b:a', '320k']), outputPath]);
+  return outputPath;
+}
+
+// Muestra de la tienda (plan Free): un tramo de `segundos` desde `inicio`, con fundido al entrar y al salir.
+async function cortarMuestra(inputPath, outputPath, inicio = 0, segundos = 60, kbps = 192) {
+  const st = Math.max(0, Number(inicio) || 0);
+  await runFfmpeg(['-y', '-ss', String(st), '-i', inputPath, '-vn', '-map_metadata', '-1', '-t', String(segundos),
+    '-af', `afade=t=in:st=0:d=1,afade=t=out:st=${Math.max(0, segundos - 2)}:d=2`, '-ar', '44100', '-ac', '2',
+    '-codec:a', 'libmp3lame', '-b:a', `${kbps}k`, outputPath]);
+  return outputPath;
+}
+
+// Marca invisible: deja dentro del archivo (metadatos) a quién se entregó y el número de su licencia.
+// No cambia el sonido; si el archivo aparece en otro lado, dice de qué compra salió.
+async function marcarEntrega(inputPath, outputPath, { comentario, titulo, artista }) {
+  await runFfmpeg(['-y', '-i', inputPath, '-map', '0:a', '-c', 'copy', '-map_metadata', '-1',
+    '-metadata', `title=${titulo || ''}`, '-metadata', `artist=${artista || ''}`,
+    '-metadata', `comment=${comentario || ''}`, '-metadata', `copyright=${comentario || ''}`, outputPath]);
+  return outputPath;
+}
+
+module.exports = { applyWatermark, bitsWav, getDurationSeconds, transcodificarMp3, miniaturaImagen, cortarDemo, cortarMuestra, marcarEntrega };

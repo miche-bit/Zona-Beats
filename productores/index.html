@@ -237,22 +237,34 @@
                   </label>
                 </div>
                 <div id="sale-fields">
+                  <div class="lic-elegir" id="lic-elegir" hidden>
+                    <span class="ff-lbl" id="lic-elegir-lbl">¿Qué licencias vendes con este beat?</span>
+                    <div class="lic-chips" role="group" aria-labelledby="lic-elegir-lbl">
+                      <button type="button" class="lic-chip" data-elegir="premium" aria-pressed="false"><strong>Premium</strong><small>WAV + MP3</small></button>
+                      <button type="button" class="lic-chip" data-elegir="unlimited" aria-pressed="false"><strong>Ilimitada</strong><small>WAV + MP3 + STEMS</small></button>
+                      <button type="button" class="lic-chip" data-elegir="exclusive" aria-pressed="false"><strong>Exclusiva</strong><small>una sola venta</small></button>
+                    </div>
+                    <span class="field-hint" id="lic-elegir-hint">Elige una o las dos primeras. La Exclusiva va sola.</span>
+                  </div>
                   <div id="license-mode-fields">
                     <div class="lic-grid">
                       <div class="field lic-field" data-lic="basic">
-                        <label for="price-basic-input">Básica <span class="opt">MP3</span></label>
-                        <div class="price-input"><input type="text" id="price-basic-input" inputmode="decimal" placeholder="Ej: 500"><span aria-hidden="true">CUP</span></div>
+                        <label for="price-basic-input">Básica monetizable <span class="opt">venta única · verificada</span></label>
+                        <div class="price-input"><input type="text" id="price-basic-input" inputmode="decimal" placeholder="1 900 a 3 000" aria-describedby="lic-aviso-basic"><span aria-hidden="true">CUP</span></div>
+                        <span class="field-hint warn lic-aviso" id="lic-aviso-basic"></span>
                       </div>
                       <div class="field lic-field" data-lic="premium">
-                        <label for="price-premium-input">Premium <span class="opt">MP3 + WAV</span></label>
-                        <div class="price-input"><input type="text" id="price-premium-input" inputmode="decimal" placeholder="Requiere WAV"><span aria-hidden="true">CUP</span></div>
+                        <label for="price-premium-input">Premium <span class="opt">WAV + MP3 · monetiza</span></label>
+                        <div class="price-input"><input type="text" id="price-premium-input" inputmode="decimal" placeholder="Requiere WAV" aria-describedby="lic-aviso-premium"><span aria-hidden="true">CUP</span></div>
+                        <span class="field-hint warn lic-aviso" id="lic-aviso-premium"></span>
                       </div>
                       <div class="field lic-field" data-lic="unlimited">
-                        <label for="price-unlimited-input">Ilimitada <span class="opt">MP3 + WAV + STEMS</span></label>
-                        <div class="price-input"><input type="text" id="price-unlimited-input" inputmode="decimal" placeholder="Requiere WAV y STEMS"><span aria-hidden="true">CUP</span></div>
+                        <label for="price-unlimited-input">Ilimitada <span class="opt">+ STEMS · monetiza</span></label>
+                        <div class="price-input"><input type="text" id="price-unlimited-input" inputmode="decimal" placeholder="Requiere WAV y STEMS" aria-describedby="lic-aviso-unlimited"><span aria-hidden="true">CUP</span></div>
+                        <span class="field-hint warn lic-aviso" id="lic-aviso-unlimited"></span>
                       </div>
                     </div>
-                    <p class="field-hint">Deja vacía la licencia que no ofrezcas.</p>
+                    <p class="field-hint" id="precio-hint">Deja vacía la licencia que no ofrezcas.</p>
                   </div>
                   <div id="exclusive-mode-fields" style="display:none;">
                     <p class="exclusive-warning">Venta única: el beat sale de la tienda y pasa a ser del artista que lo compre. Se entrega con WAV y STEMS.</p>
@@ -286,6 +298,15 @@
                       <input type="file" id="wav-input" accept=".wav,audio/wav" aria-labelledby="wav-lbl wav-drop-label">
                     </label>
                     <span class="field-hint" id="wav-note"></span>
+                  </div>
+                  <div class="field file-field" id="muestra-field" hidden>
+                    <span class="ff-lbl" id="muestra-lbl">Minuto que se escucha en la tienda</span>
+                    <div class="muestra-ctl">
+                      <button type="button" class="muestra-play" id="muestra-play" aria-label="Escuchar el minuto elegido" disabled><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 5.5v13l10-6.5z"/></svg></button>
+                      <input type="range" id="muestra-inicio" min="0" max="0" step="1" value="0" aria-labelledby="muestra-lbl" aria-describedby="muestra-txt" disabled>
+                      <span class="muestra-txt" id="muestra-txt">Elige el audio</span>
+                    </div>
+                    <span class="field-hint muestra-hint">Solo ese minuto suena en la tienda (no se descarga).</span>
                   </div>
                   <div class="field file-field" id="stems-field">
                     <span class="ff-lbl" id="stems-lbl">STEMS <span class="req-tag" id="stems-req" style="display:none;">obligatorio</span></span>
@@ -357,7 +378,7 @@
         <div data-grupo-panel="subir" data-sub="pack" hidden>
           <div class="panel pk-lock" id="packs-lock" hidden>
             <h2>Sample packs</h2>
-            <p>La venta de sample packs está incluida en los planes <strong>Pro</strong> y <strong>Studio</strong>.</p>
+            <p>La venta de sample packs está incluida en el plan <strong>Studio</strong>.</p>
             <button type="button" class="btn-primary btn-auto" data-ir="cuenta/plan" id="packs-ver-planes">Ver planes</button>
           </div>
           <div class="panel up-panel" id="packs-zona" hidden>
@@ -393,7 +414,7 @@
         <div data-grupo-panel="catalogo" data-sub="packs" hidden>
           <div class="panel pk-lock" id="packs-lock-lista" hidden>
             <h2>Sample packs</h2>
-            <p>La venta de sample packs está incluida en los planes <strong>Pro</strong> y <strong>Studio</strong>.</p>
+            <p>La venta de sample packs está incluida en el plan <strong>Studio</strong>.</p>
             <button type="button" class="btn-primary btn-auto" data-ir="cuenta/plan">Ver planes</button>
           </div>
           <div class="panel" id="packs-zona-lista" hidden>
@@ -730,6 +751,62 @@
         </div>
         <button type="button" class="btn-primary" id="hot-send-btn">Enviar comprobante</button>
         <p class="panel-hint center">Tu beat saldrá en portada al confirmarse el pago.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Verificación AudD: 1) WAV sin tag (Free), crédito o saldo  2) transferencia -->
+  <div class="plan-modal-overlay" id="verif-modal" role="dialog" aria-modal="true" aria-labelledby="verif-modal-title">
+    <div class="plan-modal-box" id="verif-modal-box" data-paso="1">
+      <button type="button" class="plan-modal-close" id="verif-modal-close" aria-label="Cerrar">&times;</button>
+      <h3 id="verif-modal-title">Verificar con AudD</h3>
+      <p class="panel-hint" id="verif-modal-info"></p>
+
+      <div class="m-paso" data-paso="1">
+        <div class="field file-field" id="verif-wav-field">
+          <span class="ff-lbl" id="verif-wav-lbl">WAV sin tag del beat completo <span class="req-tag">obligatorio</span></span>
+          <label class="file-drop" id="verif-wav-drop">
+            <span class="fd-txt" id="verif-wav-label">Es lo que se verifica y lo que recibe el artista · máx 1 GB</span>
+            <span class="fd-btn" aria-hidden="true">Elegir</span>
+            <input type="file" id="verif-wav-input" accept=".wav,audio/wav" aria-labelledby="verif-wav-lbl verif-wav-label">
+          </label>
+          <span class="field-hint" id="verif-wav-progreso"></span>
+        </div>
+        <button type="button" class="btn-primary" id="verif-wav-solo-btn" hidden>Subir el WAV</button>
+        <div id="verif-pago">
+          <button type="button" class="btn-primary" id="verif-credito-btn" hidden>Usar un crédito de verificación</button>
+          <div class="pay-balance" id="verif-balance-box" style="display:none;">
+            <div class="pay-balance-title">Pagar con tu saldo</div>
+            <p class="pb-falta" id="verif-balance-falta"></p>
+            <div class="field">
+              <label for="verif-wallet">¿De qué saldo?</label>
+              <select id="verif-wallet" class="select-p"></select>
+            </div>
+            <div class="w-row"><span>Se descuenta</span><strong id="verif-wallet-cost">—</strong></div>
+            <button type="button" class="btn-primary" id="verif-balance-btn">Verificar ya</button>
+          </div>
+          <button type="button" class="btn-ghost btn-wide" id="verif-ir-transfer">Pagar por transferencia</button>
+        </div>
+      </div>
+
+      <div class="m-paso" data-paso="2">
+        <button type="button" class="buy-back" id="verif-volver"><span aria-hidden="true">‹</span> Verificación de <span id="verif-paso-resumen">1 000 CUP</span></button>
+        <div class="field">
+          <label for="verif-currency">Moneda en que vas a pagar</label>
+          <select id="verif-currency"></select>
+        </div>
+        <div class="plan-total"><span>Total a transferir</span><strong id="verif-total">0 CUP</strong></div>
+        <div id="verif-accounts" class="plan-accounts"></div>
+        <div class="field">
+          <span class="ff-lbl" id="verif-receipt-lbl">Foto del comprobante</span>
+          <label class="file-drop" id="verif-receipt-drop">
+            <span class="fd-txt" id="verif-receipt-label">Adjuntar comprobante de pago</span>
+            <span class="fd-btn" aria-hidden="true">Elegir</span>
+            <input type="file" id="verif-receipt-input" accept=".jpg,.jpeg,.png,.webp,image/*" aria-labelledby="verif-receipt-lbl verif-receipt-label">
+          </label>
+        </div>
+        <button type="button" class="btn-primary" id="verif-send-btn">Enviar comprobante</button>
+        <p class="panel-hint center">La verificación empieza cuando se confirme el pago.</p>
       </div>
     </div>
   </div>
