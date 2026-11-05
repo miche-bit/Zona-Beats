@@ -542,8 +542,11 @@ body.con-reproductor .aviso-cookies { bottom: calc(92px + env(safe-area-inset-bo
 .footer-legal a { color: var(--text-dim); font-size: var(--fs-xs); padding: 5px 0; }
 .footer-legal a:hover { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
 .dev-credit { margin-top: 6px; font-size: var(--fs-xs); color: var(--text-faint); }
-.dev-credit strong { color: var(--text-dim); font-weight: 700; }
-.dev-credit a { color: var(--live); white-space: nowrap; text-decoration: underline; text-underline-offset: 2px; }
+/* crédito del estudio (paquete oficial del logo) */
+.miche-credito { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .25em .5em; color: var(--text-dim); text-decoration: none; }
+.miche-credito svg { height: 1.3em; width: auto; flex: none; }
+.miche-credito:hover span, .miche-credito:focus-visible span { text-decoration: underline; }
+.miche-credito .mc-sep { display: none; } /* en esta barra lateral el WhatsApp siempre va en su línea */
 
 /* Hoja «Info» del teléfono */
 .modal-box-info { max-width: 420px; }
