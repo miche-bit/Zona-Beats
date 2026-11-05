@@ -372,6 +372,11 @@ img { max-width: 100%; }
   line-height: 1.15; text-align: right; transition: background var(--dur), border-color var(--dur);
 }
 .tr-buy:hover { border-color: var(--gold); background: rgba(var(--gold-rgb), 0.12); }
+/* «Comprar» de la fila: un carrito (el precio se ve al abrir la compra) */
+.tr-buy.tr-comprar { align-items: center; padding: 0; width: 44px; color: var(--gold); }
+.tr-buy.tr-comprar svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.tr-buy.tr-comprar circle { fill: currentColor; stroke: none; }
+.tr-buy.tr-comprar:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .tr-buy.en-verif { border-color: var(--line-strong); background: transparent; }
 .tr-buy.en-verif .tr-price { color: var(--text-dim); font-size: var(--fs-xs); }
 .tr-desde { font-size: 11px; color: var(--text-faint); }

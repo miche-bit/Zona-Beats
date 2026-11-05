@@ -600,6 +600,7 @@
     return (conComa ? ', ' : '') + partes.join(' · ');
   }
 
+  const ICONO_CARRITO = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 4h2.2l2.1 10.2a1.5 1.5 0 0 0 1.5 1.2h8.4a1.5 1.5 0 0 0 1.4-1.1L20.5 8H6.1"/><circle cx="9.5" cy="19.5" r="1.4"/><circle cx="17" cy="19.5" r="1.4"/></svg>';
   const ICONO_CORAZON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>';
   const ICONO_PLAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>';
 
@@ -649,9 +650,13 @@
         const liked = isTrackLiked(track.id);
         return `<button type="button" class="track-like-btn${clase}${liked ? ' liked' : ''}" data-track-id="${track.id}" aria-label="Me gusta ${escapeHtml(track.title)}" aria-pressed="${liked}">${ICONO_CORAZON}<span class="track-like-count">${track.likes || 0}</span></button>`;
       };
-      // el precio no se muestra en la lista: se ve al tocar «Comprar» (así el artista entra a escuchar)
+      // el precio no se muestra en la lista: se ve al tocar «Comprar» (así el artista entra a ver las licencias)
+      const sePuedeComprar = (seccion === 'catalog' || esPacks) && track.for_sale && !track.sold && (track.licenses || []).length > 0;
+      const botonComprar = sePuedeComprar ? `<button type="button" class="tr-buy tr-comprar" aria-label="Comprar ${escapeHtml(track.title)}" title="Comprar">${ICONO_CARRITO}</button>` : '';
       if (seccion === 'catalog') {
-        fin = botonMeGusta(' tr-like');
+        fin = botonMeGusta(' tr-like') + botonComprar;
+      } else if (esPacks) {
+        fin = botonComprar;
       } else if (seccion === 'vip') {
         fin = '<span class="tr-sold">Vendida' + (track.price_cup > 0 ? '<span class="tr-price-sold">' + escapeHtml(formatPriceInCurrency(track.price_cup, selectedCurrency)) + '</span>' : '') + '</span>';
       } else if (seccion === 'playlist') {
