@@ -19,6 +19,20 @@ function runFfmpeg(args, timeoutMs = 10 * 60 * 1000) {
 }
 
 // Bits por muestra de un WAV (16, 24, 32…). 0 si no se pudo leer.
+// Formato real del archivo según su contenido (no según la extensión): 'mp3', 'wav', ...
+// '' si no se puede leer como audio; null si ffprobe no está disponible.
+function formatoAudio(filePath) {
+  return new Promise((resolve) => {
+    const proc = spawn('ffprobe', ['-v', 'error', '-show_entries', 'format=format_name', '-of', 'json', filePath]);
+    let out = '';
+    proc.stdout.on('data', (c) => { out += c; });
+    proc.on('error', () => resolve(null));
+    proc.on('close', () => {
+      try { resolve(String(((JSON.parse(out) || {}).format || {}).format_name || '')); } catch { resolve(''); }
+    });
+  });
+}
+
 function bitsWav(filePath) {
   return new Promise((resolve) => {
     const proc = spawn('ffprobe', ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=bits_per_sample,bits_per_raw_sample,sample_fmt', '-of', 'json', filePath]);
@@ -150,4 +164,4 @@ async function marcarEntrega(inputPath, outputPath, { comentario, titulo, artist
   return outputPath;
 }
 
-module.exports = { applyWatermark, bitsWav, getDurationSeconds, transcodificarMp3, miniaturaImagen, cortarDemo, cortarMuestra, marcarEntrega };
+module.exports = { applyWatermark, bitsWav, formatoAudio, getDurationSeconds, transcodificarMp3, miniaturaImagen, cortarDemo, cortarMuestra, marcarEntrega };

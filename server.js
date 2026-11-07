@@ -44,7 +44,7 @@ function jsonObjeto(txt) {
 }
 const producerAuth = require('./producerAuth');
 const forense = require('./forense');
-const { applyWatermark, bitsWav, getDurationSeconds, transcodificarMp3, miniaturaImagen, cortarDemo, cortarMuestra, marcarEntrega } = require('./watermark');
+const { applyWatermark, bitsWav, formatoAudio, getDurationSeconds, transcodificarMp3, miniaturaImagen, cortarDemo, cortarMuestra, marcarEntrega } = require('./watermark');
 const { pipeline } = require('node:stream/promises');
 const { Transform } = require('node:stream');
 
@@ -2790,6 +2790,28 @@ function mp3KbpsArchivo(filePath, size) {
 // Crea una pista a partir de archivos ya subidos por partes. Valida TODO antes de tocar los archivos,
 // así si falta algo (por ejemplo el WAV) la persona corrige y reenvía sin volver a subir el resto.
 const formatoMinutos = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')} min`;
+// El contenido manda, no la extensión: el MP3 tiene que ser MP3 de verdad y el WAV un WAV,
+// y los dos campos no pueden traer el mismo archivo.
+async function revisarArchivosDistintos(audio, wav, esPlaylist) {
+  if (!esPlaylist) {
+    const fa = await formatoAudio(audio.path);
+    if (fa !== null && !/(^|,)mp3(,|$)/.test(fa)) {
+      throw { status: 400, error: fa === '' ? 'No pudimos leer el audio principal. Expórtalo de nuevo en MP3 de 320 kbps.'
+        : /wav/.test(fa) ? 'El audio principal es un WAV con nombre de MP3. Arriba va el MP3 de 320 kbps; el WAV va en su propio campo.'
+        : 'El audio principal no es un MP3 de verdad. Expórtalo en MP3 de 320 kbps.' };
+    }
+  }
+  if (wav) {
+    const fw = await formatoAudio(wav.path);
+    if (fw !== null && !/(^|,)wav(,|$)/.test(fw)) {
+      throw { status: 400, error: fw === '' ? 'No pudimos leer el WAV. Expórtalo de nuevo en WAV.' : 'El archivo del campo WAV no es un WAV de verdad (parece ' + fw.split(',')[0].toUpperCase() + '). Sube el WAV original.' };
+    }
+    if (wav.size === audio.size && await hashArchivo(wav.path) === await hashArchivo(audio.path)) {
+      throw { status: 400, error: 'Subiste el mismo archivo en los dos campos. Arriba va el MP3 de 320 kbps y abajo el WAV.' };
+    }
+  }
+}
+
 async function crearPistaDesdeSubidas(d, owner, opts = {}) {
   const titulo = limpiarTexto(d.title, 120);
   if (!titulo) throw { status: 400, error: 'Ponle título al beat' };
@@ -2830,9 +2852,12 @@ async function crearPistaDesdeSubidas(d, owner, opts = {}) {
       : `Tu plan ${opts.planLabel} permite subir el audio en MP3 (320 kbps) o WAV.` };
   }
   if (wav && opts.allowWav === false) throw { status: 403, error: `Tu plan ${opts.planLabel} no incluye entrega en WAV. Sube al plan Pro o Studio.` };
+  // un beat a la venta lleva el MP3 arriba y el WAV en su propio campo (obligatorio): nunca el mismo archivo dos veces
+  if (!esPlaylist && audio.ext !== '.mp3') throw { status: 400, error: 'El audio principal va en MP3 (320 kbps). El WAV se sube en su propio campo, abajo.' };
+  await revisarArchivosDistintos(audio, wav, esPlaylist);
   if (stems && opts.allowStems === false) throw { status: 403, error: `Tu plan ${opts.planLabel} no incluye STEMS. Solo el plan Studio permite subir STEMS.` };
 
-  const hayWav = Boolean(wav) || audio.ext === '.wav';
+  const hayWav = Boolean(wav);
   if (!esPlaylist) {
     if (precios.basic > 0 && !hayWav) throw { status: 400, error: 'La Básica monetizable entrega el WAV y el MP3 sin tag: sube el archivo WAV (es obligatorio).' };
     if (precios.premium > 0 && !hayWav) throw { status: 400, error: 'Pusiste precio a la licencia Premium: sube el archivo WAV (es obligatorio).' };
@@ -3918,6 +3943,8 @@ route('POST', '/api/producer/verificaciones', async (req, res) => {
   if (k === 'free' && !archivoExiste(t.wav_filename)) {
     try { wav = tomarSubida(fields.wavUploadId, `p:${producer.id}`, 'wav'); } catch (err) { return sendJSON(res, err.status || 400, { error: err.error || 'Falta el WAV' }); }
     if (!wav) return sendJSON(res, 400, { error: 'Sube el WAV sin tag del beat completo: es lo que se verifica y lo que recibe el artista.' });
+    const fw = await formatoAudio(wav.path);
+    if (fw !== null && !/(^|,)wav(,|$)/.test(fw)) return sendJSON(res, 400, { error: 'Ese archivo no es un WAV de verdad. Sube el WAV original del beat.' });
   }
   const metodo = ['saldo', 'credito', 'comprobante'].includes(fields.metodo) ? fields.metodo : 'comprobante';
   const precio = precioVerificacion();
@@ -4005,6 +4032,8 @@ route('POST', '/api/producer/tracks/:id/wav-sin-tag', async (req, res, params) =
   let wav;
   try { wav = tomarSubida(d.wavUploadId, `p:${producer.id}`, 'wav'); } catch (err) { return sendJSON(res, err.status || 400, { error: err.error || 'Falta el WAV' }); }
   if (!wav) return sendJSON(res, 400, { error: 'Sube el WAV sin tag del beat completo.' });
+  const fw = await formatoAudio(wav.path);
+  if (fw !== null && !/(^|,)wav(,|$)/.test(fw)) return sendJSON(res, 400, { error: 'Ese archivo no es un WAV de verdad. Sube el WAV original del beat.' });
   const bits = await bitsWav(wav.path);
   if (bits && bits < 16) return sendJSON(res, 400, { error: `El WAV es de ${bits} bits: tiene que ser de 16 o, mejor, de 24 bits.` });
   if (plan.maxSegundos) {

@@ -631,10 +631,11 @@
     if (!p.puedeWav) wavInput.value = '';
     if (!p.puedeStems) stemsInput.value = '';
 
-    audioInput.accept = p.soloMp3 ? '.mp3,audio/mpeg' : '.mp3,.wav,audio/mpeg,audio/wav';
+    // arriba solo el MP3: el WAV va en su propio campo (obligatorio), así no se sube dos veces
+    audioInput.accept = '.mp3,audio/mpeg';
     const esFree = p.planClave === 'free';
     const maxMin = p.maxSegundos ? ' · máx ' + p.maxSegundos / 60 + ' min' : ' · máx 250 MB';
-    audioDefault = p.soloMp3 ? 'MP3 320 kbps' + maxMin : 'MP3 o WAV' + maxMin;
+    audioDefault = 'MP3 320 kbps' + maxMin;
     if (!audioInput.files.length) $('audio-drop-label').textContent = audioDefault;
     $('audio-hint').textContent = esFree ? 'AudD lo verifica gratis al subir.' : 'De este archivo salen el preview y el MP3 de entrega.';
     $('wav-lbl').firstChild.textContent = 'WAV sin tag ';
@@ -647,7 +648,7 @@
 
     const reglas = [
       'Plan ' + p.planLabel + ': puedes vender ' + lic.map(l => NOMBRES_LIC[l]).join(', ') + '.',
-      esFree ? 'MP3 de 320 kbps y WAV, sin tag, de 3 minutos como máximo. Hasta ' + (p.planMaxBeats || 2) + ' beats activos.' : (p.soloMp3 ? 'Audio solo en MP3 de 320 kbps.' : 'Audio en MP3 de 320 kbps o WAV, sin tag.'),
+      esFree ? 'MP3 de 320 kbps y WAV, sin tag, de 3 minutos como máximo. Hasta ' + (p.planMaxBeats || 2) + ' beats activos.' : (p.soloMp3 ? 'Audio solo en MP3 de 320 kbps.' : 'MP3 de 320 kbps arriba y WAV en su campo, sin tag.'),
       p.previewConMarca ? 'Tus previews llevan el tag de la plataforma.' : 'Tus previews van sin marca de agua.',
     ];
     if (!p.puedePlaylist) reglas.push('La Playlist es solo del plan Studio.');
@@ -686,8 +687,7 @@
 
     const val = (el) => (window.ZBSubidas ? window.ZBSubidas.precio(el.value) : parseFloat(String(el.value).replace(',', '.'))) > 0;
     // si el audio principal ya es WAV, ese mismo archivo es el WAV que se entrega
-    const audioEsWav = audioInput.files.length > 0 && /\.wav$/i.test(audioInput.files[0].name);
-    const necesitaWav = !esPlaylist && !audioEsWav && (exclusivo ? val(priceExclusiveInput) : (val(priceBasicInput) || val(pricePremiumInput) || val(priceUnlimitedInput)));
+    const necesitaWav = !esPlaylist && (exclusivo ? val(priceExclusiveInput) : (val(priceBasicInput) || val(pricePremiumInput) || val(priceUnlimitedInput)));
     avisosDePrecio(perfil, { basic: priceBasicInput, premium: pricePremiumInput, unlimited: priceUnlimitedInput, exclusive: priceExclusiveInput }, 'lic-aviso-');
     const necesitaStems = !esPlaylist && (exclusivo ? val(priceExclusiveInput) : val(priceUnlimitedInput));
     const puedeWav = $('wav-stems-field').dataset.allowed === '1';
@@ -698,7 +698,7 @@
     $('stems-field').style.display = puedeStems && !esPlaylist && stemsUtiles ? '' : 'none';
     if (!stemsUtiles && stemsInput.files.length) { stemsInput.value = ''; stemsInput.dispatchEvent(new Event('change')); }
     $('wav-req').style.display = necesitaWav ? '' : 'none';
-    $('wav-note').textContent = audioEsWav && !esPlaylist ? 'Tu audio principal ya es WAV: se entrega ese mismo, no hace falta subirlo otra vez.' : '';
+    $('wav-note').textContent = '';
     $('stems-req').style.display = necesitaStems ? '' : 'none';
     $('wav-drop').classList.toggle('required', necesitaWav && !wavInput.files.length);
     $('stems-drop').classList.toggle('required', necesitaStems && !stemsInput.files.length);
@@ -944,14 +944,12 @@
       return 'Tu plan ' + perfil.planLabel + ' permite ' + perfil.planMaxBeats + ' beats activos y ya tienes ' + perfil.beatsUsados + '. Elimina alguno o sube de plan.';
     }
     const extAudio = extDe(audio);
-    const permitidos = perfil && perfil.soloMp3 ? ['.mp3'] : ['.mp3', '.wav'];
-    if (!permitidos.includes(extAudio)) {
-      return perfil && perfil.soloMp3 ? 'Con el plan ' + perfil.planLabel + ' el audio tiene que ser MP3 de 320 kbps.' : 'El audio tiene que ser MP3 (320 kbps) o WAV.';
-    }
+    if (extAudio !== '.mp3') return 'Arriba va el MP3 de 320 kbps. El WAV se sube en su propio campo, abajo.';
     if (!['.jpg', '.jpeg', '.png', '.webp'].includes(extDe(cover))) return 'La portada tiene que ser JPG, PNG o WEBP.';
     const wav = !esPlaylist ? wavInput.files[0] : null;
     const stems = !esPlaylist ? stemsInput.files[0] : null;
     if (wav && extDe(wav) !== '.wav') return 'El archivo WAV tiene que terminar en .wav.';
+    if (wav && wav.name === audio.name && wav.size === audio.size) return 'Elegiste el mismo archivo en los dos campos. Arriba va el MP3 y abajo el WAV.';
     if (stems && !['.zip', '.rar', '.7z'].includes(extDe(stems))) return 'Los STEMS tienen que ir comprimidos en ZIP, RAR o 7Z.';
     for (const [kind, f] of [['audio', audio], ['cover', cover], ['wav', wav], ['stems', stems]]) {
       if (!f) continue;
@@ -959,7 +957,7 @@
       if (err) return err;
     }
     if (!esPlaylist) {
-      const hayWav = Boolean(wav) || extAudio === '.wav';
+      const hayWav = Boolean(wav);
       if ((precios.premium > 0 || precios.unlimited > 0 || precios.exclusive > 0) && !hayWav) return 'Esta licencia requiere el archivo WAV.';
       if ((precios.unlimited > 0 || precios.exclusive > 0) && !stems) return 'Esta licencia requiere los STEMS.';
     }

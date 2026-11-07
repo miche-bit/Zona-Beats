@@ -293,12 +293,15 @@
         labelEl.textContent = inputEl.files[0].name + ' · ' + tamanoTxt(inputEl.files[0].size);
         dropEl.classList.add('has-file');
       } else {
-        labelEl.textContent = defaultLabel;
+        labelEl.textContent = typeof defaultLabel === 'function' ? defaultLabel() : defaultLabel;
         dropEl.classList.remove('has-file');
       }
     });
   }
-  const AUDIO_LABEL = 'MP3, WAV, M4A, OGG o FLAC · máx 250 MB';
+  // beat a la venta: arriba solo el MP3 (el WAV va en su campo, obligatorio); la Playlist acepta cualquier audio
+  const AUDIO_LABEL_VENTA = 'MP3 320 kbps · máx 250 MB';
+  const AUDIO_LABEL_PLAYLIST = 'MP3, WAV, M4A, OGG o FLAC · máx 250 MB';
+  const AUDIO_LABEL = () => (isPlaylistInput && isPlaylistInput.checked ? AUDIO_LABEL_PLAYLIST : AUDIO_LABEL_VENTA);
   const COVER_LABEL = 'Cuadrada 3000x3000 px · JPG, PNG o WEBP · máx 8 MB';
   const WAV_LABEL = 'WAV en alta calidad · máx 1 GB';
   const STEMS_LABEL = 'ZIP (o RAR/7Z) con las pistas separadas · máx 4 GB';
@@ -334,13 +337,14 @@
   function actualizarArchivosAdmin() {
     const pl = isPlaylistInput.checked;
     const ex = isExclusiveInput.checked;
-    const audioEsWav = audioInput.files.length > 0 && /\.wav$/i.test(audioInput.files[0].name);
-    const wav = !pl && !audioEsWav && (ex ? numPos(priceExclusiveInput.value) : (numPos(pricePremiumInput.value) || numPos(priceUnlimitedInput.value)));
+    audioInput.accept = pl ? '.mp3,.wav,.m4a,.ogg,.flac' : '.mp3,audio/mpeg';
+    if (!audioInput.files.length) document.getElementById('audio-drop-label').textContent = AUDIO_LABEL();
+    const wav = !pl && (ex ? numPos(priceExclusiveInput.value) : (numPos(pricePremiumInput.value) || numPos(priceUnlimitedInput.value)));
     const stems = !pl && (ex ? numPos(priceExclusiveInput.value) : numPos(priceUnlimitedInput.value));
     document.getElementById('admin-wav-field').style.display = pl ? 'none' : '';
     document.getElementById('admin-stems-field').style.display = pl ? 'none' : '';
     document.getElementById('admin-wav-req').style.display = wav ? '' : 'none';
-    document.getElementById('admin-wav-note').textContent = audioEsWav && !pl ? 'El audio principal ya es WAV y se usará para la entrega.' : '';
+    document.getElementById('admin-wav-note').textContent = '';
     document.getElementById('admin-stems-req').style.display = stems ? '' : 'none';
     document.getElementById('admin-wav-drop').classList.toggle('required', wav && !adminWavInput.files.length);
     document.getElementById('admin-stems-drop').classList.toggle('required', stems && !adminStemsInput.files.length);
@@ -390,7 +394,7 @@
     catalogOnlyFields.style.display = 'block';
     licenseModeFields.style.display = 'block';
     exclusiveModeFields.style.display = 'none';
-    document.getElementById('audio-drop-label').textContent = AUDIO_LABEL;
+    document.getElementById('audio-drop-label').textContent = AUDIO_LABEL();
     document.getElementById('cover-drop-label').textContent = COVER_LABEL;
     document.getElementById('admin-wav-label').textContent = WAV_LABEL;
     document.getElementById('admin-stems-label').textContent = STEMS_LABEL;
@@ -483,7 +487,9 @@
     const wav = esPlaylist ? null : adminWavInput.files[0];
     const stems = esPlaylist ? null : adminStemsInput.files[0];
 
+    if (!esPlaylist && extDe(audio) !== '.mp3') { showToast('Arriba va el MP3 de 320 kbps. El WAV se sube en su propio campo, abajo.', true); irPasoA(3, true); return; }
     if (!['.mp3', '.wav', '.m4a', '.ogg', '.flac'].includes(extDe(audio))) { showToast('El audio tiene que ser MP3, WAV, M4A, OGG o FLAC.', true); return; }
+    if (wav && wav.name === audio.name && wav.size === audio.size) { showToast('Elegiste el mismo archivo en los dos campos. Arriba va el MP3 y abajo el WAV.', true); irPasoA(3, true); return; }
     if (!['.jpg', '.jpeg', '.png', '.webp'].includes(extDe(cover))) { showToast('La portada tiene que ser JPG, PNG o WEBP.', true); return; }
     if (wav && extDe(wav) !== '.wav') { showToast('El archivo WAV tiene que terminar en .wav.', true); return; }
     if (stems && !['.zip', '.rar', '.7z'].includes(extDe(stems))) { showToast('Los STEMS tienen que ir en ZIP, RAR o 7Z.', true); return; }
@@ -497,7 +503,7 @@
         showToast(isExclusiveMode ? 'Ponle el precio exclusivo a la pista.' : 'Ponle precio a al menos una licencia.', true);
         return;
       }
-      const hayWav = Boolean(wav) || extDe(audio) === '.wav';
+      const hayWav = Boolean(wav);
       if ((numPos(prices.premium) || numPos(prices.unlimited) || numPos(prices.exclusive)) && !hayWav) {
         showToast('Esta licencia requiere el archivo WAV.', true);
         return;
