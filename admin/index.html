@@ -670,7 +670,7 @@
           </div>
           <div data-grupo-panel="msubir" data-sub="pack" hidden>
             <div class="panel up-panel">
-              <p class="panel-hint pk-warn" id="packs-almacen-aviso" hidden>El almacenamiento para packs pesados aún no está activo. Hasta entonces, los packs de varios GB pueden no descargarse completos con conexiones lentas.</p>
+              <p class="panel-hint pk-warn" id="packs-almacen-aviso" hidden>Los packs de varios GB pueden no descargarse completos con conexiones lentas. Si un comprador tiene problemas, avísale al desarrollador.</p>
               <div id="packs-form"></div>
             </div>
           </div>
@@ -859,6 +859,7 @@
             <button type="button" class="subtab" data-sub="rastrear">Rastrear</button>
             <button type="button" class="subtab" data-sub="titular">Titular</button>
             <button type="button" class="subtab" data-sub="copias">Copias</button>
+            <button type="button" class="subtab" data-sub="almacen">Almacenamiento</button>
             <button type="button" class="subtab" data-sub="tag">Tag de voz</button>
           </div>
         </header>
@@ -956,6 +957,19 @@
               <div class="upload-progress-track"><div class="upload-progress-fill" id="restore-fill"></div></div>
               <div class="upload-progress-label" id="restore-status" role="status" aria-live="polite">Subiendo… 0%</div>
             </div>
+          </div>
+        </div>
+
+        <div data-grupo-panel="ajustes" data-sub="almacen" hidden>
+          <div class="panel" id="almacen-panel">
+            <h2>Almacenamiento de la música</h2>
+            <p class="panel-hint" id="alm-estado" role="status">Cargando…</p>
+            <div class="alm-grid" id="alm-grid" hidden>
+              <div class="alm-dato"><strong id="alm-bucket">—</strong><span>en la nube</span></div>
+              <div class="alm-dato"><strong id="alm-pend">—</strong><span>por pasar a la nube</span></div>
+              <div class="alm-dato"><strong id="alm-libre">—</strong><span>libres en el servidor</span></div>
+            </div>
+            <p class="panel-hint compact" id="alm-detalle"></p>
           </div>
         </div>
 

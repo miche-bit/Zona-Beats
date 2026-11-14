@@ -63,6 +63,9 @@
 /* aviso de plan (portal) */
 .pk-lock { text-align: center; padding: var(--s-4) var(--s-3); }
 .pk-lock p { color: var(--text-dim); margin: 8px auto 16px; max-width: 460px; line-height: 1.5; }
+.pk-pronto { padding-block: var(--s-5); }
+.panel.pk-pronto h2 { text-align: center; justify-content: center; }
+.pk-pronto-chip { display: inline-block; margin-bottom: 10px; padding: 4px 12px; border-radius: var(--r-pill); border: 1px solid var(--accent, #2dd4bf); color: var(--accent, #2dd4bf); font-size: var(--fs-sm); font-weight: 700; }
 .pk-proc { color: var(--warn); }
 .pk-ok { color: var(--live); }
 .pk-meta a { color: var(--live); text-decoration: underline; }

@@ -877,6 +877,7 @@ a.modal-whatsapp-btn:hover { filter: brightness(1.06); }
 .purchase-dl { background: var(--live); color: var(--on-bright); }
 .purchase-pdf { border: 1px solid var(--line-strong); color: var(--text); }
 .purchase-pdf:hover { background: var(--bg-card-hover); }
+.purchase-agotado { display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; border-radius: var(--r-pill); border: 1px dashed var(--line-strong); color: var(--text-dim); font-size: var(--fs-sm); }
 .purchase-forget { align-self: flex-start; padding: 6px 0; font-size: var(--fs-xs); color: var(--text-faint); text-decoration: underline; }
 .purchase-more { border-top: 1px dashed var(--line); padding-top: 8px; }
 .purchase-more summary { cursor: pointer; font-weight: 700; font-size: var(--fs-sm); padding: 6px 0; }

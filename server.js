@@ -100,6 +100,124 @@ const TMP_PROCESSING = path.join(DATA_ROOT, 'uploads', 'tmp');
 const UPLOADS_MASTERS = path.join(DATA_ROOT, 'uploads', 'masters');
 [UPLOADS_AUDIO, UPLOADS_COVERS, UPLOADS_RECEIPTS, UPLOADS_WATERMARK, TMP_PROCESSING, UPLOADS_MASTERS].forEach(d => fs.mkdirSync(d, { recursive: true }));
 
+// ---------- Archivos maestros: en el volumen o en el bucket ----------
+// El MP3 320, el WAV, el audio original y las copias de entrega se crean en uploads/masters.
+// Con el bucket configurado pasan solos a él (prefijo «masters/») y se borran del volumen; así el volumen
+// solo guarda la base de datos, las portadas y los previews. Cuando hace falta procesar uno que ya está en
+// el bucket (marca forense, AudD, muestra…), se baja una copia temporal y se borra al terminar.
+// Los previews y portadas se quedan en el volumen: son livianos y la tienda los pide todo el tiempo.
+const DIR_CACHE = path.join(TMP_PROCESSING, 'cache');
+fs.rmSync(DIR_CACHE, { recursive: true, force: true });       // copias temporales que quedaron de un reinicio
+fs.mkdirSync(DIR_CACHE, { recursive: true });
+const PREFIJO_BUCKET = 'masters/';
+// un archivo recién creado se espera un rato antes de subirlo (puede estar escribiéndose o procesándose)
+const ESPERA_SUBIDA_MS = Math.max(0, Number(process.env.ZB_BUCKET_ESPERA_SEG ?? 600)) * 1000;
+const CADA_SUBIDA_MS = Math.max(5, Number(process.env.ZB_BUCKET_CADA_SEG) || 300) * 1000;
+const maestrosEnUso = new Map();
+const usarMaestro = (n, d) => { const v = (maestrosEnUso.get(n) || 0) + d; if (v > 0) maestrosEnUso.set(n, v); else maestrosEnUso.delete(n); };
+
+function maestroLocal(nombre) {
+  if (!nombre || nombre !== path.basename(nombre)) return null;
+  const p = path.join(UPLOADS_MASTERS, nombre);
+  try { return fs.statSync(p).isFile() ? p : null; } catch { return null; }
+}
+function maestroRemoto(nombre) {
+  if (!nombre) return null;
+  return db.prepare('SELECT clave, size FROM archivos_bucket WHERE nombre = ?').get(nombre) || null;
+}
+function archivoExiste(nombre) {
+  return Boolean(maestroLocal(nombre) || (almacen.activo() && maestroRemoto(nombre)));
+}
+// dónde está y cuánto pesa (null si no existe)
+function infoMaestro(nombre) {
+  const local = maestroLocal(nombre);
+  if (local) { try { return { local, size: fs.statSync(local).size }; } catch { /* se borró recién */ } }
+  const r = almacen.activo() ? maestroRemoto(nombre) : null;
+  return r ? { remoto: r.clave, size: Number(r.size) || 0 } : null;
+}
+// Ruta local del archivo para procesarlo; si está en el bucket se baja una copia que se borra al terminar.
+// La copia conserva el nombre original (la caché de AudD lo usa para reconocer el mismo audio).
+async function conMaestro(nombre, fn) {
+  usarMaestro(nombre, 1);
+  try {
+    const local = maestroLocal(nombre);
+    if (local) return await fn(local);
+    const r = almacen.activo() ? maestroRemoto(nombre) : null;
+    if (!r) throw new Error(`no se encontró el archivo ${nombre}`);
+    const dir = path.join(DIR_CACHE, crypto.randomUUID());
+    fs.mkdirSync(dir);
+    try {
+      const copia = path.join(dir, nombre);
+      await almacen.bajarArchivo(r.clave, copia);
+      return await fn(copia);
+    } finally { fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {}); }
+  } finally { usarMaestro(nombre, -1); }
+}
+// borra el archivo del volumen y del bucket
+function borrarMaestro(nombre) {
+  if (!nombre || nombre !== path.basename(nombre)) return;
+  const local = path.join(UPLOADS_MASTERS, nombre);
+  fs.promises.unlink(local).catch(() => {});
+  const r = maestroRemoto(nombre);
+  if (r) {
+    db.prepare('DELETE FROM archivos_bucket WHERE nombre = ?').run(nombre);
+    almacen.borrar(r.clave);
+  }
+}
+// archivos de masters que la app usa (los STEMS y packs tienen su propio camino al bucket)
+function maestrosReferenciados() {
+  const s = new Set();
+  for (const r of db.prepare(`SELECT master_filename a, mp3_filename b, wav_filename c, mon_mp3_filename d, tagwav_filename e,
+      demo_filename f, demo_wav_filename g FROM tracks`).all()) for (const v of Object.values(r)) if (v) s.add(v);
+  for (const r of db.prepare("SELECT forense_wav a, forense_mp3 b FROM orders WHERE forense_wav != '' OR forense_mp3 != ''").all()) {
+    if (r.a) s.add(r.a);
+    if (r.b) s.add(r.b);
+  }
+  return s;
+}
+const estadoBucket = { subiendo: false, ultimaRevision: '', ultimoError: '', subidosEnVuelta: 0 };
+async function subirMaestrosAlBucket() {
+  if (!almacen.activo() || estadoBucket.subiendo) return;
+  estadoBucket.subiendo = true;
+  estadoBucket.subidosEnVuelta = 0;
+  try {
+    const refs = maestrosReferenciados();
+    let nombres = [];
+    try { nombres = fs.readdirSync(UPLOADS_MASTERS); } catch { nombres = []; }
+    for (const nombre of nombres) {
+      const usado = refs.has(nombre) || /^entrega-\d+-demo\.(mp3|wav)$/.test(nombre);
+      if (!usado || maestrosEnUso.has(nombre)) continue;
+      const local = path.join(UPLOADS_MASTERS, nombre);
+      let st;
+      try { st = fs.statSync(local); } catch { continue; }
+      if (!st.isFile() || Date.now() - st.mtimeMs < ESPERA_SUBIDA_MS) continue;
+      try {
+        if (!maestroRemoto(nombre)) {
+          const clave = PREFIJO_BUCKET + nombre;
+          const size = await almacen.subirArchivo(local, clave, { tipo: contentTypeDescarga(path.extname(nombre).toLowerCase()) });
+          const enBucket = await almacen.tamano(clave);
+          if (enBucket !== st.size || size !== st.size) throw new Error(`el bucket guardó ${enBucket} bytes de ${st.size}`);
+          db.prepare("INSERT OR REPLACE INTO archivos_bucket (nombre, clave, size, subido_at) VALUES (?, ?, ?, datetime('now'))").run(nombre, clave, st.size);
+          // si mientras subía lo borraron (beat eliminado, WAV reemplazado), se borra también del bucket
+          if (!maestrosReferenciados().has(nombre) && !/^entrega-/.test(nombre)) { borrarMaestro(nombre); continue; }
+          estadoBucket.subidosEnVuelta++;
+        }
+        if (!maestrosEnUso.has(nombre)) fs.unlinkSync(local);
+      } catch (e) {
+        estadoBucket.ultimoError = `${nombre}: ${String(e.message || e).slice(0, 200)}`;
+        console.error('No se pudo pasar al bucket', nombre, e.message);
+      }
+    }
+    estadoBucket.ultimaRevision = new Date().toISOString();
+  } finally { estadoBucket.subiendo = false; }
+}
+// al arrancar, el registro de Railway dice si el bucket responde (para el desarrollador; el admin no ve detalles técnicos)
+if (almacen.activo()) {
+  almacen.probar().then((r) => console.log(r.ok ? `Bucket conectado (${r.ms} ms)` : `ATENCIÓN: el bucket no responde: ${r.error}`));
+} else console.log('Sin bucket: la música se guarda en el volumen');
+setTimeout(() => { subirMaestrosAlBucket().catch((e) => console.error('Bucket:', e.message)); }, 20 * 1000).unref();
+setInterval(() => { subirMaestrosAlBucket().catch((e) => console.error('Bucket:', e.message)); }, CADA_SUBIDA_MS).unref();
+
 const MAX_COVER_BYTES = 8 * 1024 * 1024;  // 8MB portada
 const MAX_RECEIPT_BYTES = 12 * 1024 * 1024; // 12MB comprobante (fotos de capturas de pantalla pueden pesar más que una portada)
 const MAX_WATERMARK_BYTES = 10 * 1024 * 1024; // 10MB para el audio corto de la voz de marca de agua
@@ -634,7 +752,7 @@ route('POST', '/api/uploads', async (req, res) => {
     const plan = planEfectivo(full);
     if (kind === 'wav' && !plan.wav) return sendJSON(res, 403, { error: `Tu plan ${plan.label} no incluye entrega en WAV. Sube al plan Pro o Studio.` });
     if (kind === 'stems' && !plan.stems) return sendJSON(res, 403, { error: `Tu plan ${plan.label} no incluye STEMS. Solo el plan Studio permite subir STEMS.` });
-    if (kind === 'pack' && !plan.packs) return sendJSON(res, 403, { error: `Tu plan ${plan.label} no permite vender Sample Packs. Son del plan Studio.` });
+    if (kind === 'pack' && !plan.packs) return sendJSON(res, 403, { error: MSG_PACKS_PROXIMAMENTE });
     if (kind === 'audio' && !plan.audioExt.includes(ext)) {
       return sendJSON(res, 403, { error: plan.audioExt.length === 1 ? `Tu plan ${plan.label} solo permite subir audio en MP3 (320 kbps).` : `Tu plan ${plan.label} permite subir el audio en MP3 (320 kbps) o WAV.` });
     }
@@ -991,13 +1109,12 @@ function archivosDeCompra(order) {
   };
   const agregar = (tipo, nombre, etiqueta) => {
     if (!nombre || vistos.has(nombre)) return;
-    const p = path.join(UPLOADS_MASTERS, nombre);
-    let st = null;
-    try { st = fs.statSync(p); } catch { st = null; }
-    if (!st) return;
+    const info = infoMaestro(nombre);
+    if (!info) return;
     vistos.add(nombre);
     const ext = path.extname(nombre).toLowerCase();
-    lista.push({ f: tipo, etiqueta: etiqueta || nombreBonito(ext, tipo), nombre, path: p, ext, size: st.size, titulo: t.title });
+    // en el volumen se envía por el servidor; en el bucket, con enlace firmado directo
+    lista.push({ f: tipo, etiqueta: etiqueta || nombreBonito(ext, tipo), nombre, path: info.local || null, remoto: info.remoto || null, ext, size: info.size, titulo: t.title });
   };
   // el archivo grande (pack o STEMS) puede estar en el almacenamiento externo
   const agregarGrande = (tipo) => {
@@ -1019,9 +1136,11 @@ function archivosDeCompra(order) {
       return lista;
     }
     // marca forense (Free y Studio): se entregan las copias marcadas de este pedido
-    if (order.forense === 'lista' && archivoExiste(order.forense_wav)) {
-      agregar('wav', order.forense_wav);
-      agregar('mp3', order.forense_mp3);
+    if (order.forense === 'lista' || order.forense === 'archivada') {
+      if (order.forense === 'lista' && archivoExiste(order.forense_wav)) {
+        agregar('wav', order.forense_wav);
+        agregar('mp3', order.forense_mp3);
+      } else rehacerForense(order.id);   // se archivaron (o se perdieron): se vuelven a crear, con la misma marca
     } else if (order.forense !== 'pendiente') {
       agregar('wav', t.wav_filename);
       // beats Free de antes (MP3 con tag): el MP3 sin tag sale del WAV sin tag que subió después
@@ -1062,9 +1181,11 @@ route('GET', '/api/purchase/:token', (req, res, params) => {
     createdAt: normalizarFecha(order.created_at),
     certificateId: aprobada ? order.certificate_id : null,
     pdfUrl: aprobada ? `/api/license/${encodeURIComponent(order.certificate_id)}/pdf` : null,
-    files: archivos.map(a => ({ f: a.f, label: a.etiqueta, size: a.size, url: `${base}?f=${a.f}` })),
+    files: archivos.map(a => ({ f: a.f, label: a.etiqueta, size: a.size, url: `${base}?f=${a.f}`,
+      restantes: Math.max(0, descargasPermitidas(order) - descargasUsadas(order.id, a.f)) })),
+    limiteDescargas: descargasPermitidas(order),
     // se están preparando los archivos con la marca forense de esta compra (tarda uno o dos minutos)
-    preparando: aprobada && order.forense === 'pendiente',
+    preparando: aprobada && ['pendiente', 'archivada', 'lista'].includes(order.forense) && !archivos.some(a => a.f === 'wav'),
     downloadUrl: archivos.length ? `${base}?f=${archivos[0].f}` : null,
     codigo: codigoPedido(order),
     comprobanteUrl: `/api/purchase/${order.buyer_token}/comprobante`,
@@ -1082,21 +1203,57 @@ route('GET', '/api/purchase/:token', (req, res, params) => {
   });
 });
 
+// ---- Límite de descargas por compra ----
+// Cada archivo de una compra se puede pedir LIMITE_DESCARGAS veces (el admin puede habilitar más).
+// Un mismo comprador que reintenta desde la misma conexión en 10 minutos cuenta una sola vez,
+// y retomar una descarga cortada (gestores como ADM o IDM) no cuenta.
+const LIMITE_DESCARGAS = Math.max(1, Number(process.env.ZB_LIMITE_DESCARGAS) || 10);
+const HORAS_ENLACE_COMPRA = 12;
+function descargasUsadas(orderId, archivo) {
+  return db.prepare('SELECT COUNT(*) as c FROM descargas WHERE order_id = ? AND archivo = ?').get(orderId, archivo).c;
+}
+function descargasPermitidas(order) { return LIMITE_DESCARGAS + (Number(order.descargas_extra) || 0); }
+function anotarDescarga(req, order, archivo) {
+  const ip = clientIp(req);
+  const reciente = db.prepare("SELECT 1 FROM descargas WHERE order_id = ? AND archivo = ? AND ip = ? AND created_at >= datetime('now', '-10 minutes')").get(order.id, archivo, ip);
+  if (!reciente) db.prepare('INSERT INTO descargas (order_id, archivo, ip, agente) VALUES (?, ?, ?, ?)').run(order.id, archivo, ip, String(req.headers['user-agent'] || '').slice(0, 200));
+}
+// el comprador llega con un enlace del navegador: si algo falla, ve una página clara y no un JSON
+function avisoDescarga(req, res, status, mensaje, token) {
+  if (!/text\/html/.test(String(req.headers.accept || ''))) return sendJSON(res, status, { error: mensaje });
+  const volver = token ? `/?compra=${encodeURIComponent(token)}` : '/';
+  const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Descarga · Zona Beats</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#120e1a;color:#ece8f4;font:16px/1.5 system-ui,sans-serif;padding:24px}main{max-width:420px;text-align:center}h1{font-size:20px;margin:0 0 8px}p{color:#b8b0c8;margin:0 0 20px}a{display:inline-block;padding:12px 22px;border-radius:999px;background:#ece8f4;color:#120e1a;font-weight:700;text-decoration:none}</style></head>
+<body><main><h1>No se pudo descargar</h1><p>${escaparAtributo(mensaje)}</p><a href="${escaparAtributo(volver)}">Volver a mi compra</a></main></body></html>`;
+  res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+  res.end(html);
+}
+
 route('GET', '/api/purchase/:token/download', (req, res, params, query) => {
-  if (!rateLimit(req, 'purchase-dl', 120, 60 * 1000)) return sendJSON(res, 429, { error: 'Demasiadas descargas seguidas. Espera un minuto.' });
+  if (!rateLimit(req, 'purchase-dl', 120, 60 * 1000)) return avisoDescarga(req, res, 429, 'Demasiadas descargas seguidas. Espera un minuto y vuelve a intentarlo.');
   const order = findOrderByBuyerToken(params.token);
-  if (!order || order.status !== 'approved') return sendJSON(res, 404, { error: 'Esta compra no existe o todavía no fue aprobada' });
+  if (!order || order.status !== 'approved') return avisoDescarga(req, res, 404, 'Esta compra no existe o todavía no fue aprobada.');
   const archivos = archivosDeCompra(order);
   const pedido = String(query.get('f') || '');
-  const archivo = archivos.find(a => a.f === pedido) || archivos[0];
+  const archivo = pedido ? archivos.find(a => a.f === pedido) : archivos[0];
   if (!archivo) {
-    return sendJSON(res, 404, { error: 'Archivo aún no disponible. Contáctanos por WhatsApp.' });
+    return avisoDescarga(req, res, 404, 'Tus archivos todavía se están preparando. Vuelve a intentarlo en unos minutos o escríbele al vendedor por WhatsApp.', order.buyer_token);
+  }
+  // retomar una descarga ya empezada (Range que no arranca en 0) no cuenta ni se frena
+  const rango = String(req.headers.range || '');
+  const esReanudacion = /^bytes=\d+-/.test(rango) && !/^bytes=0-/.test(rango);
+  if (!esReanudacion) {
+    if (descargasUsadas(order.id, archivo.f) >= descargasPermitidas(order)) {
+      return avisoDescarga(req, res, 429, `Ya descargaste este archivo ${descargasPermitidas(order)} veces, el máximo por compra. Escríbele al vendedor por WhatsApp y te habilita más descargas.`, order.buyer_token);
+    }
+    anotarDescarga(req, order, archivo.f);
   }
   const nombre = archivo.f === 'pack' ? `${archivo.titulo || 'Sample Pack'}${archivo.ext}` : `${archivo.titulo || 'beat'} - ${archivo.etiqueta.replace(/[()]/g, '')}${archivo.ext}`;
   if (archivo.remoto) {
-    // directo desde el almacenamiento: no pasa por el límite de 15 minutos de Railway y se puede retomar
-    if (!almacen.activo()) return sendJSON(res, 503, { error: 'Descarga no disponible en este momento. Contáctanos por WhatsApp.' });
-    res.writeHead(302, { Location: almacen.enlaceFirmado(archivo.remoto, { nombre }), 'Cache-Control': 'private, no-store' });
+    // directo desde el bucket: no pasa por el límite de 15 minutos de Railway y se puede retomar.
+    // El enlace sirve 12 horas para empezar o retomar; después, «Descargar» da uno nuevo.
+    if (!almacen.activo()) return avisoDescarga(req, res, 503, 'La descarga no está disponible en este momento. Escríbele al vendedor por WhatsApp.', order.buyer_token);
+    res.writeHead(302, { Location: almacen.enlaceFirmado(archivo.remoto, { nombre, segundos: HORAS_ENLACE_COMPRA * 3600 }), 'Cache-Control': 'private, no-store' });
     return res.end();
   }
   enviarArchivo(req, res, archivo.path, contentTypeDescarga(archivo.ext), {
@@ -2181,7 +2338,12 @@ route('GET', '/api/download/:id', (req, res, params) => {
   if (!pistaVisible(track)) return sendJSON(res, 403, { error: 'Esta pista ya no está disponible' });
   // se descarga el MP3 de 320 kbps si existe; si no, el preview
   let filePath = path.join(UPLOADS_AUDIO, track.audio_filename);
-  if (track.mp3_filename && fs.existsSync(path.join(UPLOADS_MASTERS, track.mp3_filename))) filePath = path.join(UPLOADS_MASTERS, track.mp3_filename);
+  const mp3 = infoMaestro(track.mp3_filename);
+  if (mp3 && mp3.remoto) {
+    res.writeHead(302, { Location: almacen.enlaceFirmado(mp3.remoto, { nombre: `${track.title}.mp3`, segundos: 3600 }), 'Cache-Control': 'no-store' });
+    return res.end();
+  }
+  if (mp3) filePath = mp3.local;
   const ext = path.extname(filePath).toLowerCase();
   enviarArchivo(req, res, filePath, contentTypeForAudio(ext), { 'Content-Disposition': dispositionAdjunto(`${track.title}${ext}`) });
 });
@@ -2730,12 +2892,13 @@ function borrarArchivosTrack(t) {
       .catch((e) => console.error('Huella antes de borrar:', e.message))
       .then(() => { try { fs.unlinkSync(ruta); } catch { /* nada */ } });
   }
-  const pares = [[UPLOADS_AUDIO, t.audio_filename], [UPLOADS_COVERS, t.cover_filename], [UPLOADS_MASTERS, t.master_filename],
-                 [UPLOADS_MASTERS, stemsLocal], [UPLOADS_MASTERS, t.wav_filename], [UPLOADS_MASTERS, t.mp3_filename]];
+  const pares = [[UPLOADS_AUDIO, t.audio_filename], [UPLOADS_COVERS, t.cover_filename], [UPLOADS_MASTERS, stemsLocal]];
   for (const [dir, file] of pares) {
     if (!file) continue;
     try { const fp = path.join(dir, file); if (fs.existsSync(fp)) fs.unlinkSync(fp); } catch { /* ya no existe */ }
   }
+  // los maestros pueden estar en el volumen o en el bucket (las copias de las compras ya hechas no se tocan)
+  for (const f of new Set([t.master_filename, t.wav_filename, t.mp3_filename, t.mon_mp3_filename, t.tagwav_filename, t.demo_filename, t.demo_wav_filename])) borrarMaestro(f);
 }
 
 // Lee la calidad (kbps) de un MP3 sin librerías: primer frame + cabecera Xing si es VBR.
@@ -3005,8 +3168,7 @@ async function procesarPista({ titulo, genero, descripcion, credito, esPlaylist,
 }
 
 function archivosDePista(t) {
-  const existe = (f) => { if (!f) return false; try { return fs.statSync(path.join(UPLOADS_MASTERS, f)).isFile(); } catch { return false; } };
-  return { wav: existe(t.wav_filename), stems: Boolean(t.stems_remote) || existe(t.stems_filename), mp3: existe(t.mp3_filename || t.master_filename) };
+  return { wav: archivoExiste(t.wav_filename), stems: Boolean(t.stems_remote) || Boolean(maestroLocal(t.stems_filename)), mp3: archivoExiste(t.mp3_filename || t.master_filename) };
 }
 
 // Revisa que cada licencia con precio tenga el archivo que entrega.
@@ -3074,7 +3236,8 @@ const PRODUCER_PLANS = {
     // Studio: 150 beats de 20 minutos como máximo, Premium, Ilimitada y Exclusiva, con marca forense
     label: 'Studio', commission: 10, maxBeats: 150, watermarkPreview: false, exclusiveAuto: true,
     payout: '24 horas', payoutDays: 1, audioExt: ['.mp3', '.wav'], wav: true, stems: true,
-    social: true, playlist: true, stats: true, packs: true, licenses: ['premium', 'unlimited', 'exclusive'], auddMes: 150, forense: true,
+    // Sample Packs de productores: en pausa («Próximamente»), así no hace falta pagar el almacenamiento todavía
+    social: true, playlist: true, stats: true, packs: false, packsProximamente: true, licenses: ['premium', 'unlimited', 'exclusive'], auddMes: 150, forense: true,
     maxSegundos: 1200,
   },
 };
@@ -3203,7 +3366,11 @@ function planPriceCup(planKey) {
 
 function ultimaSolicitudPlan(producerId) {
   const r = db.prepare('SELECT id, plan, months, amount_cup, currency, status, reject_reason, paid_until_result, created_at, resolved_at FROM plan_requests WHERE producer_id = ? ORDER BY id DESC LIMIT 1').get(producerId);
-  return r || null;
+  if (!r) return null;
+  // si después de responder ese pago el admin cambió el plan a mano, el aviso viejo ya no aplica
+  const p = db.prepare('SELECT plan_set_at FROM producers WHERE id = ?').get(producerId);
+  if (r.status !== 'pending' && p && p.plan_set_at && r.resolved_at && p.plan_set_at >= r.resolved_at) return null;
+  return r;
 }
 
 function sumarMeses(fechaISO, meses) {
@@ -3230,10 +3397,9 @@ function quitarMarcaDePreviews(producerId) {
   const pistas = db.prepare('SELECT id, master_filename FROM tracks WHERE producer_id = ? AND preview_marca = 1').all(producerId);
   for (const t of pistas) {
     conCupoAudio(async () => {
-      const master = path.join(UPLOADS_MASTERS, t.master_filename || '-');
-      if (!fs.existsSync(master)) return;
+      if (!archivoExiste(t.master_filename)) return;
       const nuevo = `${crypto.randomUUID()}.mp3`;
-      await transcodificarMp3(master, path.join(UPLOADS_AUDIO, nuevo), 192);
+      await conMaestro(t.master_filename, (master) => transcodificarMp3(master, path.join(UPLOADS_AUDIO, nuevo), 192));
       const actual = db.prepare('SELECT audio_filename FROM tracks WHERE id = ?').get(t.id);
       if (!actual) { try { fs.unlinkSync(path.join(UPLOADS_AUDIO, nuevo)); } catch { /* nada */ } return; }
       db.prepare('UPDATE tracks SET audio_filename = ?, preview_marca = 0 WHERE id = ?').run(nuevo, t.id);
@@ -3631,10 +3797,6 @@ function estadoLicenciaVenta(t, tipo, o) {
   if (e === 'sin_verificar') return tipo === 'basic' ? 'suplemento' : null;
   return 'verificando';
 }
-function archivoExiste(f) {
-  if (!f) return false;
-  try { return fs.statSync(path.join(UPLOADS_MASTERS, f)).isFile(); } catch { return false; }
-}
 function basicaUnicaVendida(trackId) {
   return Boolean(db.prepare("SELECT 1 FROM orders WHERE track_id = ? AND license_type = 'basic' AND terms_v >= 2 AND status = 'approved'").get(trackId));
 }
@@ -3671,15 +3833,15 @@ async function generarDemo(id) {
   const fuente = [t.master_filename, t.mp3_filename].find(archivoExiste);
   if (!fuente) return;
   const mp3 = `demo-${crypto.randomUUID()}.mp3`;
-  await cortarDemo(path.join(UPLOADS_MASTERS, fuente), path.join(UPLOADS_MASTERS, mp3), 60);
+  await conMaestro(fuente, (src) => cortarDemo(src, path.join(UPLOADS_MASTERS, mp3), 60));
   let wav = '';
   if (archivoExiste(t.tagwav_filename)) {
     wav = `demo-${crypto.randomUUID()}.wav`;
-    try { await cortarDemo(path.join(UPLOADS_MASTERS, t.tagwav_filename), path.join(UPLOADS_MASTERS, wav), 60); }
+    try { await conMaestro(t.tagwav_filename, (src) => cortarDemo(src, path.join(UPLOADS_MASTERS, wav), 60)); }
     catch (e) { wav = ''; console.error(`Demo WAV de la pista ${id}:`, e.message); }
   }
   db.prepare('UPDATE tracks SET demo_filename = ?, demo_wav_filename = ? WHERE id = ?').run(mp3, wav, id);
-  for (const viejo of [t.demo_filename, t.demo_wav_filename]) { if (viejo) fs.promises.unlink(path.join(UPLOADS_MASTERS, viejo)).catch(() => {}); }
+  for (const viejo of [t.demo_filename, t.demo_wav_filename]) { if (viejo) borrarMaestro(viejo); }
 }
 function completarDemos() {
   for (const r of db.prepare("SELECT DISTINCT l.track_id as id FROM track_licenses l JOIN tracks t ON t.id = l.track_id WHERE l.license_type = 'practice' AND COALESCE(t.demo_filename, '') = '' LIMIT 20").all()) programarDemo(r.id);
@@ -3700,10 +3862,10 @@ async function prepararEntregaPractica(orderId) {
     for (const [f, ext] of [[o.demo_filename, '.mp3'], [o.demo_wav_filename, '.wav']]) {
       if (!archivoExiste(f)) continue;
       const destino = path.join(UPLOADS_MASTERS, nombreEntrega(o.id, ext));
-      if (fs.existsSync(destino)) continue;
+      if (archivoExiste(nombreEntrega(o.id, ext))) continue;
       const tmp = destino + '.tmp' + ext;
       try {
-        await marcarEntrega(path.join(UPLOADS_MASTERS, f), tmp, { comentario, titulo: `${o.title} (demo)`, artista: o.producer_name || nombreAdmin() });
+        await conMaestro(f, (src) => marcarEntrega(src, tmp, { comentario, titulo: `${o.title} (demo)`, artista: o.producer_name || nombreAdmin() }));
         fs.renameSync(tmp, destino);
       } catch (e) { try { fs.unlinkSync(tmp); } catch { /* nada */ } console.error(`Marca de la entrega ${o.id}:`, e.message); }
     }
@@ -3743,10 +3905,10 @@ async function generarForense(orderId) {
   const pw = path.join(UPLOADS_MASTERS, wav), pm = path.join(UPLOADS_MASTERS, mp3);
   try {
     await conCupoAudio(async () => {
-      await forense.marcar(path.join(UPLOADS_MASTERS, o.wav_filename), pw, { secreto: secretoForense(), codigo: codigoForense(o.id) });
+      await conMaestro(o.wav_filename, (src) => forense.marcar(src, pw, { secreto: secretoForense(), codigo: codigoForense(o.id) }));
       await transcodificarMp3(pw, pm, 320);
     });
-    db.prepare("UPDATE orders SET forense = 'lista', forense_wav = ?, forense_mp3 = ? WHERE id = ?").run(wav, mp3, o.id);
+    db.prepare("UPDATE orders SET forense = 'lista', forense_wav = ?, forense_mp3 = ?, forense_at = datetime('now') WHERE id = ?").run(wav, mp3, o.id);
   } catch (e) {
     for (const p of [pw, pm]) fs.promises.unlink(p).catch(() => {});
     // si no se pudo marcar, se entrega el archivo normal para no dejar al artista sin su compra
@@ -3754,6 +3916,35 @@ async function generarForense(orderId) {
     throw e;
   }
 }
+// Las copias marcadas pesan como el beat entero: si nadie las bajó en 30 días se archivan (se borran)
+// y, si el comprador vuelve, se crean otra vez con la misma marca (sale siempre del número de pedido).
+const DIAS_COPIA_FORENSE = Math.max(1, Number(process.env.ZB_DIAS_COPIA_FORENSE) || 30);
+// pedidos cuya marca vale para rastrear (aunque la copia esté archivada o rehaciéndose)
+const FORENSE_CON_MARCA = "('lista', 'archivada', 'pendiente')";
+function rehacerForense(orderId) {
+  // sin el WAV original a mano (p. ej. el bucket se desconectó) no se intenta: así no termina en «error»
+  // y entregando el original sin marca; queda archivada y se rehace cuando el archivo vuelva a estar.
+  const t = db.prepare('SELECT t.wav_filename FROM orders o JOIN tracks t ON t.id = o.track_id WHERE o.id = ?').get(orderId);
+  if (!t || !archivoExiste(t.wav_filename)) return;
+  const r = db.prepare("UPDATE orders SET forense = 'pendiente', forense_wav = '', forense_mp3 = '' WHERE id = ? AND forense IN ('lista', 'archivada')").run(orderId);
+  if (r.changes) programarForense(orderId);
+}
+function archivarCopiasForenses() {
+  const dias = `-${DIAS_COPIA_FORENSE} days`;
+  const viejas = db.prepare(`SELECT id, forense_wav, forense_mp3 FROM orders o WHERE forense = 'lista'
+      AND COALESCE(NULLIF(forense_at, ''), NULLIF(approved_at, ''), created_at) < datetime('now', ?)
+      AND NOT EXISTS (SELECT 1 FROM descargas d WHERE d.order_id = o.id AND d.created_at >= datetime('now', ?))
+      LIMIT 200`).all(dias, dias);
+  for (const o of viejas) {
+    db.prepare("UPDATE orders SET forense = 'archivada', forense_wav = '', forense_mp3 = '' WHERE id = ? AND forense = 'lista'").run(o.id);
+    borrarMaestro(o.forense_wav);
+    borrarMaestro(o.forense_mp3);
+  }
+  if (viejas.length) console.log(`Copias con marca forense archivadas: ${viejas.length}`);
+}
+setTimeout(archivarCopiasForenses, 60 * 1000).unref();
+setInterval(archivarCopiasForenses, Math.max(5, Number(process.env.ZB_ARCHIVAR_CADA_SEG) || 6 * 3600) * 1000).unref();
+
 // al arrancar: lo que quedó a medias
 function completarForense() {
   for (const r of db.prepare("SELECT id FROM orders WHERE forense = 'pendiente' AND status = 'approved' LIMIT 50").all()) programarForense(r.id);
@@ -3768,7 +3959,7 @@ async function rastrearArchivo(archivo, trackId) {
     const h = await originalidad.huella(archivo);
     let mejor = null;
     for (const r of db.prepare(`SELECT DISTINCT o.track_id, g.huella FROM orders o JOIN originalidad g ON g.track_id = o.track_id
-      WHERE o.forense = 'lista' AND g.huella != ''`).all()) {
+      WHERE o.forense IN ${FORENSE_CON_MARCA} AND g.huella != ''`).all()) {
       const c = originalidad.comparar(h, originalidad.deTexto(r.huella));
       if (!mejor || c.similitud > mejor.similitud) mejor = { trackId: r.track_id, similitud: c.similitud };
     }
@@ -3777,11 +3968,11 @@ async function rastrearArchivo(archivo, trackId) {
     similitud = Math.round(mejor.similitud * 100);
   }
   if (!track) return { encontrado: false, motivo: 'Beat no encontrado.' };
-  const pedidos = db.prepare("SELECT id, control_code, buyer_name, buyer_phone, license_type, terms_v, certificate_id, approved_at, created_at FROM orders WHERE track_id = ? AND forense = 'lista'").all(track.id);
+  const pedidos = db.prepare(`SELECT id, control_code, buyer_name, buyer_phone, license_type, terms_v, certificate_id, approved_at, created_at FROM orders WHERE track_id = ? AND forense IN ${FORENSE_CON_MARCA}`).all(track.id);
   const beat = { id: track.id, titulo: track.title, similitud };
   if (!pedidos.length) return { encontrado: false, beat, motivo: 'Este beat no tiene ventas con marca forense.' };
   if (!archivoExiste(track.wav_filename)) return { encontrado: false, beat, motivo: 'Falta el WAV original del beat para comparar.' };
-  const r = await conCupoAudio(() => forense.detectar(path.join(UPLOADS_MASTERS, track.wav_filename), archivo, { secreto: secretoForense(), codigos: pedidos.map(p => codigoForense(p.id)) }));
+  const r = await conCupoAudio(() => conMaestro(track.wav_filename, (original) => forense.detectar(original, archivo, { secreto: secretoForense(), codigos: pedidos.map(p => codigoForense(p.id)) })));
   const porCodigo = new Map(pedidos.map(p => [codigoForense(p.id), p]));
   const fila = (x) => { const p = porCodigo.get(x.codigo); return { pedido: codigoPedido(p), comprador: p.buyer_name, telefono: p.buyer_phone, licencia: etiquetaLicencia(p.license_type, p.terms_v), certificado: p.certificate_id, fecha: normalizarFecha(p.approved_at || p.created_at), confianza: Math.round(x.z) }; };
   return { encontrado: Boolean(r.encontrado), beat, pedido: r.encontrado ? fila(r.resultados[0]) : null,
@@ -3810,16 +4001,16 @@ route('POST', '/api/admin/forense/rastrear', async (req, res) => {
 // Si un beat que se sube coincide con otro vendido con marca forense, se lee la marca sola:
 // así el administrador ve de qué compra salió la copia que intentan volver a vender.
 async function revisarFiltracion(trackId, internas) {
-  const vendidos = internas.filter(x => db.prepare("SELECT 1 FROM orders WHERE track_id = ? AND forense = 'lista'").get(x.trackId));
+  const vendidos = internas.filter(x => db.prepare(`SELECT 1 FROM orders WHERE track_id = ? AND forense IN ${FORENSE_CON_MARCA}`).get(x.trackId));
   if (!vendidos.length) return;
   const t = db.prepare('SELECT * FROM tracks WHERE id = ?').get(trackId);
   if (!t) return;
   // se prueba con cada archivo que subió (el audio principal y el WAV pueden venir de copias distintas)
-  const archivos = [...new Set([t.master_filename, t.mp3_filename, t.wav_filename].filter(Boolean))].map(f => path.join(UPLOADS_MASTERS, f)).filter(f => fs.existsSync(f));
+  const archivos = [...new Set([t.master_filename, t.mp3_filename, t.wav_filename].filter(Boolean))].filter(archivoExiste);
   for (const v of vendidos) {
-    for (const archivo of archivos) {
+    for (const nombre of archivos) {
       try {
-        const r = await rastrearArchivo(archivo, v.trackId);
+        const r = await conMaestro(nombre, (archivo) => rastrearArchivo(archivo, v.trackId));
         if (r.encontrado) {
           db.prepare('UPDATE originalidad SET forense_json = ? WHERE track_id = ?').run(JSON.stringify({ beatOriginal: r.beat, pedido: r.pedido }), trackId);
           return;
@@ -3874,7 +4065,7 @@ async function guardarWavSinTag(track, up) {
     db.prepare('UPDATE tracks SET mon_mp3_filename = ? WHERE id = ?').run(mp3, track.id);
   } catch (e) { console.error('MP3 sin tag:', e.message); }
   if (viejo) {
-    for (const f of [viejo.wav_filename, viejo.mon_mp3_filename]) if (f && f !== nombre) fs.promises.unlink(path.join(UPLOADS_MASTERS, f)).catch(() => {});
+    for (const f of [viejo.wav_filename, viejo.mon_mp3_filename]) if (f && f !== nombre) borrarMaestro(f);
   }
 }
 
@@ -3993,8 +4184,12 @@ async function regenerarMuestra(trackId, inicio) {
   const k = t && t.producer_id ? planClave(producerFull(t.producer_id)) : '';
   const plan = PRODUCER_PLANS[k];
   if (!plan || !plan.muestraSegundos) return null;
-  const fuente = [t.wav_filename, t.master_filename, t.mp3_filename].filter(Boolean).map(f => path.join(UPLOADS_MASTERS, f)).find(f => fs.existsSync(f));
-  if (!fuente) throw new Error('no se encontró el audio');
+  const nombreFuente = [t.wav_filename, t.master_filename, t.mp3_filename].find(archivoExiste);
+  if (!nombreFuente) throw new Error('no se encontró el audio');
+  return conMaestro(nombreFuente, (fuente) => regenerarMuestraDesde(t, plan, fuente, inicio));
+}
+async function regenerarMuestraDesde(t, plan, fuente, inicio) {
+  const trackId = t.id;
   let dur = 0;
   try { dur = await getDurationSeconds(fuente); } catch { dur = Number(t.duration_seconds) || 0; }
   const st = Math.min(Math.max(0, Math.round(Number(inicio) || 0)), Math.max(0, Math.floor(dur - plan.muestraSegundos)));
@@ -4261,6 +4456,16 @@ function migrarFreeV3() {
   (async () => { for (const id of muestras) { try { await regenerarMuestra(id, 0); } catch (e) { console.error(`Muestra de la pista ${id}:`, e.message); } } })();
 }
 
+// ---- Migración única: quien ya tiene un plan pagado vigente no arrastra el aviso de un pago rechazado antes ----
+function migrarRechazoViejo() {
+  if (db.prepare("SELECT 1 FROM app_secrets WHERE clave = 'mig_rechazo_viejo'").get()) return;
+  const r = db.prepare(`UPDATE producers SET plan_set_at = datetime('now')
+    WHERE plan != 'free' AND plan_paid_until >= date('now')
+      AND (SELECT status FROM plan_requests q WHERE q.producer_id = producers.id ORDER BY q.id DESC LIMIT 1) = 'rejected'`).run();
+  db.prepare("INSERT INTO app_secrets (clave, valor) VALUES ('mig_rechazo_viejo', datetime('now'))").run();
+  if (r.changes) console.log(`Planes activados a mano: se limpió el aviso de rechazo de ${r.changes}`);
+}
+
 // ---- Migración única: las pistas del administrador dejan de vender la Básica ----
 function migrarAdminSinBasica() {
   if (db.prepare("SELECT 1 FROM app_secrets WHERE clave = 'mig_admin_sin_basica'").get()) return;
@@ -4287,7 +4492,7 @@ function programarOriginalidad(trackId) {
     .then(() => { originalidadEnCola.delete(trackId); });
 }
 const UMBRAL_MISMO_AUDIO = 0.85;
-const NOTA_SIN_AUDD = 'Solo se comparó dentro de la tienda (AudD no respondió: ';
+const NOTA_SIN_AUDD = 'Solo se comparó dentro de la tienda: AudD no respondió. Se vuelve a intentar solo.';
 // por qué AudD no está respondiendo (token vencido, sin suscripción…), si es el caso
 function fallaAudd() {
   try { const f = db.prepare("SELECT valor FROM app_secrets WHERE clave = 'audd_falla'").get(); return f ? JSON.parse(f.valor) : null; } catch { return null; }
@@ -4301,10 +4506,13 @@ async function verificarOriginalidadPista(id) {
   if (!t) { db.prepare('DELETE FROM originalidad WHERE track_id = ?').run(id); return; }
   // Free: primero el WAV sin tag, que es lo que se entrega y lo que tiene que pasar AudD
   const wavPrimero = t.producer_id && archivoExiste(t.wav_filename) && planClave(producerFull(t.producer_id)) === 'free';
-  const candidatos = [wavPrimero ? t.wav_filename : '', t.master_filename, t.mp3_filename].filter(Boolean).map(f => path.join(UPLOADS_MASTERS, f));
-  candidatos.push(path.join(UPLOADS_AUDIO, t.audio_filename || '-'));
-  const archivo = candidatos.find(f => fs.existsSync(f));
-  if (!archivo) throw new Error('no se encontró el audio para verificar');
+  const nombre = [wavPrimero ? t.wav_filename : '', t.master_filename, t.mp3_filename].filter(Boolean).find(archivoExiste);
+  if (nombre) return conMaestro(nombre, (archivo) => verificarOriginalidadCon(id, t, archivo));
+  const preview = path.join(UPLOADS_AUDIO, t.audio_filename || '-');
+  if (!fs.existsSync(preview)) throw new Error('no se encontró el audio para verificar');
+  return verificarOriginalidadCon(id, t, preview);
+}
+async function verificarOriginalidadCon(id, t, archivo) {
   if (!t.onda) {
     try { db.prepare('UPDATE tracks SET onda = ? WHERE id = ?').run((await onda.calcular(archivo)) || '-', id); }
     catch (e) { console.error(`Onda de la pista ${id}:`, e.message); }
@@ -4351,7 +4559,9 @@ async function verificarOriginalidadPista(id) {
     } catch (e) {
       externas = [];
       const msg = String((e && e.message) || 'sin respuesta').slice(0, 240);
-      nota = NOTA_SIN_AUDD + msg + ')';
+      // el motivo técnico va al registro del servidor (para el desarrollador); el panel muestra un texto claro
+      console.error(`AudD no respondió (pista ${id}):`, msg);
+      nota = NOTA_SIN_AUDD;
       db.prepare("INSERT OR REPLACE INTO app_secrets (clave, valor) VALUES ('audd_falla', ?)").run(JSON.stringify({ msg, at: new Date().toISOString() }));
     }
   }
@@ -4427,11 +4637,13 @@ async function completarOndas() {
   ondasEnCurso = true;
   try {
     for (const t of db.prepare("SELECT id, master_filename, mp3_filename, audio_filename FROM tracks WHERE onda = '' OR onda IS NULL ORDER BY id DESC LIMIT 20").all()) {
-      const candidatos = [t.master_filename, t.mp3_filename].filter(Boolean).map(f => path.join(UPLOADS_MASTERS, f));
-      candidatos.push(path.join(UPLOADS_AUDIO, t.audio_filename || '-'));
-      const archivo = candidatos.find(f => fs.existsSync(f));
+      const nombre = [t.master_filename, t.mp3_filename].filter(Boolean).find(archivoExiste);
+      const preview = path.join(UPLOADS_AUDIO, t.audio_filename || '-');
       let o = '-';
-      if (archivo) { try { o = (await onda.calcular(archivo)) || '-'; } catch (e) { console.error(`Onda de la pista ${t.id}:`, e.message); } }
+      try {
+        if (nombre) o = (await conMaestro(nombre, (archivo) => onda.calcular(archivo))) || '-';
+        else if (fs.existsSync(preview)) o = (await onda.calcular(preview)) || '-';
+      } catch (e) { console.error(`Onda de la pista ${t.id}:`, e.message); }
       db.prepare('UPDATE tracks SET onda = ? WHERE id = ?').run(o, t.id);
     }
   } finally { ondasEnCurso = false; }
@@ -4549,12 +4761,14 @@ async function editarPack(req, res, track, { volverARevision, anotarCambios }) {
 }
 
 // --- productor (solo planes Pro y Studio)
+const MSG_PACKS_PROXIMAMENTE = 'Próximamente: estamos preparando el servidor para recibir Sample Packs. Te avisamos en cuanto puedas subirlos.';
+
 function productorConPacks(req, res) {
   const producer = getAuthedProducer(req);
   if (!producer) { sendJSON(res, 401, { error: 'No autorizado' }); return null; }
   const full = producerFull(producer.id);
   const plan = planEfectivo(full);
-  if (!plan.packs) { sendJSON(res, 403, { error: `Tu plan ${plan.label} no permite vender Sample Packs. Son del plan Studio.` }); return null; }
+  if (!plan.packs) { sendJSON(res, 403, { error: MSG_PACKS_PROXIMAMENTE }); return null; }
   return full;
 }
 
@@ -4563,7 +4777,7 @@ route('GET', '/api/producer/packs', (req, res) => {
   if (!producer) return sendJSON(res, 401, { error: 'No autorizado' });
   const plan = planEfectivo(producerFull(producer.id));
   const packs = db.prepare('SELECT * FROM tracks WHERE producer_id = ? AND is_pack = 1 ORDER BY created_at DESC').all(producer.id).map(t => packParaPanel(t));
-  sendJSON(res, 200, { permitido: Boolean(plan.packs), plan: plan.label, packs });
+  sendJSON(res, 200, { permitido: Boolean(plan.packs), proximamente: !plan.packs, plan: plan.label, packs });
 });
 
 route('POST', '/api/producer/packs', async (req, res) => {
@@ -5230,6 +5444,7 @@ function actualizarElToque({ forzar = null } = {}) {
       Object.assign(e, { tasas, ultimoOk: e.ultimoIntento, error: '', pendientes: r.pendientes });
     } catch (err) {
       e.error = String((err && err.message) || 'No se pudo consultar elTOQUE.').slice(0, 200);
+      console.error('elTOQUE:', e.error, err && err.status ? `(HTTP ${err.status})` : '');
     }
     guardarSecretoJson('eltoque_estado', e);
     return estadoElToque();
@@ -5431,7 +5646,7 @@ route('POST', '/api/admin/producers/:id/plan', async (req, res, params) => {
       }
     }
     const fecha = plan === 'free' ? '' : paidUntil;
-    db.prepare(`UPDATE producers SET plan = ?, plan_paid_until = ?,
+    db.prepare(`UPDATE producers SET plan = ?, plan_paid_until = ?, plan_set_at = datetime('now'),
                 active = CASE WHEN ? AND disabled_reason = 'plan_vencido' THEN 1 ELSE active END,
                 disabled_reason = CASE WHEN ? AND disabled_reason = 'plan_vencido' THEN '' ELSE disabled_reason END
                 WHERE id = ?`).run(plan, fecha, plan !== 'free' ? 1 : 0, plan !== 'free' ? 1 : 0, params.id);
@@ -6236,8 +6451,66 @@ route('GET', '/api/admin/orders-history', (req, res) => {
     WHERE o.status IN ('approved', 'rejected') AND COALESCE(o.pago_metodo, '') != 'gratis' ORDER BY COALESCE(NULLIF(o.approved_at, ''), NULLIF(o.rejected_at, ''), o.created_at) DESC, o.id DESC
     LIMIT 3000
   `).all();
+  // descargas de cada compra: cuántas, desde cuántas conexiones distintas y si llegó al tope
+  const usos = new Map(db.prepare(`SELECT order_id, COUNT(*) as n, COUNT(DISTINCT ip) as ips, MAX(c) as maximo FROM
+      (SELECT order_id, archivo, ip, COUNT(*) OVER (PARTITION BY order_id, archivo) as c FROM descargas) GROUP BY order_id`).all().map(r => [r.order_id, r]));
   const oc = clavesOcultas('admin:compras');
-  sendJSON(res, 200, { orders: orders.filter(o => !oc.has('orden:' + o.id)), ocultos: contarOcultas('admin:compras') });
+  sendJSON(res, 200, {
+    orders: orders.filter(o => !oc.has('orden:' + o.id)).map(o => {
+      const u = usos.get(o.id);
+      return { ...o, descargas: u ? { total: u.n, conexiones: u.ips, agotada: u.maximo >= descargasPermitidas(o), limite: descargasPermitidas(o) } : null };
+    }),
+    ocultos: contarOcultas('admin:compras'), limiteDescargas: LIMITE_DESCARGAS,
+  });
+});
+
+// ---- Panel: estado del almacenamiento (bucket y volumen) ----
+function pesoCarpeta(dir, filtro) {
+  let n = 0, bytes = 0;
+  let nombres = [];
+  try { nombres = fs.readdirSync(dir); } catch { return { archivos: 0, bytes: 0 }; }
+  for (const f of nombres) {
+    if (filtro && !filtro(f)) continue;
+    try { const st = fs.statSync(path.join(dir, f)); if (st.isFile()) { n++; bytes += st.size; } } catch { /* se borró recién */ }
+  }
+  return { archivos: n, bytes };
+}
+function estadoAlmacenamiento() {
+  const maestros = db.prepare('SELECT COUNT(*) as n, COALESCE(SUM(size), 0) as b FROM archivos_bucket').get();
+  const grandes = db.prepare("SELECT COUNT(*) as n, COALESCE(SUM(stems_size), 0) as b FROM tracks WHERE stems_remote != '' AND stems_remote IS NOT NULL").get();
+  const refs = maestrosReferenciados();
+  const stemsLocales = new Set(db.prepare("SELECT stems_filename f FROM tracks WHERE stems_filename != '' AND (stems_remote = '' OR stems_remote IS NULL)").all().map(r => r.f));
+  const pendientes = pesoCarpeta(UPLOADS_MASTERS, (f) => (refs.has(f) && !maestroRemoto(f)) || stemsLocales.has(f) || /^entrega-\d+-demo\./.test(f));
+  return {
+    activo: almacen.activo(),
+    enBucket: { archivos: maestros.n + grandes.n, bytes: Number(maestros.b) + Number(grandes.b) },
+    pendientes,
+    volumen: { libres: espacioLibre(), previews: pesoCarpeta(UPLOADS_AUDIO).bytes, maestros: pesoCarpeta(UPLOADS_MASTERS).bytes },
+    subiendo: estadoBucket.subiendo, ultimaRevision: estadoBucket.ultimaRevision, ultimoError: estadoBucket.ultimoError,
+    cadaMinutos: Math.round(CADA_SUBIDA_MS / 60000),
+  };
+}
+route('GET', '/api/admin/almacenamiento', (req, res) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  sendJSON(res, 200, estadoAlmacenamiento());
+});
+route('POST', '/api/admin/almacenamiento/probar', async (req, res) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  if (!rateLimit(req, 'almacen-probar', 10, 60 * 1000)) return sendJSON(res, 429, { error: 'Espera un minuto.' });
+  const r = await almacen.probar();
+  // si conecta, de una vez se revisa lo que falta subir
+  if (r.ok) { subirMaestrosAlBucket().catch((e) => console.error('Bucket:', e.message)); revisarArchivosPendientes(); }
+  sendJSON(res, 200, r);
+});
+
+// El comprador llegó al tope de descargas (cambió de teléfono, se le perdió el archivo…): el admin le da otra tanda
+route('POST', '/api/admin/orders/:id/mas-descargas', (req, res, params) => {
+  if (!isAdminAuthed(req)) return sendJSON(res, 401, { error: 'No autorizado' });
+  const o = db.prepare("SELECT id, status, descargas_extra FROM orders WHERE id = ?").get(params.id);
+  if (!o) return sendJSON(res, 404, { error: 'Pedido no encontrado' });
+  if (o.status !== 'approved') return sendJSON(res, 409, { error: 'Solo las compras aprobadas tienen descargas' });
+  db.prepare('UPDATE orders SET descargas_extra = descargas_extra + ? WHERE id = ?').run(LIMITE_DESCARGAS, o.id);
+  sendJSON(res, 200, { ok: true, extra: (Number(o.descargas_extra) || 0) + LIMITE_DESCARGAS });
 });
 
 route('POST', '/api/admin/producers/:id/toggle-exclusive', (req, res, params) => {
@@ -6324,8 +6597,14 @@ route('GET', '/api/admin/tracks/:id/file', (req, res, params, query) => {
     return res.end();
   }
   const ext = path.extname(nombre).toLowerCase();
+  const nombreBajada = `${t.title} - ${String(query.get('f') || 'master').toUpperCase()}${ext}`;
+  const info = infoMaestro(nombre);
+  if (info && info.remoto) {
+    res.writeHead(302, { Location: almacen.enlaceFirmado(info.remoto, { nombre: nombreBajada, segundos: 3600 }), 'Cache-Control': 'no-store' });
+    return res.end();
+  }
   enviarArchivo(req, res, path.join(UPLOADS_MASTERS, nombre), contentTypeDescarga(ext), {
-    'Content-Disposition': dispositionAdjunto(`${t.title} - ${String(query.get('f') || 'master').toUpperCase()}${ext}`),
+    'Content-Disposition': dispositionAdjunto(nombreBajada),
     'Cache-Control': 'no-store',
   });
 });
@@ -7134,6 +7413,7 @@ migrarLicenciasV2();
 migrarPracticaGratis();
 migrarFreeV3();
 migrarAdminSinBasica();
+migrarRechazoViejo();
 
 server.listen(PORT, () => {
   console.log(`Servidor corriendo en http://localhost:${PORT}`);

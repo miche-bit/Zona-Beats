@@ -255,6 +255,8 @@ if (!producerCols.includes('exclusive_enabled')) {
 if (!producerCols.includes('approved')) db.exec('ALTER TABLE producers ADD COLUMN approved INTEGER DEFAULT 0');
 if (!producerCols.includes('plan')) db.exec("ALTER TABLE producers ADD COLUMN plan TEXT DEFAULT 'free'");
 if (!producerCols.includes('plan_paid_until')) db.exec("ALTER TABLE producers ADD COLUMN plan_paid_until TEXT DEFAULT ''");
+// cuándo el admin cambió el plan a mano: deja atrás los avisos de pagos anteriores (p. ej. un rechazo)
+if (!producerCols.includes('plan_set_at')) db.exec("ALTER TABLE producers ADD COLUMN plan_set_at TEXT DEFAULT ''");
 if (!producerCols.includes('avatar_filename')) db.exec("ALTER TABLE producers ADD COLUMN avatar_filename TEXT DEFAULT ''");
 if (!producerCols.includes('bio')) db.exec("ALTER TABLE producers ADD COLUMN bio TEXT DEFAULT ''");
 if (!producerCols.includes('social_links_json')) db.exec("ALTER TABLE producers ADD COLUMN social_links_json TEXT DEFAULT '[]'");
@@ -729,5 +731,26 @@ db.exec('CREATE INDEX IF NOT EXISTS idx_verif_track ON verificaciones (track_id)
 db.exec('CREATE INDEX IF NOT EXISTS idx_verif_productor ON verificaciones (producer_id)');
 
 agregarCol('hot_requests', 'descuento_pct', 'REAL DEFAULT 0');          // descuento del plan aplicado a ese Hot
+
+// Archivos maestros (MP3 320, WAV, copias de entrega) que ya están en el bucket y no en el volumen
+db.exec(`CREATE TABLE IF NOT EXISTS archivos_bucket (
+  nombre TEXT PRIMARY KEY,
+  clave TEXT NOT NULL,
+  size INTEGER DEFAULT 0,
+  subido_at TEXT DEFAULT (datetime('now'))
+)`);
+
+// Cada vez que un comprador pide un archivo de su compra (para el límite de descargas y para ver abusos)
+db.exec(`CREATE TABLE IF NOT EXISTS descargas (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id INTEGER NOT NULL,
+  archivo TEXT NOT NULL,
+  ip TEXT DEFAULT '',
+  agente TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now'))
+)`);
+db.exec('CREATE INDEX IF NOT EXISTS idx_descargas_pedido ON descargas (order_id, archivo)');
+agregarCol('orders', 'descargas_extra', 'INTEGER DEFAULT 0');       // descargas que el admin volvió a habilitar
+agregarCol('orders', 'forense_at', "TEXT DEFAULT ''");              // cuándo quedaron listas las copias con marca forense
 
 module.exports = db;

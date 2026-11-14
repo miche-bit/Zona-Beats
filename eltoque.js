@@ -35,7 +35,7 @@ async function pedirTasas(token) {
   } finally { clearTimeout(reloj); }
   if (res.status === 401 || res.status === 403 || res.status === 422) throw new ErrorToque('elTOQUE no aceptó el token: revisa que esté bien copiado o pide uno nuevo.', res.status);
   if (res.status === 429) throw new ErrorToque('elTOQUE pidió esperar (demasiadas consultas). Se reintenta en la próxima hora.', 429);
-  if (!res.ok) throw new ErrorToque('elTOQUE respondió con un error (' + res.status + ').', res.status);
+  if (!res.ok) throw new ErrorToque('elTOQUE tuvo un problema y no envió las tasas. Se reintenta en la próxima hora.', res.status);
   const d = await res.json().catch(() => null);
   const t = d && d.tasas;
   if (!t || typeof t !== 'object' || Array.isArray(t)) throw new ErrorToque('elTOQUE respondió algo inesperado (sin tasas).');

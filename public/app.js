@@ -1695,10 +1695,18 @@
           (d.preparando && !archivos.length
             ? '<span class="purchase-meta">Preparando tus archivos con la marca de tu licencia… Vuelve a abrir «Mis compras» en uno o dos minutos.</span>'
             : archivos.length
-            ? archivos.map((f, i) => '<a class="' + (i === 0 ? 'purchase-dl' : 'purchase-pdf') + '" href="' + escapeHtml(f.url) + '" download>Descargar ' + escapeHtml(f.label || f.f) + pesoTxt(f.size) + '</a>').join('')
+            ? archivos.map((f, i) => (typeof f.restantes === 'number' && f.restantes <= 0
+                ? '<span class="purchase-agotado">' + escapeHtml(f.label || f.f) + ': ya usaste todas tus descargas</span>'
+                : '<a class="' + (i === 0 ? 'purchase-dl' : 'purchase-pdf') + '" href="' + escapeHtml(f.url) + '" download>Descargar ' + escapeHtml(f.label || f.f) + pesoTxt(f.size) + '</a>')).join('')
             : '<span class="purchase-meta">Recibirás tus archivos por WhatsApp.</span>') +
           (d.pdfUrl ? '<a class="purchase-pdf" href="' + escapeHtml(d.pdfUrl) + '" target="_blank" rel="noopener">Licencia en PDF</a>' : '') +
           '</div>' +
+          (archivos.length && d.limiteDescargas
+            ? '<span class="purchase-meta">Puedes descargar cada archivo hasta ' + d.limiteDescargas + ' veces' +
+              (archivos.some(f => f.restantes < d.limiteDescargas) ? ' (te quedan ' + archivos.map(f => escapeHtml(f.label || f.f) + ': ' + Math.max(0, f.restantes)).join(' · ') + ')' : '') +
+              '. Si se corta, vuelve a tocar «Descargar»; un gestor de descargas puede retomarla.' +
+              (archivos.some(f => f.restantes <= 0) ? ' Para descargar otra vez, escríbele al vendedor por WhatsApp.' : '') + '</span>'
+            : '') +
           ((archivos.length > 1 || archivos.some(f => f.f === 'pack')) ? '<span class="purchase-meta">Para WAV, STEMS y packs se recomienda una conexión estable.</span>' : '');
       }
       // reclamo: si pasó el plazo sin aprobar, o si rechazaron el pago

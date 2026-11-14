@@ -62,7 +62,7 @@ function firmar(metodo, key, consulta, hashCuerpo, extra = {}) {
   const firma = hmac(claveFirma(dia), ['AWS4-HMAC-SHA256', amz, alcance, sha256(canon)].join('\n')).toString('hex');
   cab.Authorization = `AWS4-HMAC-SHA256 Credential=${CFG.accessKey}/${alcance}, SignedHeaders=${nombres.join(';')}, Signature=${firma}`;
   const q = consultaCanonica(consulta);
-  return { d, cab, ruta: d.ruta + (q ? '?' + q : '') };
+  return { d, cab, ruta: d.ruta + (q ? '?' + q : ''), canon };
 }
 
 function pedir(metodo, key, consulta, { cuerpo = null, flujo = null, largo = null, hashCuerpo, extra = {} } = {}) {
@@ -129,6 +129,64 @@ async function subirArchivo(ruta, key, { tipo = 'application/octet-stream', alAv
   }
 }
 
+// Baja un objeto a un archivo del disco (para procesarlo: marca forense, AudD, muestras…).
+// Escribe primero en «.parcial» y renombra al final: nunca queda un archivo a medias con el nombre bueno.
+function bajarArchivo(key, ruta) {
+  if (!activo()) return Promise.reject(new Error('Almacenamiento externo no configurado'));
+  const una = () => new Promise((resolve, reject) => {
+    const { d, cab, ruta: rutaHttp } = firmar('GET', key, {}, sha256(''));
+    const lib = d.protocolo === 'http:' ? http : https;
+    const [nombreHost, puerto] = d.host.split(':');
+    const parcial = ruta + '.parcial';
+    const req = lib.request({ method: 'GET', host: nombreHost, port: puerto || undefined, path: rutaHttp, headers: cab, timeout: 10 * 60 * 1000 }, (res) => {
+      if (res.statusCode !== 200) {
+        const trozos = [];
+        res.on('data', (c) => trozos.push(c));
+        res.on('end', () => reject(Object.assign(new Error(`Almacenamiento respondió ${res.statusCode}: ${Buffer.concat(trozos).toString('utf8').slice(0, 300)}`), { status: res.statusCode })));
+        return;
+      }
+      const esperado = Number(res.headers['content-length']);
+      const out = fs.createWriteStream(parcial);
+      res.on('error', (e) => out.destroy(e));
+      out.on('error', (e) => { fs.promises.unlink(parcial).catch(() => {}); reject(e); });
+      out.on('finish', () => {
+        try {
+          const tam = fs.statSync(parcial).size;
+          if (Number.isFinite(esperado) && tam !== esperado) throw new Error(`descarga incompleta (${tam} de ${esperado} bytes)`);
+          fs.renameSync(parcial, ruta);
+          resolve(tam);
+        } catch (e) { fs.promises.unlink(parcial).catch(() => {}); reject(e); }
+      });
+      res.pipe(out);
+    });
+    req.on('timeout', () => req.destroy(new Error('El almacenamiento tardó demasiado en responder')));
+    req.on('error', reject);
+    req.end();
+  });
+  return conReintentos(una, 3);
+}
+
+// Comprueba que las credenciales funcionan: sube, lee y borra un archivo diminuto.
+async function probar() {
+  if (!activo()) return { ok: false, error: 'Faltan las variables del bucket (S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY).' };
+  const key = `_prueba/conexion-${Date.now()}.txt`;
+  const t0 = Date.now();
+  try {
+    const cuerpo = 'zona-beats: prueba de conexión';
+    await pedir('PUT', key, {}, { cuerpo, extra: { 'content-type': 'text/plain; charset=utf-8' } });
+    const n = await tamano(key);
+    await pedir('DELETE', key, {});
+    if (n !== Buffer.byteLength(cuerpo)) return { ok: false, error: 'El bucket guardó el archivo de prueba con otro tamaño.' };
+    return { ok: true, ms: Date.now() - t0 };
+  } catch (e) {
+    const s = e.status;
+    const pista = s === 403 ? ' Revisa S3_ACCESS_KEY_ID y S3_SECRET_ACCESS_KEY.'
+      : s === 404 ? ' Revisa S3_BUCKET (usa la variable BUCKET del bucket, no su nombre visible) y S3_PATH_STYLE.'
+      : !s ? ' Revisa S3_ENDPOINT.' : '';
+    return { ok: false, error: String(e.message || e).slice(0, 200) + pista };
+  }
+}
+
 async function tamano(key) {
   const r = await pedir('HEAD', key, {});
   return Number(r.headers['content-length']) || 0;
@@ -160,4 +218,4 @@ function enlaceFirmado(key, { segundos = 6 * 24 * 3600, nombre } = {}) {
   return `${d.protocolo}//${d.host}${d.ruta}?${consultaCanonica(q)}&X-Amz-Signature=${firma}`;
 }
 
-module.exports = { activo, subirArchivo, tamano, borrar, enlaceFirmado, CFG_PUBLICA: () => ({ activo: activo(), endpoint: CFG.endpoint, bucket: CFG.bucket ? CFG.bucket.slice(0, 4) + '…' : '' }) };
+module.exports = { activo, subirArchivo, bajarArchivo, probar, tamano, borrar, enlaceFirmado, _prueba: { firmar }, CFG_PUBLICA: () => ({ activo: activo(), endpoint: CFG.endpoint, bucket: CFG.bucket ? CFG.bucket.slice(0, 4) + '…' : '' }) };

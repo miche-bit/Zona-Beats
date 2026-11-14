@@ -230,6 +230,7 @@
     loadDenuncias();
     loadReclamosCid();
     loadResenasAdmin();
+    cargarAlmacen();
     loadConfianzaAdmin();
     loadOrigEstado();
     loadCoincidencias();
@@ -792,7 +793,7 @@
   function lineaOrigAdmin(o) {
     if (!o) return '';
     if (o.estado === 'pendiente') { if (!origTracksTimer) origTracksTimer = setTimeout(() => { origTracksTimer = null; if (document.visibilityState === 'visible') loadTracks(); }, 8000); return '<div class="m orig-mini proc">Verificando originalidad…</div>'; }
-    if (o.estado === 'error') return '<div class="m orig-mini warn">La verificación de originalidad falló' + (o.error ? ': ' + escapeHtml(o.error) : '') + '</div>';
+    if (o.estado === 'error') return '<div class="m orig-mini warn">La verificación de originalidad falló: ' + escapeHtml(errorUsuario(o.error)) + '</div>';
     if (o.estado === 'limpio') return '<div class="m orig-mini ok">✓ Sin coincidencias' + (o.servicio ? ' (catálogo y ' + escapeHtml(o.servicio) + ')' : ' en el catálogo') + (o.error ? ' · ' + escapeHtml(notaOrig(o.error)) : '') + '</div>';
     const lista = (o.externas || []).map(x => '«' + escapeHtml(x.titulo) + '» de ' + escapeHtml(x.artista))
       .concat((o.internas || []).map(x => '«' + escapeHtml(x.titulo) + '» (' + x.similitud + ' %)'));
@@ -994,9 +995,9 @@
     document.getElementById('orig-estado').innerHTML =
       (d.servicioExterno ? 'Reconocimiento externo (AudD): <strong>configurado</strong>.' : 'Reconocimiento externo (AudD): <strong>sin configurar</strong>. Solo se compara con el catálogo de la tienda.') +
       '<br>Verificados: ' + d.limpio + ' sin coincidencias · ' + d.coincidencias + ' con coincidencias · ' + d.pendiente + ' en curso · ' + d.error + ' con error' +
-      (d.ultimoError ? '<br>Último error: ' + escapeHtml(d.ultimoError) : '') +
-      (d.fallaAudd ? '<br><span class="warn-txt"><strong>AudD no está respondiendo</strong> (' + escapeHtml(d.fallaAudd.msg) + '). ' +
-        (/token|subscription|trial|authoriz/i.test(d.fallaAudd.msg) ? 'Renueva la suscripción en dashboard.audd.io o quita AUDD_API_TOKEN en Railway. ' : '') +
+      (d.ultimoError ? '<br>Último error: ' + escapeHtml(errorUsuario(d.ultimoError)) : '') +
+      (d.fallaAudd ? '<br><span class="warn-txt"><strong>AudD no está respondiendo.</strong> ' +
+        (/token|subscription|trial|authoriz/i.test(d.fallaAudd.msg) ? 'Puede que la suscripción de AudD haya vencido: avísale al desarrollador. ' : '') +
         'Mientras tanto los beats se verifican solo dentro de la tienda' + (d.sinAudd ? ' (' + d.sinAudd + ' esperan la revisión de AudD)' : '') + ' y se pueden aprobar.</span>' : '');
     document.getElementById('orig-probar').hidden = !d.servicioExterno;
     pintarConsumoAudd(d.consumo, d.servicioExterno);
@@ -1108,7 +1109,7 @@
       tarjeta('Este mes', cup(d.mes.total), d.mes.ventas + ' venta' + (d.mes.ventas === 1 ? '' : 's') + ' · para ti ' + cup(d.mes.tuyo), 'highlight') +
       tarjeta(d.contadorDesde ? 'Desde el ' + fechaHora(d.contadorDesde) : 'Desde el inicio', cup(d.siempre.total), d.siempre.ventas + ' venta' + (d.siempre.ventas === 1 ? '' : 's') + ' · para ti ' + cup(d.siempre.tuyo)) +
       tarjeta('Debes a productores', cup(d.deudaProductores), 'ventas y bonos sin pagar', d.deudaProductores > 0 ? 'warn' : '') +
-      tarjeta('Espacio usado', gb(d.discoBytes || 0), 'audios, portadas y base de datos');
+      tarjeta('Espacio usado', gb(d.discoBytes || 0), 'audios, portadas y datos de la tienda');
     document.getElementById('reset-deshacer').hidden = !d.contadorDesde;
     const p = d.pendientes;
     const chips = [
@@ -1154,6 +1155,43 @@
     showToast('Listo: se borraron ' + d.ventas + ' ventas y ' + d.retiros + ' retiros. Todo quedó en 0.');
     loadSummary(true); loadOrders(); loadHistory(); loadProducers(); loadPayouts(); loadTracks();
   });
+
+  // Los errores técnicos (del sistema o de otros servicios) no se muestran tal cual: el admin ve un texto claro
+  function errorUsuario(m) {
+    const t = String(m || '').trim();
+    const tecnico = !t || /spawn|ENOENT|EACCES|ffmpeg|ffprobe|https?:|status|undefined|null|stack|exception|TypeError|Error:|\b[45]\d\d\b|[{}<>[\]=_\/\\]/i.test(t) || !/[áéíóúñ¿¡]|\b(el|la|los|las|de|del|al|no|se|para|por|con|que|un|una)\b/i.test(t);
+    return tecnico ? 'no se pudo analizar el audio. Se intenta de nuevo sola; si se repite, avísale al desarrollador.' : t;
+  }
+
+  // ---------- Almacenamiento (bucket y volumen) ----------
+  const fmtPeso = (b) => {
+    const n = Number(b) || 0;
+    if (n >= 1024 ** 3) return (Math.round(n / 1024 ** 3 * 10) / 10).toLocaleString('es') + ' GB';
+    if (n >= 1024 ** 2) return Math.round(n / 1024 ** 2).toLocaleString('es') + ' MB';
+    return n ? Math.max(1, Math.round(n / 1024)) + ' KB' : '0 MB';
+  };
+  async function cargarAlmacen() {
+    const estado = document.getElementById('alm-estado');
+    if (!estado) return;
+    const r = await fetch('/api/admin/almacenamiento');
+    if (!r.ok) { estado.textContent = 'No se pudo leer el estado del almacenamiento.'; return; }
+    const d = await r.json();
+    const grid = document.getElementById('alm-grid');
+    const det = document.getElementById('alm-detalle');
+    if (!d.activo) {
+      estado.textContent = 'La música se guarda en el servidor: quedan ' + fmtPeso(d.volumen.libres) + ' libres.';
+      grid.hidden = true;
+      det.textContent = '';
+      return;
+    }
+    estado.textContent = 'La música (MP3, WAV, STEMS y packs) se guarda en la nube. Las portadas y los previews de la tienda se quedan en el servidor.';
+    grid.hidden = false;
+    document.getElementById('alm-bucket').textContent = fmtPeso(d.enBucket.bytes);
+    document.getElementById('alm-pend').textContent = d.pendientes.archivos ? fmtPeso(d.pendientes.bytes) : 'Nada';
+    document.getElementById('alm-libre').textContent = fmtPeso(d.volumen.libres);
+    det.textContent = d.ultimoError ? 'Hubo un problema al guardar un archivo en la nube. Avísale al desarrollador.' : (d.pendientes.archivos ? 'Lo nuevo pasa a la nube solo, unos minutos después de subirse.' : '');
+  }
+  document.addEventListener('zb:subtab', (e) => { if (e.detail && e.detail.grupo === 'ajustes' && e.detail.sub === 'almacen') cargarAlmacen(); });
 
   async function loadOrders() {
     const res = await fetch('/api/admin/orders');
@@ -2180,7 +2218,7 @@
     const sinExterno = servicioExternoActivo ? '' : '<div class="orig-decl muted">Verificado solo contra el catálogo de la tienda.</div>';
     let cuerpo;
     if (o.estado === 'pendiente') cuerpo = '<div class="orig-estado proc">Verificando originalidad…</div>';
-    else if (o.estado === 'error') cuerpo = '<div class="orig-estado warn">La verificación falló' + (o.error ? ': ' + escapeHtml(o.error) : '') + '.</div>';
+    else if (o.estado === 'error') cuerpo = '<div class="orig-estado warn">La verificación falló: ' + escapeHtml(errorUsuario(o.error)) + '</div>';
     else if (o.estado === 'limpio') cuerpo = '<div class="orig-estado ok">✓ Sin coincidencias' + (o.servicio ? ' (catálogo de la tienda y ' + escapeHtml(o.servicio) + ')' : ' en el catálogo de la tienda') + (o.error ? ' · ' + escapeHtml(notaOrig(o.error)) : '') + '</div>';
     else {
       const filas = (o.internas || []).map(x => '<li>Se parece un <strong>' + x.similitud + ' %</strong> (' + x.segundos + ' s) a «' + escapeHtml(x.titulo) + '» de ' + escapeHtml(x.productor) + (x.mismoProductor ? ' (del mismo productor)' : '') + '</li>')
@@ -2540,8 +2578,13 @@
           '<div class="meta">' + escapeHtml(o.buyer_phone) + ' · ' + fechaHora(o.approved_at || o.rejected_at || o.created_at) + ' · ' + vendedor + escapeHtml(rechazada ? '' : paraProductor(o)) +
             (o.certificate_id ? ' · <span class="cert-line">Licencia <strong>' + escapeHtml(o.certificate_id) + '</strong></span>' : '') + '</div>' +
           (rechazada && o.reject_reason ? '<div class="meta">Motivo: ' + escapeHtml(o.reject_reason) + '</div>' : '') +
+          (o.descargas ? '<div class="meta' + (o.descargas.conexiones >= 4 ? ' dl-alerta' : '') + '">Descargas: ' + o.descargas.total +
+            ' desde ' + o.descargas.conexiones + (o.descargas.conexiones === 1 ? ' conexión' : ' conexiones') +
+            (o.descargas.conexiones >= 4 ? ' · revisa si compartió el enlace' : '') +
+            (o.descargas.agotada ? ' · <strong>llegó al tope</strong>' : '') + '</div>' : '') +
         '</div>' +
         '<div class="actions">' +
+          (o.descargas && o.descargas.agotada ? '<button type="button" class="btn-toggle-producer btn-mas-descargas">Habilitar más descargas</button>' : '') +
           (o.certificate_id ? '<a class="btn-whatsapp-order" href="/api/license/' + encodeURIComponent(o.certificate_id) + '/pdf" target="_blank" rel="noopener">PDF</a>' : '') +
           (wa && !rechazada ? '<a class="btn-toggle-producer" href="https://wa.me/' + wa + '?text=' + waText + '" target="_blank" rel="noopener">WhatsApp</a>' : '') +
           (linkCompra ? '<button type="button" class="btn-toggle-producer btn-copy-link">Copiar link</button>' : '') +
@@ -2553,6 +2596,13 @@
       if (cp) cp.addEventListener('click', async () => {
         try { await navigator.clipboard.writeText(linkCompra); showToast('Enlace privado copiado.'); }
         catch { prompt('Copia este link y mándaselo al comprador:', linkCompra); }
+      });
+      const mas = item.querySelector('.btn-mas-descargas');
+      if (mas) mas.addEventListener('click', async () => {
+        mas.disabled = true;
+        const r = await fetch('/api/admin/orders/' + o.id + '/mas-descargas', { method: 'POST' });
+        showToast(r.ok ? 'Listo: ' + o.buyer_name + ' puede volver a descargar sus archivos.' : 'No se pudo habilitar.', !r.ok);
+        if (r.ok) loadHistory(); else mas.disabled = false;
       });
       const late = item.querySelector('.btn-approve-late');
       if (late) late.addEventListener('click', (ev) => {
