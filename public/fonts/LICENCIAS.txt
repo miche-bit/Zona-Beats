@@ -189,3 +189,8 @@ INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
 DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
+
+
+==========================================================
+Jost — Copyright 2020 The Jost Project Authors (https://github.com/indestructible-type/Jost)
+SIL Open Font License, Version 1.1 (el mismo texto de licencia que aparece arriba).

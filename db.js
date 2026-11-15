@@ -732,6 +732,18 @@ db.exec('CREATE INDEX IF NOT EXISTS idx_verif_productor ON verificaciones (produ
 
 agregarCol('hot_requests', 'descuento_pct', 'REAL DEFAULT 0');          // descuento del plan aplicado a ese Hot
 
+// Índices para las consultas que crecen con el uso (retiros y pagos de plan de cada productor)
+db.exec('CREATE INDEX IF NOT EXISTS idx_retiros_productor ON producer_withdrawals (producer_id)');
+db.exec('CREATE INDEX IF NOT EXISTS idx_planes_productor ON plan_requests (producer_id, id)');
+db.exec('CREATE INDEX IF NOT EXISTS idx_hots_productor ON hot_requests (producer_id, status)');
+
+// Subidas que van directo al bucket (STEMS y packs): solo pasa por el volumen un trozo pequeño a la vez
+agregarCol('uploads', 'remoto_key', "TEXT DEFAULT ''");
+agregarCol('uploads', 'remoto_upload_id', "TEXT DEFAULT ''");
+agregarCol('uploads', 'remoto_partes', "TEXT DEFAULT '[]'");
+agregarCol('uploads', 'remoto_subido', 'INTEGER DEFAULT 0');
+agregarCol('uploads', 'remoto_listo', 'INTEGER DEFAULT 0');
+
 // Archivos maestros (MP3 320, WAV, copias de entrega) que ya están en el bucket y no en el volumen
 db.exec(`CREATE TABLE IF NOT EXISTS archivos_bucket (
   nombre TEXT PRIMARY KEY,

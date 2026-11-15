@@ -661,13 +661,27 @@ function subidaDe(id, owner) {
   return up && up.owner === owner ? up : null;
 }
 
+// ---- Subidas directas al bucket ----
+// Los STEMS y los Sample Packs (lo más pesado, y no hay que procesarlos) no se guardan en el volumen:
+// cada trozo que llega se junta en un archivo pequeño y, al pasar de PARTE_DIRECTA, sale hacia el bucket
+// como una parte. Así un pack de 20 GB se sube aunque el volumen tenga pocos GB libres.
+// El audio, el WAV y la portada sí pasan por el volumen: hay que medirlos, verificarlos y sacar el preview.
+const PARTE_DIRECTA = Math.max(5, Number(process.env.ZB_PARTE_DIRECTA_MB) || 8) * 1024 * 1024;
+const KINDS_DIRECTOS = { stems: ['stems', 'stems-'], pack: ['packs', 'pack-'] };
+// borra una subida (terminada o a medias) con todo lo que dejó en el volumen y en el bucket
+function descartarSubida(up) {
+  try { fs.unlinkSync(rutaSubida(up.id)); } catch { /* ya no estaba */ }
+  if (up.remoto_key) {
+    if (up.remoto_listo) almacen.borrar(up.remoto_key);
+    else almacen.abortarMultiparte(up.remoto_key, up.remoto_upload_id);
+  }
+  db.prepare('DELETE FROM uploads WHERE id = ?').run(up.id);
+}
+
 function limpiarSubidasViejas() {
   // una subida a medias se guarda 7 días desde el último trozo (apagones, conexión que se cae por horas)
   const limite = Date.now() - 7 * 24 * 3600 * 1000;
-  for (const up of db.prepare('SELECT id FROM uploads WHERE updated_at < ?').all(limite)) {
-    try { fs.unlinkSync(rutaSubida(up.id)); } catch { /* ya no estaba */ }
-    db.prepare('DELETE FROM uploads WHERE id = ?').run(up.id);
-  }
+  for (const up of db.prepare('SELECT * FROM uploads WHERE updated_at < ?').all(limite)) descartarSubida(up);
   // restos de procesamientos cortados a la mitad
   try {
     for (const f of fs.readdirSync(TMP_PROCESSING)) {
@@ -686,6 +700,11 @@ function tomarSubida(id, owner, kind) {
   const tipo = UPLOAD_KINDS[kind];
   const up = subidaDe(id, owner);
   if (!up || up.kind !== kind) throw { status: 400, error: `No encontramos ${tipo.etiqueta}. Vuelve a elegir el archivo.` };
+  if (up.remoto_key) {
+    // ya está entero en el bucket: no hay archivo local que mover
+    if (up.received !== up.size || !up.remoto_listo) throw { status: 400, error: `${tipo.etiqueta.charAt(0).toUpperCase() + tipo.etiqueta.slice(1)} no terminó de subirse. Espera a que llegue al 100%.` };
+    return { ...up, path: null, remoto: up.remoto_key };
+  }
   let st = null;
   try { st = fs.statSync(rutaSubida(up.id)); } catch { st = null; }
   if (!st || up.received !== up.size || st.size !== up.size) {
@@ -758,15 +777,20 @@ route('POST', '/api/uploads', async (req, res) => {
     }
   }
   // si alguien deja muchas subidas a medias, se borran las más viejas
-  const abiertas = db.prepare('SELECT id FROM uploads WHERE owner = ? ORDER BY updated_at DESC').all(owner);
-  for (const vieja of abiertas.slice(39)) {
-    try { fs.unlinkSync(rutaSubida(vieja.id)); } catch { /* nada */ }
-    db.prepare('DELETE FROM uploads WHERE id = ?').run(vieja.id);
+  const abiertas = db.prepare('SELECT * FROM uploads WHERE owner = ? ORDER BY updated_at DESC').all(owner);
+  for (const vieja of abiertas.slice(39)) descartarSubida(vieja);
+  // STEMS y packs van directo al bucket (si no responde, se sube por el volumen como antes)
+  let remotoKey = '', remotoUploadId = '';
+  if (KINDS_DIRECTOS[kind] && almacen.activo()) {
+    const [carpeta, prefijo] = KINDS_DIRECTOS[kind];
+    remotoKey = `${carpeta}/${prefijo}${crypto.randomUUID()}${ext}`;
+    try { remotoUploadId = await almacen.iniciarMultiparte(remotoKey, contentTypeDescarga(ext)); }
+    catch (e) { console.error('Subida directa al bucket no disponible:', e.message); remotoKey = ''; }
   }
-  // ¿cabe en el disco? Se cuenta lo que falta por llegar de las otras subidas a medias
-  const faltaDeOtras = db.prepare('SELECT COALESCE(SUM(size - received), 0) as s FROM uploads').get().s;
+  // ¿cabe en el disco? Se cuenta lo que falta por llegar de las otras subidas a medias (las directas no ocupan)
+  const faltaDeOtras = db.prepare("SELECT COALESCE(SUM(size - received), 0) as s FROM uploads WHERE remoto_key = ''").get().s;
   const libre = espacioLibre();
-  if (size + faltaDeOtras + 512 * 1024 * 1024 > libre) {
+  if (!remotoKey && size + faltaDeOtras + 512 * 1024 * 1024 > libre) {
     return sendJSON(res, 507, { sinEspacio: true, error: owner === 'admin'
       ? `Espacio de almacenamiento insuficiente: el archivo pesa ${fmtMB(size)} y quedan ${fmtMB(Math.max(0, libre - faltaDeOtras))} disponibles.`
       : `No es posible subir este archivo (${fmtMB(size)}) en este momento. Inténtalo más tarde.` });
@@ -774,14 +798,15 @@ route('POST', '/api/uploads', async (req, res) => {
   if (owner !== 'admin') {
     const enCurso = db.prepare('SELECT COALESCE(SUM(size), 0) as s FROM uploads WHERE owner = ?').get(owner).s;
     if (enCurso + size > 22 * 1024 * 1024 * 1024) {
+      if (remotoKey) almacen.abortarMultiparte(remotoKey, remotoUploadId);
       return sendJSON(res, 413, { error: 'Tienes demasiadas subidas sin terminar. Completa la publicación pendiente.' });
     }
   }
   const id = crypto.randomBytes(16).toString('hex');
   fs.writeFileSync(rutaSubida(id), Buffer.alloc(0));
   const ahora = Date.now();
-  db.prepare('INSERT INTO uploads (id, owner, kind, original_name, ext, size, received, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)')
-    .run(id, owner, kind, limpiarTexto(d.name, 200), ext, size, ahora, ahora);
+  db.prepare('INSERT INTO uploads (id, owner, kind, original_name, ext, size, received, created_at, updated_at, remoto_key, remoto_upload_id) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)')
+    .run(id, owner, kind, limpiarTexto(d.name, 200), ext, size, ahora, ahora, remotoKey, remotoUploadId);
   sendJSON(res, 201, { id, chunkSize: CHUNK_SIZE, received: 0, size });
 });
 
@@ -799,8 +824,7 @@ route('DELETE', '/api/uploads/:id', (req, res, params) => {
   const up = subidaDe(params.id, owner);
   // solo el dueño puede borrarla; para cualquier otro «no existe»
   if (!up) return sendJSON(res, 404, { error: 'Subida no encontrada' });
-  try { fs.unlinkSync(rutaSubida(up.id)); } catch { /* nada */ }
-  db.prepare('DELETE FROM uploads WHERE id = ?').run(up.id);
+  descartarSubida(up);
   sendJSON(res, 200, { ok: true });
 });
 
@@ -822,19 +846,24 @@ route('PUT', '/api/uploads/:id/chunk', async (req, res, params, query) => {
 
   subidasOcupadas.add(up.id);
   const destino = rutaSubida(up.id);
+  // en una subida directa el archivo local solo guarda lo que todavía no salió hacia el bucket
+  const yaEnBucket = up.remoto_key ? Number(up.remoto_subido) || 0 : 0;
+  const enLocal = up.received - yaEnBucket;
   let escritos = 0;
   try {
     // si el servidor se cayó justo después de escribir un trozo (y antes de anotarlo), el archivo
     // puede tener bytes de más: se recorta a lo anotado para que el siguiente trozo caiga en su lugar
     try {
       const st = fs.statSync(destino);
-      if (st.size !== up.received) fs.truncateSync(destino, up.received);
+      if (st.size < enLocal) throw new Error('falta parte del archivo');
+      if (st.size !== enLocal) fs.truncateSync(destino, enLocal);
     } catch {
       fs.writeFileSync(destino, Buffer.alloc(0));
-      if (up.received > 0) {
-        db.prepare('UPDATE uploads SET received = 0, updated_at = ? WHERE id = ?').run(Date.now(), up.id);
+      if (enLocal > 0) {
+        // se perdió lo que había en el volumen: se retoma desde lo último que quedó a salvo
+        db.prepare('UPDATE uploads SET received = ?, updated_at = ? WHERE id = ?').run(yaEnBucket, Date.now(), up.id);
         await drenar(req);
-        return sendJSON(res, 409, { error: 'El archivo parcial se perdió. Se vuelve a empezar.', received: 0 });
+        return sendJSON(res, 409, { error: 'El archivo parcial se perdió. Se retoma desde lo último guardado.', received: yaEnBucket });
       }
     }
     const limite = Math.min(CHUNK_MAX, restante);
@@ -849,11 +878,35 @@ route('PUT', '/api/uploads/:id/chunk', async (req, res, params, query) => {
     const declarado = Number(req.headers['content-length']);
     if (Number.isFinite(declarado) && declarado !== escritos) throw Object.assign(new Error('Trozo incompleto'), { code: 'INCOMPLETO' });
     const recibido = up.received + escritos;
+    const completo = recibido >= up.size;
+    if (up.remoto_key && (enLocal + escritos >= PARTE_DIRECTA || completo)) {
+      // lo juntado sale hacia el bucket como una parte; con la última se unen todas
+      const etags = JSON.parse(up.remoto_partes || '[]');
+      try {
+        try {
+          etags.push(await almacen.subirParte(up.remoto_key, up.remoto_upload_id, etags.length + 1, destino, enLocal + escritos));
+          if (completo) await almacen.completarMultiparte(up.remoto_key, up.remoto_upload_id, etags);
+        } catch (e) {
+          // si ya se había unido justo antes de un reinicio, el archivo entero está en el bucket
+          if (!(completo && e.status === 404 && await almacen.tamano(up.remoto_key).catch(() => -1) === up.size)) throw e;
+        }
+        if (completo && await almacen.tamano(up.remoto_key) !== up.size) throw new Error('el bucket guardó un tamaño distinto');
+      } catch (e) {
+        console.error(`Subida directa ${up.id} (${up.remoto_key}):`, e.message);
+        try { fs.truncateSync(destino, enLocal); } catch { /* nada */ }
+        return sendJSON(res, 503, { error: 'No se pudo guardar esta parte. Reintentando…', received: up.received });
+      }
+      db.prepare('UPDATE uploads SET received = ?, remoto_subido = ?, remoto_partes = ?, remoto_listo = ?, updated_at = ? WHERE id = ?')
+        .run(recibido, recibido, JSON.stringify(etags), completo ? 1 : 0, Date.now(), up.id);
+      try { fs.truncateSync(destino, 0); } catch { /* nada */ }
+      if (completo) { try { fs.unlinkSync(destino); } catch { /* nada */ } }
+      return sendJSON(res, 200, { received: recibido, done: completo });
+    }
     db.prepare('UPDATE uploads SET received = ?, updated_at = ? WHERE id = ?').run(recibido, Date.now(), up.id);
-    sendJSON(res, 200, { received: recibido, done: recibido >= up.size });
+    sendJSON(res, 200, { received: recibido, done: completo });
   } catch (err) {
     // se deshace lo que haya entrado a medias para que el archivo nunca quede corrupto
-    try { fs.truncateSync(destino, up.received); } catch { /* nada */ }
+    try { fs.truncateSync(destino, enLocal); } catch { /* nada */ }
     if (!res.headersSent && !res.destroyed) {
       const grande = err && err.code === 'TROZO_GRANDE';
       const lleno = err && err.code === 'ENOSPC';
@@ -3082,8 +3135,12 @@ async function procesarPista({ titulo, genero, descripcion, credito, esPlaylist,
       wavFilename = masterFilename; wavHash = masterHash;
     }
 
-    let stemsFilename = '', stemsHash = '';
-    if (stems) {
+    let stemsFilename = '', stemsHash = '', stemsRemoto = null;
+    if (stems && stems.remoto) {
+      // ya está en el bucket: no se mueve nada; su huella se calcula después, leyéndolo desde allí
+      stemsFilename = path.basename(stems.remoto);
+      stemsRemoto = { key: stems.remoto, size: stems.size, subidaId: stems.id };
+    } else if (stems) {
       stemsFilename = moverSubida(stems, UPLOADS_MASTERS, opts.prefijoGrande || 'stems-');
       creados.push([UPLOADS_MASTERS, stemsFilename]);
       // un pack de 20 GB tarda en leerse: su huella se calcula después, en segundo plano
@@ -3157,7 +3214,7 @@ async function procesarPista({ titulo, genero, descripcion, credito, esPlaylist,
 
     return {
       titulo, genero, descripcion, credito, esPlaylist, precios, validacion,
-      masterFilename, masterHash, coverFilename, wavFilename, wavHash, stemsFilename, stemsHash,
+      masterFilename, masterHash, coverFilename, wavFilename, wavHash, stemsFilename, stemsHash, stemsRemoto,
       mp3Filename, mp3Hash, audioFilename, duracion, conMarca, muestraInicio: opts.muestraSegundos ? opts.muestraInicio || 0 : null,
       deshacer: quitarCreados,
     };
@@ -3196,6 +3253,13 @@ function etiquetaPrecio(precios, validacion) {
   return { lowest, label: ofrecidas.length > 1 ? `Desde ${lowest} CUP` : `${lowest} CUP` };
 }
 
+// STEMS o pack que se subió directo al bucket: la obra ya nace apuntando a él
+function anotarGrandeRemoto(trackId, r) {
+  if (!r.stemsRemoto) return;
+  db.prepare('UPDATE tracks SET stems_remote = ?, stems_size = ? WHERE id = ?').run(r.stemsRemoto.key, r.stemsRemoto.size, trackId);
+  db.prepare('DELETE FROM uploads WHERE id = ?').run(r.stemsRemoto.subidaId);
+}
+
 function insertarPista(r, { producerId, estado }) {
   const { lowest, label } = etiquetaPrecio(r.precios, r.validacion);
   const result = db.prepare(`
@@ -3211,6 +3275,7 @@ function insertarPista(r, { producerId, estado }) {
     r.mp3Filename, r.mp3Hash, r.duracion, r.conMarca ? 1 : 0
   );
   const trackId = Number(result.lastInsertRowid);
+  anotarGrandeRemoto(trackId, r);
   if (!r.esPlaylist) saveLicensesForTrack(trackId, r.precios);
   if (r.muestraInicio !== null && r.muestraInicio !== undefined) db.prepare('UPDATE tracks SET muestra_inicio = ? WHERE id = ?').run(r.muestraInicio, trackId);
   return trackId;
@@ -3548,6 +3613,14 @@ async function procesarArchivoGrande(id) {
     agregarHuellaRegistro(id, t.is_pack ? 'Archivo del pack' : 'STEMS', h);
     t = db.prepare('SELECT * FROM tracks WHERE id = ?').get(id);
     if (!t) return;
+  }
+  if (!t.stems_hash && !hayLocal && t.stems_remote && almacen.activo()) {
+    // se subió directo al bucket: la huella se saca leyéndolo desde allí, sin tocar el volumen
+    const h = await almacen.hashRemoto(t.stems_remote);
+    if (!db.prepare('SELECT id FROM tracks WHERE id = ?').get(id)) return;
+    db.prepare('UPDATE tracks SET stems_hash = ? WHERE id = ?').run(h, id);
+    agregarHuellaRegistro(id, t.is_pack ? 'Archivo del pack' : 'STEMS', h);
+    t = db.prepare('SELECT * FROM tracks WHERE id = ?').get(id);
   }
   if (t.producer_id) registrarObra(id);
   if (almacen.activo() && !t.stems_remote && hayLocal) {
@@ -4708,6 +4781,7 @@ function insertarPack(r, { producerId, estado }) {
     r.mp3Filename, r.mp3Hash, r.duracion, r.conMarca ? 1 : 0
   );
   const id = Number(result.lastInsertRowid);
+  anotarGrandeRemoto(id, r);
   db.prepare("INSERT INTO track_licenses (track_id, license_type, price_cup) VALUES (?, 'pack', ?)").run(id, r.precio);
   return id;
 }

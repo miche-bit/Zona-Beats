@@ -129,6 +129,51 @@ async function subirArchivo(ruta, key, { tipo = 'application/octet-stream', alAv
   }
 }
 
+// ---- Subida multiparte paso a paso (para lo que llega del navegador y va directo al bucket) ----
+async function iniciarMultiparte(key, tipo = 'application/octet-stream') {
+  const ini = await conReintentos(() => pedir('POST', key, { uploads: '' }, { cuerpo: '', extra: { 'content-type': tipo } }), 2);
+  const uploadId = (ini.texto.match(/<UploadId>([^<]+)<\/UploadId>/) || [])[1];
+  if (!uploadId) throw new Error('El almacenamiento no devolvió un número de subida');
+  return uploadId;
+}
+// sube como parte «n» los primeros «largo» bytes de un archivo del disco; devuelve su ETag
+async function subirParte(key, uploadId, n, ruta, largo) {
+  const r = await conReintentos(() => pedir('PUT', key, { partNumber: n, uploadId },
+    { flujo: fs.createReadStream(ruta, { start: 0, end: largo - 1 }), largo }), 3);
+  return r.headers.etag;
+}
+async function completarMultiparte(key, uploadId, etags) {
+  const xml = '<CompleteMultipartUpload>' + etags.map((e, i) => `<Part><PartNumber>${i + 1}</PartNumber><ETag>${e}</ETag></Part>`).join('') + '</CompleteMultipartUpload>';
+  const fin = await conReintentos(() => pedir('POST', key, { uploadId }, { cuerpo: xml, extra: { 'content-type': 'application/xml' } }), 3);
+  if (/<Error>/.test(fin.texto)) throw new Error('El almacenamiento rechazó unir las partes: ' + fin.texto.slice(0, 200));
+}
+function abortarMultiparte(key, uploadId) {
+  if (!activo() || !key || !uploadId) return Promise.resolve();
+  return pedir('DELETE', key, { uploadId }).catch(() => {});
+}
+
+// SHA-256 de un objeto del bucket, leyéndolo de corrido (sin guardarlo en el disco)
+function hashRemoto(key) {
+  const una = () => new Promise((resolve, reject) => {
+    const { d, cab, ruta } = firmar('GET', key, {}, sha256(''));
+    const lib = d.protocolo === 'http:' ? http : https;
+    const [nombreHost, puerto] = d.host.split(':');
+    const req = lib.request({ method: 'GET', host: nombreHost, port: puerto || undefined, path: ruta, headers: cab, timeout: 10 * 60 * 1000 }, (res) => {
+      if (res.statusCode !== 200) { res.resume(); return reject(Object.assign(new Error(`Almacenamiento respondió ${res.statusCode}`), { status: res.statusCode })); }
+      const h = crypto.createHash('sha256');
+      let n = 0;
+      const esperado = Number(res.headers['content-length']);
+      res.on('data', (c) => { h.update(c); n += c.length; });
+      res.on('error', reject);
+      res.on('end', () => (Number.isFinite(esperado) && n !== esperado ? reject(new Error('lectura incompleta del almacenamiento')) : resolve(h.digest('hex'))));
+    });
+    req.on('timeout', () => req.destroy(new Error('El almacenamiento tardó demasiado en responder')));
+    req.on('error', reject);
+    req.end();
+  });
+  return conReintentos(una, 3);
+}
+
 // Baja un objeto a un archivo del disco (para procesarlo: marca forense, AudD, muestras…).
 // Escribe primero en «.parcial» y renombra al final: nunca queda un archivo a medias con el nombre bueno.
 function bajarArchivo(key, ruta) {
@@ -218,4 +263,4 @@ function enlaceFirmado(key, { segundos = 6 * 24 * 3600, nombre } = {}) {
   return `${d.protocolo}//${d.host}${d.ruta}?${consultaCanonica(q)}&X-Amz-Signature=${firma}`;
 }
 
-module.exports = { activo, subirArchivo, bajarArchivo, probar, tamano, borrar, enlaceFirmado, _prueba: { firmar }, CFG_PUBLICA: () => ({ activo: activo(), endpoint: CFG.endpoint, bucket: CFG.bucket ? CFG.bucket.slice(0, 4) + '…' : '' }) };
+module.exports = { activo, subirArchivo, iniciarMultiparte, subirParte, completarMultiparte, abortarMultiparte, hashRemoto, bajarArchivo, probar, tamano, borrar, enlaceFirmado, _prueba: { firmar }, CFG_PUBLICA: () => ({ activo: activo(), endpoint: CFG.endpoint, bucket: CFG.bucket ? CFG.bucket.slice(0, 4) + '…' : '' }) };

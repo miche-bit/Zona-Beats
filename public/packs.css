@@ -27,7 +27,7 @@
   background: transparent; border: 1px solid var(--line-strong); color: var(--text);
   font: 600 var(--fs-sm) var(--font-body); cursor: pointer; text-decoration: none; white-space: nowrap;
 }
-.pk-btn:hover:not(:disabled) { background: var(--bg-card-hover); }
+@media (hover: hover) and (pointer: fine) { .pk-btn:hover:not(:disabled) { background: var(--bg-card-hover); } }
 .pk-btn:disabled { opacity: .6; cursor: default; }
 .pk-btn.pk-ok { color: var(--live); border-color: rgba(var(--live-rgb), .45); }
 .pk-btn.pk-no { color: var(--danger); border-color: rgba(var(--danger-rgb), .45); }
