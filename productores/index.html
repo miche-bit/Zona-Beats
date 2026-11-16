@@ -193,7 +193,12 @@
         </header>
 
         <div data-grupo-panel="subir" data-sub="beat">
-          <div class="panel up-panel">
+          <div class="panel pk-lock pk-pronto" id="beats-pausa" hidden>
+            <span class="pk-pronto-chip">En pausa</span>
+            <h2>Subir beats</h2>
+            <p>La subida de beats nuevos está en pausa por el momento. Tus beats publicados siguen a la venta y tu saldo no cambia. Te avisamos en cuanto vuelva.</p>
+          </div>
+          <div class="panel up-panel" id="beats-zona">
             <ol class="stepper" id="up-stepper" aria-label="Pasos para subir tu beat">
               <li><button type="button" class="stp" data-paso="1"><span class="stp-n">1</span><span class="stp-t">Datos</span></button></li>
               <li><button type="button" class="stp" data-paso="2"><span class="stp-n">2</span><span class="stp-t">Precios</span></button></li>
@@ -379,9 +384,10 @@
 
         <div data-grupo-panel="subir" data-sub="pack" hidden>
           <div class="panel pk-lock pk-pronto" id="packs-lock" hidden>
-            <span class="pk-pronto-chip">Próximamente</span>
+            <span class="pk-pronto-chip" data-pk-chip>En pausa</span>
             <h2>Sample Packs</h2>
-            <p>Estamos preparando el servidor para recibir tus drum kits, loops, one-shots y vocal chops con el espacio y la calidad que tus sonidos merecen. Muy pronto vas a poder subir y vender tus Sample Packs desde aquí. Te avisamos en cuanto esté activo.</p>
+            <p data-pk-txt></p>
+            <button type="button" class="btn-primary btn-auto" data-ir="cuenta/plan" data-pk-planes hidden>Ver planes</button>
           </div>
           <div class="panel up-panel" id="packs-zona" hidden>
             <div id="packs-form"></div>
@@ -415,9 +421,10 @@
 
         <div data-grupo-panel="catalogo" data-sub="packs" hidden>
           <div class="panel pk-lock pk-pronto" id="packs-lock-lista" hidden>
-            <span class="pk-pronto-chip">Próximamente</span>
+            <span class="pk-pronto-chip" data-pk-chip>Plan Studio</span>
             <h2>Sample Packs</h2>
-            <p>Estamos preparando el servidor para recibir tus drum kits, loops, one-shots y vocal chops con el espacio y la calidad que tus sonidos merecen. Muy pronto vas a poder subir y vender tus Sample Packs desde aquí. Te avisamos en cuanto esté activo.</p>
+            <p data-pk-txt></p>
+            <button type="button" class="btn-primary btn-auto" data-ir="cuenta/plan" data-pk-planes hidden>Ver planes</button>
           </div>
           <div class="panel" id="packs-zona-lista" hidden>
             <div class="panel-head">
@@ -532,6 +539,8 @@
             </div>
             <div id="plan-request-status" class="plan-request-status" style="display:none;"></div>
             <div class="plan-facts" id="plan-facts"><div class="skel-wrap skel-lineas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-line" style="width:92%"></div><div class="skel skel-line" style="width:75%"></div><div class="skel skel-line" style="width:58%"></div></div></div>
+            <p class="plan-request-status pending" id="plan-pausas" hidden></p>
+            <p class="panel-hint" id="plan-cambio-note" hidden></p>
             <div class="plan-picker subtabs" id="plan-picker" role="group" aria-label="Ver plan"></div>
             <div class="plans-grid" id="plans-grid"><div class="skel-wrap skel-tarjetas" role="status"><span class="sr-only">Cargando…</span><div class="skel skel-card"></div><div class="skel skel-card"></div><div class="skel skel-card"></div></div></div>
             <p class="panel-hint" id="plan-rate-note"></p>

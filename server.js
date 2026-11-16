@@ -771,7 +771,7 @@ route('POST', '/api/uploads', async (req, res) => {
     const plan = planEfectivo(full);
     if (kind === 'wav' && !plan.wav) return sendJSON(res, 403, { error: `Tu plan ${plan.label} no incluye entrega en WAV. Sube al plan Pro o Studio.` });
     if (kind === 'stems' && !plan.stems) return sendJSON(res, 403, { error: `Tu plan ${plan.label} no incluye STEMS. Solo el plan Studio permite subir STEMS.` });
-    if (kind === 'pack' && !plan.packs) return sendJSON(res, 403, { error: MSG_PACKS_PROXIMAMENTE });
+    if (kind === 'pack') { const no = motivoSinPacks(plan); if (no) return sendJSON(res, 403, { error: no.error }); }
     if (kind === 'audio' && !plan.audioExt.includes(ext)) {
       return sendJSON(res, 403, { error: plan.audioExt.length === 1 ? `Tu plan ${plan.label} solo permite subir audio en MP3 (320 kbps).` : `Tu plan ${plan.label} permite subir el audio en MP3 (320 kbps) o WAV.` });
     }
@@ -1458,6 +1458,8 @@ route('GET', '/api/producer/me', (req, res) => {
       playlist: v.playlist, stats: v.stats, licenses: v.licenses, packs: v.packs, payoutDays: v.payoutDays, auddMes: v.auddMes,
     })),
     planRequest: ultimaSolicitudPlan(full.id),
+    planEnCola: planEnCola(full),
+    subidas: subidasProductores(),
     planClave: planClave(full),
     verificacion: { precio: precioVerificacion(), creditos: creditosVerificacion(full.id), cupo: cupoAudd(full.id), externoActivo: originalidad.externoActivo() },
     rangosFree: RANGOS_FREE,
@@ -1574,15 +1576,61 @@ route('POST', '/api/producer/avatar', async (req, res) => {
 
 const PLAN_MESES_PERMITIDOS = [1, 3, 6, 12];
 
-// Activa o extiende un plan: si ya tenía ese mismo plan vigente, los meses se suman a su fecha.
+// ---- Cambios de plan ----
+// · El mismo plan vigente: los meses se suman a su fecha (renovación).
+// · Un plan MAYOR (Pro → Studio): empieza hoy, y los días ya pagados del plan anterior no se pierden:
+//   se convierten en días del plan nuevo según lo que valían (días × precio viejo ÷ precio nuevo).
+// · Un plan MENOR (Studio → Pro) con el actual todavía pagado: NO se le quita lo que pagó. El plan
+//   menor queda en cola y empieza solo, sin cortes, el día que termina el actual.
+const RANGO_PLAN = { free: 0, pro: 1, studio: 2 };
+function sumarDias(fechaISO, dias) {
+  const d = new Date(fechaISO + 'T12:00:00');
+  d.setDate(d.getDate() + dias);
+  return d.toISOString().slice(0, 10);
+}
 function activarPlan(p, plan, months) {
   const hoy = hoyISO();
-  const mismoPlanVigente = p.plan === plan && p.plan_paid_until && p.plan_paid_until >= hoy;
-  const base = mismoPlanVigente ? p.plan_paid_until : hoy;
-  const hasta = sumarMeses(base, months);
-  db.prepare("UPDATE producers SET plan = ?, plan_paid_until = ?, approved = 1, active = CASE WHEN disabled_reason = 'plan_vencido' THEN 1 ELSE active END, disabled_reason = CASE WHEN disabled_reason = 'plan_vencido' THEN '' ELSE disabled_reason END WHERE id = ?")
-    .run(plan, hasta, p.id);
-  return { hasta, extendido: Boolean(mismoPlanVigente) };
+  const actual = PRODUCER_PLANS[p.plan] ? p.plan : 'free';
+  const vigente = actual !== 'free' && p.plan_paid_until && p.plan_paid_until >= hoy;
+  if (vigente && RANGO_PLAN[plan] < RANGO_PLAN[actual]) {
+    const meses = (p.plan_next === plan ? Number(p.plan_next_months) || 0 : 0) + months;
+    db.prepare('UPDATE producers SET plan_next = ?, plan_next_months = ?, approved = 1 WHERE id = ?').run(plan, meses, p.id);
+    return { hasta: sumarMeses(p.plan_paid_until, meses), extendido: false, programado: true, desde: sumarDias(p.plan_paid_until, 1), sigueCon: actual, sigueHasta: p.plan_paid_until };
+  }
+  const mismoPlanVigente = vigente && actual === plan;
+  let hasta = sumarMeses(mismoPlanVigente ? p.plan_paid_until : hoy, months);
+  let diasAbonados = 0;
+  if (vigente && RANGO_PLAN[plan] > RANGO_PLAN[actual]) {
+    const restan = Math.max(0, Math.round((new Date(p.plan_paid_until + 'T12:00:00') - new Date(hoy + 'T12:00:00')) / 86400000));
+    const viejo = planPriceUsd(actual), nuevo = planPriceUsd(plan);
+    if (restan > 0 && viejo > 0 && nuevo > 0) diasAbonados = Math.floor(restan * Math.min(1, viejo / nuevo));
+    if (diasAbonados > 0) hasta = sumarDias(hasta, diasAbonados);
+  }
+  // un plan en cola solo se conserva si sigue siendo menor que el que queda activo
+  const cola = p.plan_next && RANGO_PLAN[p.plan_next] < RANGO_PLAN[plan] ? [p.plan_next, Number(p.plan_next_months) || 0] : ['', 0];
+  db.prepare("UPDATE producers SET plan = ?, plan_paid_until = ?, plan_next = ?, plan_next_months = ?, approved = 1, active = CASE WHEN disabled_reason = 'plan_vencido' THEN 1 ELSE active END, disabled_reason = CASE WHEN disabled_reason = 'plan_vencido' THEN '' ELSE disabled_reason END WHERE id = ?")
+    .run(plan, hasta, cola[0], cola[1], p.id);
+  return { hasta, extendido: Boolean(mismoPlanVigente), programado: false, diasAbonados };
+}
+// Al terminar un plan, si hay otro pagado en cola, entra ese (desde el día en que terminó el anterior)
+function aplicarPlanesEnCola() {
+  const hoy = hoyISO();
+  let n = 0;
+  for (const p of db.prepare("SELECT id, plan, plan_paid_until, plan_next, plan_next_months FROM producers WHERE plan_next != '' AND plan_paid_until != '' AND plan_paid_until < ?").all(hoy)) {
+    if (!PRODUCER_PLANS[p.plan_next] || !(p.plan_next_months > 0)) { db.prepare("UPDATE producers SET plan_next = '', plan_next_months = 0 WHERE id = ?").run(p.id); continue; }
+    const hasta = sumarMeses(p.plan_paid_until, p.plan_next_months);
+    db.prepare("UPDATE producers SET plan = ?, plan_paid_until = ?, plan_next = '', plan_next_months = 0, active = CASE WHEN disabled_reason = 'plan_vencido' THEN 1 ELSE active END, disabled_reason = CASE WHEN disabled_reason = 'plan_vencido' THEN '' ELSE disabled_reason END WHERE id = ?")
+      .run(p.plan_next, hasta, p.id);
+    anotar(p.id, 'Empezó tu nuevo plan', `Terminó tu plan ${PRODUCER_PLANS[p.plan].label} y empezó el ${PRODUCER_PLANS[p.plan_next].label}, pagado hasta el ${hasta}.`);
+    n++;
+  }
+  return n;
+}
+// lo que el productor ve de su plan en cola
+function planEnCola(full) {
+  if (!full || !full.plan_next || !PRODUCER_PLANS[full.plan_next] || !full.plan_paid_until) return null;
+  return { plan: full.plan_next, label: PRODUCER_PLANS[full.plan_next].label, meses: Number(full.plan_next_months) || 0,
+    desde: sumarDias(full.plan_paid_until, 1), hasta: sumarMeses(full.plan_paid_until, Number(full.plan_next_months) || 0) };
 }
 
 // Lo que cuesta un plan en la moneda de una billetera (con la tasa de venta del admin).
@@ -1623,14 +1671,14 @@ route('POST', '/api/producer/plan-con-saldo', async (req, res) => {
   }
   const full = producerFull(producer.id);
   const nombre = PRODUCER_PLANS[plan].label;
-  const { hasta, extendido } = activarPlan(full, plan, months);
+  const { hasta, extendido, programado, desde, diasAbonados } = activarPlan(full, plan, months);
   db.prepare("INSERT INTO producer_credits (producer_id, kind, amount_cup, detail, currency, amount_units) VALUES (?, 'plan', ?, ?, ?, ?)")
     .run(producer.id, -totalCup, `Plan ${nombre} · ${months} ${months === 1 ? 'mes' : 'meses'} pagado con tu saldo`, moneda, -costo.unidades);
   db.prepare(`INSERT INTO plan_requests (producer_id, plan, months, amount_cup, currency, receipt_filename, status, paid_until_result, resolved_at)
               VALUES (?, ?, ?, ?, ?, '', 'approved', ?, datetime('now'))`)
     .run(producer.id, plan, months, totalCup, `Saldo ${etiquetaMoneda(moneda)}`, hasta);
-  const previewsSinMarca = quitarMarcaDePreviews(producer.id);
-  sendJSON(res, 201, { ok: true, plan, paidUntil: hasta, extendido, cobrado: costo.unidades, moneda: etiquetaMoneda(moneda), previewsSinMarca });
+  const previewsSinMarca = programado ? 0 : quitarMarcaDePreviews(producer.id);
+  sendJSON(res, 201, { ok: true, plan, paidUntil: hasta, extendido, programado: Boolean(programado), desde: desde || '', diasAbonados: diasAbonados || 0, cobrado: costo.unidades, moneda: etiquetaMoneda(moneda), previewsSinMarca });
 });
 
 // ================= HOTS =================
@@ -2003,11 +2051,14 @@ route('POST', '/api/admin/plan-requests/:id/approve', (req, res, params) => {
   const p = producerFull(r.producer_id);
   if (!p) return sendJSON(res, 404, { error: 'El productor ya no existe' });
 
-  const { hasta, extendido } = activarPlan(p, r.plan, r.months);
+  const { hasta, extendido, programado, desde, sigueCon, diasAbonados } = activarPlan(p, r.plan, r.months);
   db.prepare("UPDATE plan_requests SET status = 'approved', paid_until_result = ?, resolved_at = datetime('now') WHERE id = ?").run(hasta, r.id);
-  const previewsLimpios = quitarMarcaDePreviews(r.producer_id);
-  anotar(r.producer_id, 'Aprobó tu compra de plan', `Plan ${(PRODUCER_PLANS[r.plan] || {}).label || r.plan} hasta el ${hasta}`);
-  sendJSON(res, 200, { ok: true, plan: r.plan, paidUntil: hasta, extendido, previewsSinMarca: previewsLimpios });
+  const previewsLimpios = programado ? 0 : quitarMarcaDePreviews(r.producer_id);
+  const etq = (PRODUCER_PLANS[r.plan] || {}).label || r.plan;
+  anotar(r.producer_id, 'Aprobó tu compra de plan', programado
+    ? `Plan ${etq}: empieza el ${desde}, cuando termine tu ${PRODUCER_PLANS[sigueCon].label}, y queda pagado hasta el ${hasta}`
+    : `Plan ${etq} hasta el ${hasta}` + (diasAbonados ? ` (incluye ${diasAbonados} días por lo que te quedaba del plan anterior)` : ''));
+  sendJSON(res, 200, { ok: true, plan: r.plan, paidUntil: hasta, extendido, programado: Boolean(programado), desde: desde || '', sigueCon: sigueCon || '', diasAbonados: diasAbonados || 0, previewsSinMarca: previewsLimpios });
 });
 
 route('POST', '/api/admin/plan-requests/:id/reject', async (req, res, params) => {
@@ -3301,8 +3352,7 @@ const PRODUCER_PLANS = {
     // Studio: 150 beats de 20 minutos como máximo, Premium, Ilimitada y Exclusiva, con marca forense
     label: 'Studio', commission: 10, maxBeats: 150, watermarkPreview: false, exclusiveAuto: true,
     payout: '24 horas', payoutDays: 1, audioExt: ['.mp3', '.wav'], wav: true, stems: true,
-    // Sample Packs de productores: en pausa («Próximamente»), así no hace falta pagar el almacenamiento todavía
-    social: true, playlist: true, stats: true, packs: false, packsProximamente: true, licenses: ['premium', 'unlimited', 'exclusive'], auddMes: 150, forense: true,
+    social: true, playlist: true, stats: true, packs: true, licenses: ['premium', 'unlimited', 'exclusive'], auddMes: 150, forense: true,
     maxSegundos: 1200,
   },
 };
@@ -3378,7 +3428,9 @@ function planEfectivo(producerRow) {
 function planClave(producerRow) {
   if (!producerRow) return 'free';
   const k = producerRow.plan || 'free';
-  return PRODUCER_PLANS[k] && planVigente(producerRow) ? k : 'free';
+  if (PRODUCER_PLANS[k] && planVigente(producerRow)) return k;
+  // terminó el plan pero hay otro pagado en cola: rige ese desde ya (el cambio se asienta cada hora)
+  return producerRow.plan_next && PRODUCER_PLANS[producerRow.plan_next] ? producerRow.plan_next : 'free';
 }
 
 function planVigente(producerRow) {
@@ -3386,7 +3438,9 @@ function planVigente(producerRow) {
   const plan = (producerRow.plan || 'free');
   if (plan === 'free') return true;
   if (!producerRow.plan_paid_until) return false;
-  return new Date(producerRow.plan_paid_until + 'T23:59:59') >= new Date();
+  if (new Date(producerRow.plan_paid_until + 'T23:59:59') >= new Date()) return true;
+  // recién terminó, pero tiene otro plan pagado en cola (entra en la próxima revisión, cada hora)
+  return Boolean(producerRow.plan_next && PRODUCER_PLANS[producerRow.plan_next] && producerRow.plan_next_months > 0);
 }
 
 function diasRestantesPlan(producerRow) {
@@ -3451,7 +3505,13 @@ function hoyISO() {
 }
 
 function producerFull(id) {
-  return db.prepare('SELECT * FROM producers WHERE id = ?').get(id);
+  let p = db.prepare('SELECT * FROM producers WHERE id = ?').get(id);
+  // si su plan acaba de terminar y tiene otro pagado en cola, entra en este momento
+  if (p && p.plan_next && p.plan_paid_until && p.plan_paid_until < hoyISO()) {
+    aplicarPlanesEnCola();
+    p = db.prepare('SELECT * FROM producers WHERE id = ?').get(id);
+  }
+  return p;
 }
 
 // Cuando un productor pasa de Free a Pro/Studio, sus previews se rehacen sin la marca de agua
@@ -4835,14 +4895,27 @@ async function editarPack(req, res, track, { volverARevision, anotarCambios }) {
 }
 
 // --- productor (solo planes Pro y Studio)
-const MSG_PACKS_PROXIMAMENTE = 'Próximamente: estamos preparando el servidor para recibir Sample Packs. Te avisamos en cuanto puedas subirlos.';
+// ---- Lo que los productores pueden subir hoy (interruptores del admin, en Pagos → Reglas → Subidas) ----
+function subidasProductores() {
+  const c = db.prepare('SELECT prod_beats_on, prod_packs_on FROM platform_config WHERE id = 1').get() || {};
+  return { beats: c.prod_beats_on !== 0, packs: c.prod_packs_on !== 0 };
+}
+const MSG_BEATS_PAUSA = 'La subida de beats nuevos está en pausa por el momento. Te avisamos en cuanto vuelva.';
+const MSG_PACKS_PAUSA = 'La subida de Sample Packs está en pausa por el momento. Te avisamos en cuanto vuelva.';
+// null si puede subir packs; si no, por qué: su plan no los incluye o el admin los pausó
+function motivoSinPacks(plan) {
+  if (!plan.packs) return { motivo: 'plan', error: 'Los Sample Packs están incluidos en el plan Studio.' };
+  if (!subidasProductores().packs) return { motivo: 'pausa', error: MSG_PACKS_PAUSA };
+  return null;
+}
 
+// para subir un pack nuevo o cambiar su archivo (borrar uno propio siempre se puede)
 function productorConPacks(req, res) {
   const producer = getAuthedProducer(req);
   if (!producer) { sendJSON(res, 401, { error: 'No autorizado' }); return null; }
   const full = producerFull(producer.id);
-  const plan = planEfectivo(full);
-  if (!plan.packs) { sendJSON(res, 403, { error: MSG_PACKS_PROXIMAMENTE }); return null; }
+  const no = motivoSinPacks(planEfectivo(full));
+  if (no) { sendJSON(res, 403, { error: no.error }); return null; }
   return full;
 }
 
@@ -4851,7 +4924,8 @@ route('GET', '/api/producer/packs', (req, res) => {
   if (!producer) return sendJSON(res, 401, { error: 'No autorizado' });
   const plan = planEfectivo(producerFull(producer.id));
   const packs = db.prepare('SELECT * FROM tracks WHERE producer_id = ? AND is_pack = 1 ORDER BY created_at DESC').all(producer.id).map(t => packParaPanel(t));
-  sendJSON(res, 200, { permitido: Boolean(plan.packs), proximamente: !plan.packs, plan: plan.label, packs });
+  const no = motivoSinPacks(plan);
+  sendJSON(res, 200, { permitido: !no, motivo: no ? no.motivo : '', aviso: no ? no.error : '', plan: plan.label, packs });
 });
 
 route('POST', '/api/producer/packs', async (req, res) => {
@@ -4960,6 +5034,7 @@ route('POST', '/api/producer/tracks', async (req, res) => {
   const full = producerFull(producer.id);
   const plan = getPlan(full);
   if (!full.approved) return sendJSON(res, 403, { error: 'Tu cuenta todavía no fue aprobada por el administrador.' });
+  if (!subidasProductores().beats) return sendJSON(res, 403, { error: MSG_BEATS_PAUSA });
   if (!planVigente(full)) return sendJSON(res, 403, { error: `Tu plan ${plan.label} está vencido. Renuévalo para volver a subir beats.` });
   if (!full.active) return sendJSON(res, 403, { error: 'Tu cuenta está desactivada. Renueva tu plan o contacta al administrador.' });
   const activos = db.prepare("SELECT COUNT(*) as c FROM tracks WHERE producer_id = ? AND approval_status != 'rejected' AND sold = 0 AND is_pack = 0").get(producer.id).c;
@@ -5720,7 +5795,7 @@ route('POST', '/api/admin/producers/:id/plan', async (req, res, params) => {
       }
     }
     const fecha = plan === 'free' ? '' : paidUntil;
-    db.prepare(`UPDATE producers SET plan = ?, plan_paid_until = ?, plan_set_at = datetime('now'),
+    db.prepare(`UPDATE producers SET plan = ?, plan_paid_until = ?, plan_set_at = datetime('now'), plan_next = '', plan_next_months = 0,
                 active = CASE WHEN ? AND disabled_reason = 'plan_vencido' THEN 1 ELSE active END,
                 disabled_reason = CASE WHEN ? AND disabled_reason = 'plan_vencido' THEN '' ELSE disabled_reason END
                 WHERE id = ?`).run(plan, fecha, plan !== 'free' ? 1 : 0, plan !== 'free' ? 1 : 0, params.id);
@@ -5750,6 +5825,7 @@ route('GET', '/api/admin/platform-config', (req, res) => {
     referralMinBeats: bonos.referidosMinBeats,
     payoutRates: bonos.tasasRetiro,
     payoutDays: plazosRetiro(),
+    subidas: subidasProductores(),
   });
 });
 
@@ -5771,6 +5847,9 @@ route('POST', '/api/admin/platform-config', async (req, res) => {
     if (d.referralMinSalesCup !== undefined) {
       const minimo = parsePrecio(d.referralMinSalesCup, 0);
       db.prepare('UPDATE platform_config SET referral_min_sales_cup = ? WHERE id = 1').run(Math.max(0, minimo));
+    }
+    if (d.subidas && typeof d.subidas === 'object') {
+      db.prepare('UPDATE platform_config SET prod_beats_on = ?, prod_packs_on = ? WHERE id = 1').run(d.subidas.beats === false ? 0 : 1, d.subidas.packs === false ? 0 : 1);
     }
     if (d.payoutDays && typeof d.payoutDays === 'object') {
       const plazos = {};
@@ -7428,9 +7507,10 @@ const server = http.createServer(async (req, res) => {
 process.on('unhandledRejection', (err) => { console.error('Promesa rechazada sin manejar:', err); });
 
 limpiarRestosRestauracion(DATA_ROOT);
+aplicarPlanesEnCola();
 desactivarVencidos();
 limpiarSubidasViejas();
-setInterval(() => { desactivarVencidos(); limpiarSubidasViejas(); }, 60 * 60 * 1000).unref();
+setInterval(() => { aplicarPlanesEnCola(); desactivarVencidos(); limpiarSubidasViejas(); }, 60 * 60 * 1000).unref();
 
 // ---------- Migración única: vuelve USDT (BEP20) ----------
 // Por un tiempo la moneda se llamó «BNB (BEP20)». El cliente pidió que vuelva a ser USDT (BEP20):

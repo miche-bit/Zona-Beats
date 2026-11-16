@@ -737,6 +737,13 @@ db.exec('CREATE INDEX IF NOT EXISTS idx_retiros_productor ON producer_withdrawal
 db.exec('CREATE INDEX IF NOT EXISTS idx_planes_productor ON plan_requests (producer_id, id)');
 db.exec('CREATE INDEX IF NOT EXISTS idx_hots_productor ON hot_requests (producer_id, status)');
 
+// Cambio de plan a uno menor: queda en cola y empieza cuando termina el plan pagado
+agregarCol('producers', 'plan_next', "TEXT DEFAULT ''");
+agregarCol('producers', 'plan_next_months', 'INTEGER DEFAULT 0');
+// Interruptores del admin: qué pueden subir hoy los productores
+agregarCol('platform_config', 'prod_beats_on', 'INTEGER DEFAULT 1');
+agregarCol('platform_config', 'prod_packs_on', 'INTEGER DEFAULT 1');
+
 // Subidas que van directo al bucket (STEMS y packs): solo pasa por el volumen un trozo pequeño a la vez
 agregarCol('uploads', 'remoto_key', "TEXT DEFAULT ''");
 agregarCol('uploads', 'remoto_upload_id', "TEXT DEFAULT ''");

@@ -2378,6 +2378,8 @@
     document.getElementById('referral-bonus-cup').value = d.referralBonusCup;
     payoutRatesCfg = d.payoutRates || {};
     for (const k of ['free', 'pro', 'studio']) document.getElementById('payout-days-' + k).value = (d.payoutDays && d.payoutDays[k]) || '';
+    document.getElementById('subidas-beats').checked = !d.subidas || d.subidas.beats !== false;
+    document.getElementById('subidas-packs').checked = !d.subidas || d.subidas.packs !== false;
     pintarCupPlanes();
     pintarTasasRetiro();
   }
@@ -2403,6 +2405,7 @@
         referralBonusCup: document.getElementById('referral-bonus-cup').value,
         payoutRates,
         payoutDays: Object.fromEntries(['free', 'pro', 'studio'].map(k => [k, document.getElementById('payout-days-' + k).value.trim()])),
+        subidas: { beats: document.getElementById('subidas-beats').checked, packs: document.getElementById('subidas-packs').checked },
       }),
     });
     if (res.ok) { showToast('Configuración de planes, bonos y retiros guardada.'); loadCommission(); }
@@ -2706,12 +2709,20 @@
       });
       const ap = item.querySelector('.btn-approve-plan');
       if (ap) ap.addEventListener('click', async () => {
-        if (!confirm('¿Confirmas que recibiste ' + Number(r.amount_cup).toLocaleString('es') + ' CUP de ' + r.producer_name + '? Se activará el plan ' + (PLAN_NAMES[r.plan] || r.plan) + ' por ' + r.months + ' mes(es).')) return;
+        // si paga un plan menor al que tiene vigente, no se le quita el actual: el nuevo queda en cola
+        const RANGO = { free: 0, pro: 1, studio: 2 };
+        const hoy = new Date().toISOString().slice(0, 10);
+        const enCola = r.current_plan && r.current_plan !== 'free' && r.current_paid_until >= hoy && RANGO[r.plan] < RANGO[r.current_plan];
+        if (!confirm('¿Confirmas que recibiste ' + Number(r.amount_cup).toLocaleString('es') + ' CUP de ' + r.producer_name + '? ' + (enCola
+          ? 'Tiene el plan ' + (PLAN_NAMES[r.current_plan] || r.current_plan) + ' pagado hasta el ' + r.current_paid_until + ': lo conserva, y el ' + (PLAN_NAMES[r.plan] || r.plan) + ' (' + r.months + ' mes(es)) empieza cuando termine.'
+          : 'Se activará el plan ' + (PLAN_NAMES[r.plan] || r.plan) + ' por ' + r.months + ' mes(es).'))) return;
         ap.disabled = true;
         const res2 = await fetch('/api/admin/plan-requests/' + r.id + '/approve', { method: 'POST' });
         if (res2.ok) {
           const d = await res2.json();
-          showToast('Plan ' + (PLAN_NAMES[d.plan] || d.plan) + ' activo hasta ' + d.paidUntil + (d.extendido ? ' (se sumó a lo que ya tenía).' : '.'));
+          showToast(d.programado
+            ? 'Pago aprobado. Sigue con su plan ' + (PLAN_NAMES[d.sigueCon] || d.sigueCon) + '; el ' + (PLAN_NAMES[d.plan] || d.plan) + ' empieza el ' + d.desde + ' y dura hasta el ' + d.paidUntil + '.'
+            : 'Plan ' + (PLAN_NAMES[d.plan] || d.plan) + ' activo hasta ' + d.paidUntil + (d.extendido ? ' (se sumó a lo que ya tenía).' : d.diasAbonados ? ' (con ' + d.diasAbonados + ' días por lo que le quedaba del plan anterior).' : '.'));
           loadPlanRequests(); loadProducers(); loadPayouts();
         } else {
           const e2 = await res2.json().catch(() => ({}));

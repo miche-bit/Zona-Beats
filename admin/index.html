@@ -420,6 +420,7 @@
                 <button type="button" class="subtab" data-sub="plazos">Plazos de pago</button>
                 <button type="button" class="subtab" data-sub="bonos">Bonos</button>
                 <button type="button" class="subtab" data-sub="fees">Fee de red</button>
+                <button type="button" class="subtab" data-sub="subidas">Subidas</button>
               </div>
               <div data-grupo-panel="reglas" data-sub="planes">
                 <p class="panel-hint">Comisiones: Free 30 %, Pro 20 %, Studio 10 %, según el plan vigente al aprobar cada venta.</p>
@@ -490,6 +491,11 @@
               <div data-grupo-panel="reglas" data-sub="fees" hidden>
                 <p class="panel-hint">Cada productor cobra en la moneda en que se le compró. El fee de red se descuenta del retiro.</p>
                 <div id="payout-rates-list"></div>
+              </div>
+              <div data-grupo-panel="reglas" data-sub="subidas" hidden>
+                <p class="panel-hint">Qué pueden subir hoy los productores. Al apagar una opción, el portal les muestra «En pausa»; lo que ya publicaron sigue a la venta.</p>
+                <label class="orig-auto"><input type="checkbox" id="subidas-beats"> Beats nuevos (todos los planes)</label>
+                <label class="orig-auto"><input type="checkbox" id="subidas-packs"> Sample Packs (plan Studio)</label>
               </div>
               <button type="submit" class="btn-primary btn-inline">Guardar reglas</button>
             </form>

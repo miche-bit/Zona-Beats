@@ -154,9 +154,21 @@
       if (res.status === 401) return showLogin();
       d = await res.json();
     } catch { return; }
-    $('packs-lock').hidden = $('packs-lock-lista').hidden = d.permitido;
-    $('packs-zona').hidden = $('packs-zona-lista').hidden = !d.permitido;
-    if (!d.permitido) return;
+    // tres casos: puede subir; su plan no los incluye (se le ofrece el plan); o el administrador los pausó
+    // (en pausa sigue viendo y manejando los packs que ya tiene)
+    const pausa = d.motivo === 'pausa';
+    $('packs-lock').hidden = d.permitido;
+    $('packs-zona').hidden = !d.permitido;
+    $('packs-lock-lista').hidden = d.permitido || pausa;
+    $('packs-zona-lista').hidden = !(d.permitido || pausa);
+    document.querySelectorAll('#packs-lock, #packs-lock-lista').forEach(caja => {
+      caja.querySelector('[data-pk-chip]').textContent = pausa ? 'En pausa' : 'Plan Studio';
+      caja.querySelector('[data-pk-txt]').textContent = pausa
+        ? 'La subida de Sample Packs está en pausa por el momento. Los packs que ya publicaste siguen a la venta. Te avisamos en cuanto vuelva.'
+        : 'Vende tus drum kits, loops, one-shots y vocal chops. Los Sample Packs están incluidos en el plan Studio.';
+      caja.querySelector('[data-pk-planes]').hidden = pausa;
+    });
+    if (!d.permitido && !pausa) return;
     if (packsUI) { packsUI.cargar(); return; }
     packsUI = window.ZBPacks.montar({
       modo: 'productor', form: $('packs-form'), lista: $('packs-list'), cuenta: $('packs-count'),
@@ -525,14 +537,24 @@
       $('plans-grid').querySelectorAll('[data-plan-card]').forEach(c => c.classList.toggle('sel', c.dataset.planCard === planVisto));
     });
   });
+  const RANGO_PLAN = { free: 0, pro: 1, studio: 2 };
+  // ¿es un plan menor que el que tiene pagado hoy?
+  function esMenorQueElActual(k) { return perfil.plan !== 'free' && perfil.planVigente && RANGO_PLAN[k] < RANGO_PLAN[perfil.plan]; }
+  function esMayorQueElActual(k) { return perfil.plan !== 'free' && perfil.planVigente && RANGO_PLAN[k] > RANGO_PLAN[perfil.plan]; }
   function renderPlanes() {
     const solicitudPendiente = perfil.planRequest && perfil.planRequest.status === 'pending';
     // el plazo de pago lo pone el administrador
     const pago = (k) => { const pl = perfil.planes.find(x => x.key === k); return 'Pago en ' + (pl && pl.payout ? pl.payout : ''); };
+    // lo que el administrador tenga en pausa se avisa arriba de los planes
+    const enPausa = [];
+    if (perfil.subidas && perfil.subidas.beats === false) enPausa.push('la subida de beats nuevos');
+    if (perfil.subidas && perfil.subidas.packs === false) enPausa.push('los Sample Packs');
+    $('plan-pausas').textContent = enPausa.length ? 'En pausa por ahora: ' + enPausa.join(' y ') + '. Lo que ya publicaste sigue a la venta.' : '';
+    $('plan-pausas').hidden = !enPausa.length;
     const feats = {
       free: ['2 beats activos', 'Comisión 30%', 'WAV de 24 bits + MP3 de 320 kbps, sin tag', 'Beats de 3 minutos como máximo', 'Básica monetizable de venta única (desde 1 900 CUP, sin techo)', 'Verificación AudD gratis al subir', 'Muestra de 1 minuto en la tienda (tú eliges cuál)', 'Marca de agua forense en cada venta (rastreable)', 'Prioridad baja', 'Sin Hots ni reportes', pago('free')],
       pro: ['50 beats activos', 'Comisión 20%', 'WAV de 24 bits + MP3 de 320 kbps, sin tag', 'Beats de 10 minutos como máximo', 'Licencia Premium monetizable, sin mínimo ni máximo', 'Verificación AudD automática: 50 beats al mes', 'Beat completo en la tienda (sin demo)', 'Estadísticas y tus redes en el perfil', 'Prioridad media', 'Hots con 10% de descuento desde 5 ventas', pago('pro')],
-      studio: ['150 beats activos', 'Comisión 10%', 'WAV de 24 bits + MP3 de 320 kbps + STEMS, sin tag', 'Beats de 20 minutos como máximo', 'Premium, Ilimitada y Exclusiva monetizables', 'Verificación AudD automática: 150 beats al mes', 'Marca de agua forense en cada venta (rastreable)', 'Estadísticas y tus redes en el perfil', 'Prioridad alta', '1 Hot al mes con 20% de descuento desde 10 ventas', 'Reporte mensual en PDF', 'Playlist', 'Sample Packs (próximamente)', pago('studio'), 'Bono por me gusta en Playlist'],
+      studio: ['150 beats activos', 'Comisión 10%', 'WAV de 24 bits + MP3 de 320 kbps + STEMS, sin tag', 'Beats de 20 minutos como máximo', 'Premium, Ilimitada y Exclusiva monetizables', 'Verificación AudD automática: 150 beats al mes', 'Marca de agua forense en cada venta (rastreable)', 'Estadísticas y tus redes en el perfil', 'Prioridad alta', '1 Hot al mes con 20% de descuento desde 10 ventas', 'Reporte mensual en PDF', 'Playlist', perfil.subidas && perfil.subidas.packs === false ? 'Sample Packs (en pausa por ahora)' : 'Sample Packs: vende tus kits y loops', pago('studio'), 'Bono por me gusta en Playlist'],
     };
     // En el teléfono se ve un plan a la vez (se elige arriba); en pantallas grandes, los tres juntos
     if (!perfil.planes.some(pl => pl.key === planVisto)) planVisto = perfil.plan === 'free' ? 'pro' : perfil.plan;
@@ -543,7 +565,8 @@
       const esActual = pl.key === perfil.plan;
       let boton = '';
       if (pl.key !== 'free') {
-        const texto = esActual ? 'Renovar' : 'Comprar ' + pl.label;
+        // subir de plan es inmediato; bajar empieza cuando termina lo que ya pagó (no pierde nada)
+        const texto = esActual ? 'Renovar' : esMenorQueElActual(pl.key) ? 'Pasar a ' + pl.label + ' al terminar' : (perfil.plan !== 'free' && perfil.planVigente ? 'Subir a ' : 'Comprar ') + pl.label;
         boton = '<button type="button" class="btn-buy-plan" data-plan="' + pl.key + '"' + (solicitudPendiente ? ' disabled' : '') + '>' + texto + '</button>';
       }
       return '<div class="plan-card' + (esActual ? ' current' : '') + (pl.key === 'studio' ? ' studio' : '') + (pl.key === planVisto ? ' sel' : '') + '" data-plan-card="' + escapeHtml(pl.key) + '">' +
@@ -553,6 +576,16 @@
       '</div>';
     }).join('');
     document.querySelectorAll('.btn-buy-plan').forEach(b => b.addEventListener('click', () => openPlanModal(b.dataset.plan)));
+    // a quien ya tiene un plan pagado se le dice, con su fecha, qué pasa si cambia
+    let cambio = '';
+    if (perfil.plan !== 'free' && perfil.planVigente && !perfil.planEnCola && !solicitudPendiente) {
+      const otro = perfil.planes.find(pl => pl.key !== 'free' && pl.key !== perfil.plan);
+      const base = 'Tu ' + perfil.planLabel + ' está pagado hasta el ' + perfil.planPaidUntil + '.';
+      if (otro && esMenorQueElActual(otro.key)) cambio = base + ' Si pasas a ' + otro.label + ', empieza ese día y no pierdes nada.';
+      else if (otro && esMayorQueElActual(otro.key)) cambio = base + ' Si subes a ' + otro.label + ', empieza hoy y los días que te quedan se te abonan.';
+    }
+    $('plan-cambio-note').textContent = cambio;
+    $('plan-cambio-note').hidden = !cambio;
     $('plan-rate-note').textContent = perfil.usdRate
       ? 'Precios en CUP a la tasa de 1 USD = ' + fmt(perfil.usdRate, 0) + ' CUP.'
       : '';
@@ -586,6 +619,15 @@
       box.style.display = 'block';
       if (!r || r.status !== 'pending') return;
     }
+    // un plan menor ya pagado, esperando a que termine el actual
+    if (p.planEnCola && !(r && r.status === 'pending')) {
+      const c = p.planEnCola;
+      box.className = 'plan-request-status ok';
+      box.innerHTML = 'Tu plan <strong>' + escapeHtml(p.planLabel) + '</strong> sigue hasta el <strong>' + escapeHtml(p.planPaidUntil) + '</strong>. El <strong>' + escapeHtml(c.label) +
+        '</strong> que pagaste empieza el ' + escapeHtml(c.desde) + ' y dura hasta el ' + escapeHtml(c.hasta) + '.';
+      box.style.display = 'block';
+      return;
+    }
     if (!r) { if (!p.desactivadoPorPago) box.style.display = 'none'; return; }
     const nombre = r.plan === 'studio' ? 'Studio' : 'Pro';
     const meses = r.months + (r.months === 1 ? ' mes' : ' meses');
@@ -608,6 +650,10 @@
 
   // ---------- Límites del plan en el formulario ----------
   function applyPlanLimits(p) {
+    // el administrador puede pausar la subida de beats nuevos
+    const beatsOn = !p.subidas || p.subidas.beats !== false;
+    $('beats-pausa').hidden = beatsOn;
+    $('beats-zona').hidden = !beatsOn;
     const lic = p.licenciasPermitidas || ['basic'];
     document.querySelectorAll('.lic-field').forEach(f => {
       const ok = lic.includes(f.dataset.lic);
@@ -1873,7 +1919,10 @@
       const d = await res.json().catch(() => ({}));
       if (res.ok) {
         planModal.classList.remove('active');
-        showToast('¡Listo! Plan ' + (pl ? pl.label : '') + ' activo hasta el ' + d.paidUntil + '. Se descontaron ' + fmt(d.cobrado, 2).replace(/,00$/, '') + ' ' + d.moneda + ' de tu saldo.');
+        const cobro = ' Se descontaron ' + fmt(d.cobrado, 2).replace(/,00$/, '') + ' ' + d.moneda + ' de tu saldo.';
+        showToast(d.programado
+          ? '¡Listo! Tu plan ' + (pl ? pl.label : '') + ' empieza el ' + d.desde + ', cuando termine el que tienes, y dura hasta el ' + d.paidUntil + '.' + cobro
+          : '¡Listo! Plan ' + (pl ? pl.label : '') + ' activo hasta el ' + d.paidUntil + (d.diasAbonados ? ' (con ' + d.diasAbonados + ' días por lo que te quedaba del plan anterior)' : '') + '.' + cobro);
         loadPerfil().then(() => { loadTracks(); loadStats(); });
         loadWithdrawals(); loadEarnings();
       } else if (res.status === 401) showLogin();
@@ -1917,9 +1966,12 @@
     await Promise.all([cargarDatosDePago(), loadWithdrawals()]);
     planModalState = { plan: planKey, months: 1, price: pl.priceCup };
     $('plan-modal-title').textContent = (planKey === perfil.plan ? 'Renovar plan ' : 'Plan ') + pl.label;
+    const notaCambio = esMenorQueElActual(planKey)
+      ? ' Tu plan ' + perfil.planLabel + ' sigue completo hasta el ' + perfil.planPaidUntil + ': no pierdes nada. El ' + pl.label + ' empieza al día siguiente.'
+      : esMayorQueElActual(planKey) ? ' Empieza hoy, y los días que te quedan de tu ' + perfil.planLabel + ' se te abonan como días de ' + pl.label + '.' : '';
     $('plan-modal-benefits').textContent = '$' + fmt(pl.priceUsd, pl.priceUsd % 1 ? 2 : 0) + ' USD/mes = ' + formatCup(pl.priceCup) + '/mes · ' +
       pl.commission + '% de comisión · te pagamos en ' + pl.payout +
-      (planKey === perfil.plan && perfil.planVigente ? '. Los meses se suman a tu fecha actual (' + perfil.planPaidUntil + ').' : '.');
+      (planKey === perfil.plan && perfil.planVigente ? '. Los meses se suman a tu fecha actual (' + perfil.planPaidUntil + ').' : '.') + notaCambio;
     const monedas = [...new Set(adminPago.accounts.map(a => a.currency))];
     const sel = $('plan-currency');
     sel.innerHTML = (monedas.length ? monedas : ['CUP']).map(m => {
